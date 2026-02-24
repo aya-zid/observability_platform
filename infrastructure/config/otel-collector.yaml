@@ -1,0 +1,89 @@
+# OpenTelemetry Collector Configuration
+# Routes telemetry to VictoriaMetrics (metrics), Loki (logs), Tempo (traces)
+
+# ============================================
+# RECEIVERS
+# ============================================
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+# ============================================
+# PROCESSORS
+# ============================================
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  resource:
+    attributes:
+      - key: environment
+        value: development
+        action: upsert
+
+  # add host metadata
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 5s
+    override: false
+
+# ============================================
+# EXPORTERS
+# ============================================
+exporters:
+  prometheusremotewrite:
+    endpoint: http://vmauth:8427/api/v1/write
+    tls:
+      insecure: true
+    #For multi-tenant: add basic auth headers
+    headers:
+      Authorization: "Basic dGVuYW50LTE6Y2hhbmdlbWUtdGVuYW50LTE="  
+    # base64(tenant-1:changeme-tenant-1)
+    # OR bypass vmauth and write directly to specific tenant (for testing):
+    # endpoint: http://vminsert:8480/insert/1/prometheus/api/v1/write
+
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+    headers:
+      X-Scope-OrgID: default-tenant
+
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    headers:
+      X-Scope-OrgID: "default-tenant"
+  debug:
+    verbosity: detailed
+
+
+# ============================================
+# SERVICE PIPELINES
+# ============================================
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [prometheusremotewrite, debug]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource, resourcedetection]
+      exporters: [otlphttp/loki, debug]
+
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [otlp/tempo, debug]
+
+  telemetry:
+    logs:
+      level: info

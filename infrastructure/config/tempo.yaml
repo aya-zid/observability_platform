@@ -1,0 +1,34 @@
+server:
+  http_listen_port: 3200
+
+multitenancy_enabled: true
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+  trace_idle_period: 10s
+storage:
+  trace:
+    backend: local
+    local:
+      path: /tmp/tempo/traces
+    wal:
+      path: /tmp/tempo/wal
+
+# Optional: Per-tenant overrides for limits
+overrides:
+  # Default limits for all tenants
+  defaults:
+    ingestion:
+      rate_limit_bytes: 10000000  # 10MB per second
+      burst_size_bytes: 20000000  # 20MB burst
+    global:
+      max_bytes_per_trace: 5000000  # 5MB max per trace

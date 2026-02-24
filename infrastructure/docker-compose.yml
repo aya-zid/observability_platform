@@ -1,0 +1,174 @@
+# ============================================
+# OBSERVABILITY STACK - Multi Tenant locally
+# ============================================
+
+services:
+  # ============================================
+  # VICTORIAMETRICS CLUSTER - Multi-tenant capable
+  # ============================================
+  # 1. VMSTORAGE - Stores the actual time-series data
+  # we can add more replicas for HA (minimum 1 for dev, 3+ for prod)
+  vmstorage:
+    image: victoriametrics/vmstorage:v1.136.0-cluster
+    container_name: vmstorage
+    ports:
+      - "8482:8482"  # HTTP port for monitoring
+      # 8400 is internal (vminsert connects here)
+    volumes:
+      - vmstorage-data:/storage
+    command:
+      - '--storageDataPath=/storage'
+      - '--retentionPeriod=30d'
+      - '--httpListenAddr=:8482'  #i added this explicit
+      - '--vminsertAddr=:8400'
+      - '--vmselectAddr=:8401'
+      # Uncomment for replication factor 2 (needs 2+ storage nodes):
+      # - '--replicationFactor=2'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8482/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. VMINSERT - Write ingestion frontend
+  #    Routes data to vmstorage nodes based on consistent hashing
+  vminsert:
+    image: victoriametrics/vminsert:v1.136.0-cluster
+    container_name: vminsert
+    ports:
+      - "8480:8480"  # HTTP ingestion port
+    command:
+      - '--storageNode=vmstorage:8400'
+      # For multiple storage nodes (HA setup):
+      # - '--storageNode=vmstorage-1:8400'
+      # - '--storageNode=vmstorage-2:8400'
+      # - '--replicationFactor=2'  # Must match vmstorage setting
+    depends_on:
+      - vmstorage
+
+  # 3. VMSELECT - Query processing frontend
+  #    Aggregates results from all vmstorage nodes
+  vmselect:
+    image: victoriametrics/vmselect:v1.136.0-cluster
+    container_name: vmselect
+    ports:
+      - "8481:8481"  # HTTP query port
+    command:
+      - '--storageNode=vmstorage:8401'
+      # For deduplication when using replication:
+      # - '--dedup.minScrapeInterval=1ms'
+      # For multiple storage nodes:
+      # - '--storageNode=vmstorage-1:8401'
+      # - '--storageNode=vmstorage-2:8401'
+    depends_on:
+      - vmstorage
+
+  # 4. VMAUTH - Authentication & multi-tenant routing 
+  #    Handles tenant isolation, rate limiting, routing
+  vmauth:
+    image: victoriametrics/vmauth:v1.136.0
+    container_name: vmauth
+    ports:
+      # This replaces the old 8428 port - apps send data here
+      - "8428:8427"
+    volumes:
+      - ./config/vmauth.yaml:/etc/vmauth/config.yaml:ro
+    command:
+      - '-auth.config=/etc/vmauth/config.yaml'
+      - '-httpListenAddr=:8427'
+    depends_on:
+      - vminsert
+      - vmselect
+
+  # ----------------------------------------
+  # 2. LOKI - Multi-tenant log storage 
+  #    Stores logs with X-Scope-OrgID tenant isolation
+  # ----------------------------------------
+  loki:
+    image: grafana/loki:3.6.0
+    container_name: loki
+    ports:
+      # 3100 = HTTP API for queries and ingestion
+      - "3100:3100"
+    volumes:
+      - ./config/loki.yaml:/etc/loki/local-config.yaml:ro
+      - ./data/loki:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  # ----------------------------------------
+  # 3. TEMPO - Distributed tracing database
+  #    Stores request journeys: API → Database → Cache
+  # ----------------------------------------
+  tempo:
+    image: grafana/tempo:2.3.1
+    container_name: tempo
+    ports:
+      # 3200 = Tempo web UI and API (only port we need exposed)
+      - "3200:3200"
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/tmp/tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  # ----------------------------------------
+  # 4. GRAFANA - Visualization dashboard
+  #    Connects to all 3 databases above to show graphs
+  # ----------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      # 3000 = Web interface (http://localhost:3000)
+      - "3000:3000"
+    environment:
+      # Default login credentials
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # to build our own UI
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+    volumes:
+      # Named volume for Grafana's internal database (users, dashboards, etc)
+      - grafana-data:/var/lib/grafana
+      # Mount datasource configuration (read-only :ro)
+      - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    depends_on:
+      - vmauth
+      - loki
+      - tempo
+
+  # ----------------------------------------
+  # 5. OPENTELEMETRY COLLECTOR - Central data router
+  #    Receives data from apps, sends to correct database
+  # ----------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.146.0
+    container_name: otel-collector
+    ports:
+      # 4317 = OTLP gRPC (main protocol for traces/metrics/logs)
+      - "4317:4317"
+      # 4318 = OTLP HTTP (fallback, easier for debugging)
+      - "4318:4318"
+      # 8889 = Metrics about the collector itself
+      - "8889:8889"
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      - vmauth
+      - loki
+      - tempo
+
+# ============================================
+# VOLUMES - Persistent storage managed by Docker
+# ============================================
+volumes:
+  vmstorage-data:      # VictoriaMetrics data
+  tempo-data:   # Tempo traces data
+  grafana-data: # Grafana dashboards and settings

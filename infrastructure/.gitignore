@@ -1,5 +1,4 @@
-infrastructure/data/
-infrastructure/data/*
+data/*
 
 *.log
 *.bak

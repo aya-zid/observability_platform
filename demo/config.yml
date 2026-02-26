@@ -1,0 +1,188 @@
+# /etc/otelcol/config.yaml
+# ============================================
+# OTEL COLLECTOR AGENT CONFIG
+# API Key = obs_test123 (will be dynamic later)
+# ============================================
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+# ============================================
+# RECEIVERS — what we collect
+# ============================================
+receivers:
+
+  # --- HOST METRICS ---
+  # CPU, memory, disk, network, processes
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk: {}
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      network: {}
+      load: {}
+      processes: {}
+      process:
+        mute_process_name_error: true
+        mute_process_exe_error: true
+        mute_process_io_error: true
+
+  # --- SYSTEM LOGS (syslog / messages) ---
+  filelog/system:
+    include:
+      - /var/log/syslog
+      - /var/log/messages
+    include_file_path: true
+    start_at: end
+    resource:
+      service.name: system
+      job: syslog
+
+  # --- JOURNALD (systemd logs) ---
+  journald:
+    start_at: end
+    resource:
+      service.name: journald
+      job: journald
+
+  # --- NGINX LOGS ---
+  filelog/nginx:
+    include:
+      - /var/log/nginx/access.log
+      - /var/log/nginx/error.log
+    include_file_path: true
+    start_at: end
+    resource:
+      service.name: nginx
+      job: nginx
+
+  # --- APACHE LOGS ---
+  filelog/apache:
+    include:
+      - /var/log/apache2/access.log
+      - /var/log/apache2/error.log
+      - /var/log/httpd/access_log
+      - /var/log/httpd/error_log
+    include_file_path: true
+    start_at: end
+    resource:
+      service.name: apache
+      job: apache
+
+  # --- DOCKER CONTAINER LOGS ---
+  filelog/docker:
+    include:
+      - /var/lib/docker/containers/*/*.log
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+      - type: move
+        from: attributes.log
+        to: body
+      - type: move
+        from: attributes.stream
+        to: attributes["docker.stream"]
+    resource:
+      service.name: docker
+      job: docker
+
+# ============================================
+# PROCESSORS — enrich and batch data
+# ============================================
+processors:
+
+  # Batch for performance
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+  # Add tenant ID and host info to everything
+  resource:
+    attributes:
+      - key: tenant.id
+        value: "obs_test123"
+        action: upsert
+
+  # Auto-detect host info
+  resourcedetection:
+    detectors: [env, system, docker]
+    timeout: 5s
+    override: false
+
+  # Drop logs from files that don't exist (no nginx = no error)
+  filter/ignore_missing:
+    error_mode: ignore
+
+# ============================================
+# EXPORTERS — where to send data
+# ============================================
+exporters:
+
+  # --- METRICS → VictoriaMetrics via vmauth ---
+  prometheusremotewrite:
+    endpoint: "http://localhost:8428/api/v1/write"
+    tls:
+      insecure: true
+    headers:
+      Authorization: "Basic b2JzX3Rlc3QxMjM6b2JzX3Rlc3QxMjM="
+      # base64 of obs_test123:obs_test123
+
+  # --- LOGS → Loki ---
+  otlphttp/loki:
+    endpoint: "http://localhost:3100/otlp"
+    tls:
+      insecure: true
+    headers:
+      X-Scope-OrgID: "obs_test123"
+
+  # --- TRACES → Tempo ---
+  otlp/tempo:
+    endpoint: "localhost:4317"
+    tls:
+      insecure: true
+    headers:
+      X-Scope-OrgID: "obs_test123"
+
+  # Debug (shows data in terminal — remove in production)
+  debug:
+    verbosity: basic
+
+# ============================================
+# PIPELINES — connect receivers → processors → exporters
+# ============================================
+service:
+  extensions: [health_check]
+  pipelines:
+
+    metrics:
+      receivers: [hostmetrics]
+      processors: [resourcedetection, resource, batch]
+      exporters: [prometheusremotewrite, debug]
+
+    logs:
+      receivers: [journald, filelog/nginx, filelog/apache, filelog/docker]
+      processors: [resourcedetection, resource, batch]
+      exporters: [otlphttp/loki, debug]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: none
+

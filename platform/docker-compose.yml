@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: obs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: obs_saas_dev
+      POSTGRES_USER: obsuser
+      POSTGRES_PASSWORD: pass1234
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # 5433 to avoid clashing with any local postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obsuser -d obs_saas_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: obs-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: obsuser
+      DB_PASSWORD: pass1234
+      DB_NAME: obs_saas_dev
+      DB_SSLMODE: disable
+      JWT_SECRET: super-secret-change-me-in-prod-32-chars-min
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: obs-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@local.dev
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"   # access at http://localhost:5050
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+volumes:
+  postgres-data:
+  pgadmin-data:

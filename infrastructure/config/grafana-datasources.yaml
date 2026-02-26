@@ -42,7 +42,7 @@ datasources:
     secureJsonData:
       # Default tenant for initial setup
       # In production, our SaaS backend injects this per-user
-      httpHeaderValue1: 'default-tenant'
+      httpHeaderValue1: 'obs_test123'
   # ----------------------------------------
   # 3. Tempo (Traces)
   # Built-in Grafana datasource

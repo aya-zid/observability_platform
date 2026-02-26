@@ -1,29 +1,29 @@
 # ============================================
-# VMAUTH CONFIGURATION - Multi-tenant routing
+# VMAUTH - API Key based multi-tenant routing
+# API key IS the tenant ID
 # ============================================
-
-# Users/tenants configuration
 users:
-  # ==========================================
-  # TENANT 1: Default tenant (for development)
-  # ==========================================
-  - username: "tenant-1"
-    password: "changeme-tenant-1"
-    # url_prefix tells vmauth where to route this tenant's data
+  # Test API key - we'll generate real ones from backend later
+  - username: "obs_test123"
+    password: "obs_test123"
     url_map:
-      - src_paths: ["/api/v1/.*", "/api/v1/write", "/prometheus/api/v1/write", "/insert/","/api/v1/import","/api/v1/import/prometheus", "/api/v1/import/csv", "/api/v1/import/jsonline"]
+      - src_paths:
+          - "/api/v1/write"
+          - "/api/v1/import.*"
+          - "/prometheus/api/v1/write"
+          - "/insert/.*"
+          - "/api/v1/import/prometheus"
+          - "/api/v1/import/csv"
+          - "/api/v1/import/jsonline"
         url_prefix: "http://vminsert:8480/insert/1/prometheus/"
-      - src_paths: ["/api/v1/query", "/api/v1/query_range", "/prometheus/api/v1/query", "/select/","/api/v1/label", "/api/v1/series", "/api/v1/metadata", "/api/v1/status"  ]
+      - src_paths:
+          - "/api/v1/query.*"
+          - "/api/v1/label.*"
+          - "/api/v1/series.*"
+          - "/api/v1/status.*"
+          - "/select/.*"
+          - "/api/v1/metadata.*"
+          - "/prometheus/api/v1/query.*"
+          - "/select/.*"
+          - "/api/v1/.*"
         url_prefix: "http://vmselect:8481/select/1/prometheus/"
-
-  # ==========================================
-  # TENANT 2: Another customer/team
-  # ==========================================
-  - username: "tenant-2"
-    password: "changeme-tenant-2"
-    url_map:
-      - src_paths: ["/api/v1/write", "/prometheus/api/v1/write", "/insert/","/api/v1/import","/api/v1/import/prometheus", "/api/v1/import/csv", "/api/v1/import/jsonline"]
-        url_prefix: "http://vminsert:8480/insert/2/prometheus/"
-      - src_paths: ["/api/v1/query", "/api/v1/query_range", "/prometheus/api/v1/query", "/select/","/api/v1/label", "/api/v1/series", "/api/v1/metadata", "/api/v1/status"]
-        url_prefix: "http://vmselect:8481/select/2/prometheus/"
-

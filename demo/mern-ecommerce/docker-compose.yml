@@ -1,0 +1,49 @@
+services:
+  client:
+    build: client
+    container_name: client
+    ports:
+      - '8082:8080'
+    networks:
+      - app-network
+
+  server:
+    build: server
+    container_name: server
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # ← ADD THIS (removed in production)
+    environment:
+      - PORT=3000
+      - BASE_API_URL=api
+      - CLIENT_URL=http://localhost:8082
+      - JWT_SECRET=update_your_JWT_secret
+      - MONGO_URI=mongodb://mongo:27017/mern_ecommerce # Default Mongo URL & DB name when running project locally
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317  # ← host otelcol      
+      #- OTEL_EXPORTER_OTLP_ENDPOINT=http://ingest.yourplatform.com:4317
+      - TENANT_ID=obs_test123  
+    ports:
+      - '3001:3000'
+    command: [
+        'sh',
+        '-c',
+        'npm run seed:db admin@example.com admin123 && npm start'
+      ] # Default email and password arguments to database seed script - update your admin email and password
+    depends_on:
+      - mongo
+    networks:
+      - app-network
+
+  mongo:
+    image: mongo:latest
+    container_name: mongodb
+    command: mongod --logpath /var/log/mongodb/mongod.log --logappend
+    volumes:
+      - /var/log/mongodb:/var/log/mongodb    # ← mounts to host for easier log access
+    ports:
+      - '27017:27017'
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

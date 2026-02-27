@@ -109,6 +109,8 @@ services:
     ports:
       # 3200 = Tempo web UI and API (only port we need exposed)
       - "3200:3200"
+      - "4320:4317"   # Tempo's own OTLP gRPC (using 4320 to avoid conflict with agent)
+      - "4321:4318"   # Tempo's own OTLP HTTP
     volumes:
       - ./config/tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/tmp/tempo
@@ -139,27 +141,6 @@ services:
       - grafana-data:/var/lib/grafana
       # Mount datasource configuration (read-only :ro)
       - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
-    depends_on:
-      - vmauth
-      - loki
-      - tempo
-
-  # ----------------------------------------
-  # 5. OPENTELEMETRY COLLECTOR - Central data router
-  #    Receives data from apps, sends to correct database
-  # ----------------------------------------
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.146.0
-    container_name: otel-collector
-    ports:
-      # 4317 = OTLP gRPC (main protocol for traces/metrics/logs)
-      - "4317:4317"
-      # 4318 = OTLP HTTP (fallback, easier for debugging)
-      - "4318:4318"
-      # 8889 = Metrics about the collector itself
-      - "8889:8889"
-    volumes:
-      - ./config/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
       - vmauth
       - loki

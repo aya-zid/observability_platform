@@ -46,7 +46,7 @@ func (s *AuthService) Signup(req dto.SignupRequest) (*dto.AuthResponse, error) {
 		CompanyName:  req.CompanyName,
 		ContactEmail: req.ContactEmail,
 		ContactPhone: req.ContactPhone,
-		APIKey:       "obs_" + uuid.New().String()[:32], // placeholder - improve later
+		APIKey: 	  "obs_" + uuid.New().String(),
 	}
 	if err := s.tenantRepo.Create(tenant); err != nil {
 		return nil, err

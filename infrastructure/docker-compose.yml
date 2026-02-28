@@ -1,155 +1,156 @@
 # ============================================
-# OBSERVABILITY STACK - Multi Tenant locally
+# OBSERVABILITY STACK - Infrastructure Layer
+# ============================================
+# Network topology:
+#   obs-network (external) — shared with platform stack
+#   All services are reachable by service name from the backend:
+#     vminsert:8480, vmselect:8481, loki:3100, tempo:4318
+#
+# tenant routing is now handled by the Go backend proxy 
 # ============================================
 
+networks:
+  obs-network:
+    external: true   # created once with: docker network create obs-network
+
 services:
+
   # ============================================
-  # VICTORIAMETRICS CLUSTER - Multi-tenant capable
+  # VICTORIAMETRICS CLUSTER
   # ============================================
-  # 1. VMSTORAGE - Stores the actual time-series data
-  # we can add more replicas for HA (minimum 1 for dev, 3+ for prod)
+
   vmstorage:
     image: victoriametrics/vmstorage:v1.136.0-cluster
     container_name: vmstorage
-    ports:
-      - "8482:8482"  # HTTP port for monitoring
-      # 8400 is internal (vminsert connects here)
+    restart: unless-stopped
     volumes:
       - vmstorage-data:/storage
     command:
       - '--storageDataPath=/storage'
       - '--retentionPeriod=30d'
-      - '--httpListenAddr=:8482'  #i added this explicit
+      - '--httpListenAddr=:8482'
       - '--vminsertAddr=:8400'
       - '--vmselectAddr=:8401'
-      # Uncomment for replication factor 2 (needs 2+ storage nodes):
-      # - '--replicationFactor=2'
+    ports:
+      - "8482:8482"   # monitoring only — not used by backend
+    networks:
+      - obs-network
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8482/health"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8482/health 2>/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
-  # 2. VMINSERT - Write ingestion frontend
-  #    Routes data to vmstorage nodes based on consistent hashing
   vminsert:
     image: victoriametrics/vminsert:v1.136.0-cluster
     container_name: vminsert
-    ports:
-      - "8480:8480"  # HTTP ingestion port
+    restart: unless-stopped
     command:
       - '--storageNode=vmstorage:8400'
-      # For multiple storage nodes (HA setup):
-      # - '--storageNode=vmstorage-1:8400'
-      # - '--storageNode=vmstorage-2:8400'
-      # - '--replicationFactor=2'  # Must match vmstorage setting
+    ports:
+      - "8480:8480"   # exposed for local debugging only
+    networks:
+      - obs-network
     depends_on:
-      - vmstorage
+      vmstorage:
+        condition: service_healthy
 
-  # 3. VMSELECT - Query processing frontend
-  #    Aggregates results from all vmstorage nodes
   vmselect:
     image: victoriametrics/vmselect:v1.136.0-cluster
     container_name: vmselect
-    ports:
-      - "8481:8481"  # HTTP query port
+    restart: unless-stopped
     command:
       - '--storageNode=vmstorage:8401'
-      # For deduplication when using replication:
-      # - '--dedup.minScrapeInterval=1ms'
-      # For multiple storage nodes:
-      # - '--storageNode=vmstorage-1:8401'
-      # - '--storageNode=vmstorage-2:8401'
-    depends_on:
-      - vmstorage
-
-  # 4. VMAUTH - Authentication & multi-tenant routing 
-  #    Handles tenant isolation, rate limiting, routing
-  vmauth:
-    image: victoriametrics/vmauth:v1.136.0
-    container_name: vmauth
     ports:
-      # This replaces the old 8428 port - apps send data here
-      - "8428:8427"
-    volumes:
-      - ./config/vmauth.yaml:/etc/vmauth/config.yaml:ro
-    command:
-      - '-auth.config=/etc/vmauth/config.yaml'
-      - '-httpListenAddr=:8427'
+      - "8481:8481"   # exposed for local debugging only
+    networks:
+      - obs-network
     depends_on:
-      - vminsert
-      - vmselect
+      vmstorage:
+        condition: service_healthy
 
-  # ----------------------------------------
-  # 2. LOKI - Multi-tenant log storage 
-  #    Stores logs with X-Scope-OrgID tenant isolation
-  # ----------------------------------------
+  # ============================================
+  # LOKI - Log storage
+  # Tenant isolation: X-Scope-OrgID injected by Go backend
+  # ============================================
   loki:
     image: grafana/loki:3.6.0
     container_name: loki
-    ports:
-      # 3100 = HTTP API for queries and ingestion
-      - "3100:3100"
+    restart: unless-stopped
     volumes:
       - ./config/loki.yaml:/etc/loki/local-config.yaml:ro
       - ./data/loki:/loki
     command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"   # exposed for local debugging only
+    networks:
+      - obs-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3100/ready || exit 1"]   
       interval: 10s
       timeout: 5s
-      retries: 5
-  # ----------------------------------------
-  # 3. TEMPO - Distributed tracing database
-  #    Stores request journeys: API → Database → Cache
-  # ----------------------------------------
+      retries: 10
+      start_period: 30s
+
+  # ============================================
+  # TEMPO - Distributed tracing
+  # Tenant isolation: X-Scope-OrgID injected by Go backend
+  # Port mapping explanation:
+  #   4318 (internal) = OTLP HTTP — backend proxies to this
+  #   4317 (internal) = OTLP gRPC — available if needed
+  #   3200 (exposed)  = Tempo HTTP API + Grafana queries
+  # ============================================
   tempo:
     image: grafana/tempo:2.3.1
     container_name: tempo
-    ports:
-      # 3200 = Tempo web UI and API (only port we need exposed)
-      - "3200:3200"
-      - "4320:4317"   # Tempo's own OTLP gRPC (using 4320 to avoid conflict with agent)
-      - "4321:4318"   # Tempo's own OTLP HTTP
+    restart: unless-stopped
     volumes:
       - ./config/tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/tmp/tempo
     command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "3200:3200"   # Tempo API — needed by Grafana
+      # 4317/4318 are NOT exposed — backend reaches them via internal network only
+    networks:
+      - obs-network
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3200/ready || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-  # ----------------------------------------
-  # 4. GRAFANA - Visualization dashboard
-  #    Connects to all 3 databases above to show graphs
-  # ----------------------------------------
+      start_period: 10s
+
+  # ============================================
+  # GRAFANA - Visualization (for internal use / admin)
+  # ============================================
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
+    restart: unless-stopped
     ports:
-      # 3000 = Web interface (http://localhost:3000)
       - "3000:3000"
     environment:
-      # Default login credentials
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
-      # to build our own UI
       - GF_SECURITY_ALLOW_EMBEDDING=true
+      # Disable auth for embedding in frontend later
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
     volumes:
-      # Named volume for Grafana's internal database (users, dashboards, etc)
       - grafana-data:/var/lib/grafana
-      # Mount datasource configuration (read-only :ro)
       - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    networks:
+      - obs-network
     depends_on:
-      - vmauth
-      - loki
-      - tempo
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_healthy
+      vmselect:
+        condition: service_started
 
-# ============================================
-# VOLUMES - Persistent storage managed by Docker
-# ============================================
 volumes:
-  vmstorage-data:      # VictoriaMetrics data
-  tempo-data:   # Tempo traces data
-  grafana-data: # Grafana dashboards and settings
+  vmstorage-data:
+  tempo-data:
+  grafana-data:

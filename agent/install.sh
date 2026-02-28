@@ -25,10 +25,16 @@ section() { echo -e "\n${BLUE}==>${NC} $1"; }
 # ============================================
 API_KEY="${API_KEY:-}"
 PLATFORM_HOST="${PLATFORM_HOST:-THE_INFRA_IP}"
+PLATFORM_PORT="${PLATFORM_PORT:-8080}"
 OTEL_VERSION="0.119.0"
 AGENT_VERSION="1.0.0"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/otelcol"
+
+# Backend ingest endpoints (agents talk ONLY to the backend proxy, not infra directly)
+METRICS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/metrics"
+LOGS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/logs"
+TRACES_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/traces"
 
 # ============================================
 # CHECKS
@@ -67,7 +73,10 @@ log "Architecture: $ARCH_NAME"
 log "Hostname: $HOSTNAME_FQDN"
 log "Machine ID: ${MACHINE_ID:0:8}..."
 log "API Key: ${API_KEY:0:8}... (truncated)"
-log "Platform: $PLATFORM_HOST"
+log "Platform: $PLATFORM_HOST:$PLATFORM_PORT"
+log "Metrics → $METRICS_ENDPOINT"
+log "Logs    → $LOGS_ENDPOINT"
+log "Traces  → $TRACES_ENDPOINT"
 log "Agent version: $AGENT_VERSION"
 
 # ============================================
@@ -348,29 +357,29 @@ processors:
 # ============================================
 exporters:
 
-  # Metrics → VictoriaMetrics via vmauth
+  # Metrics → backend proxy → vminsert (backend will inject tenant/DB ID)
   prometheusremotewrite:
-    endpoint: "http://${PLATFORM_HOST}:8428/api/v1/write"
+    endpoint: "${METRICS_ENDPOINT}"
     tls:
       insecure: true
     headers:
       Authorization: "Basic ${AUTH_B64}"
 
-  # Logs → Loki
-  otlphttp/loki:
-    endpoint: "http://${PLATFORM_HOST}:3100/otlp"
+  # Logs → backend proxy → Loki (backend will inject tenant UUID)
+  otlphttp/logs:
+    endpoint: "${LOGS_ENDPOINT}"
     tls:
       insecure: true
     headers:
-      X-Scope-OrgID: "${API_KEY}"
+      Authorization: "Basic ${AUTH_B64}"
 
-  # Traces → Tempo (HTTP, not gRPC — Tempo exposes HTTP on port 3200)
-  otlphttp/tempo:
-    endpoint: "http://${PLATFORM_HOST}:4321"
+  # Traces → backend proxy → Tempo (backend will inject tenant UUID)
+  otlphttp/traces:
+    endpoint: "${TRACES_ENDPOINT}"
     tls:
       insecure: true
     headers:
-      X-Scope-OrgID: "${API_KEY}"
+      Authorization: "Basic ${AUTH_B64}"
 
 # ============================================
 # PIPELINES
@@ -387,14 +396,14 @@ service:
     logs:
       receivers: [${PIPELINE_RECEIVERS}]
       processors: [resourcedetection, resource, batch]
-      exporters: [otlphttp/loki]
+      exporters: [otlphttp/logs]
 
     # Traces from instrumented apps (Node.js, Python, Go, etc.)
     # Note: only batch processor — apps set their own service.name and tenant.id
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/tempo]
+      exporters: [otlphttp/traces]
 
   telemetry:
     logs:
@@ -407,15 +416,6 @@ YAML
 chown root:root "$CONFIG_DIR/config.yaml"
 chmod 600 "$CONFIG_DIR/config.yaml"
 log "Config written to $CONFIG_DIR/config.yaml (permissions: 600, owner: root)"
-
-# ============================================
-# REMOVE OLD otelcol USER IF EXISTS
-# ============================================
-if id otelcol &>/dev/null; then
-  warn "Removing old otelcol user (agent now runs as root)"
-  chown root:root -R "$CONFIG_DIR" 2>/dev/null || true
-  userdel otelcol 2>/dev/null || true
-fi
 
 # ============================================
 # SYSTEMD SERVICE — runs as root

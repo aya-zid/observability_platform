@@ -108,20 +108,6 @@ else
 fi
 
 # ============================================
-# REMOVE otelcol USER (leftover from old installs)
-# Current version runs as root so no user is created,
-# but old installs created this user — clean it up
-# ============================================
-section "Checking for leftover system user"
-
-if id otelcol &>/dev/null; then
-  userdel otelcol 2>/dev/null || true
-  log "Removed leftover otelcol user"
-else
-  warn "No otelcol user found, skipping"
-fi
-
-# ============================================
 # CLEAN UP LOG FILES
 # ============================================
 section "Cleaning up logs"

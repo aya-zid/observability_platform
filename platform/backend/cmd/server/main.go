@@ -1,3 +1,4 @@
+// cmd/server/main.go
 package main
 
 import (
@@ -15,28 +16,28 @@ import (
 func main() {
 	cfg := config.Load()
 
+	// ── Infrastructure connections ────────────────────────────────────────────
 	infrastructure.InitJWT(cfg)
 	infrastructure.Connect(cfg)
+	infrastructure.ConnectRedis(cfg) // ← new
 
-	// Auto-migrate
+	// ── DB migrations ─────────────────────────────────────────────────────────
 	if err := infrastructure.DB.AutoMigrate(&domain.Tenant{}, &domain.User{}); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
-	log.Println("[DB] AutoMigrate completed – tables created/updated")
+	log.Println("[DB] AutoMigrate completed")
 
-	// Echo setup
+	// ── Echo setup ────────────────────────────────────────────────────────────
 	e := echo.New()
 	e.HideBanner = true
-
-	// Global middlewares
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
-	// Setup all routes
-	handler.SetupRoutes(e)
+	// cfg is now passed to SetupRoutes so proxy handlers can read infra addresses
+	handler.SetupRoutes(e, cfg)
 
-	log.Println("🚀 Starting Observability SaaS Backend on :8080")
-	if err := e.Start(":8080"); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	log.Printf("🚀 Observability Platform backend starting on :%s", cfg.ServerPort)
+	if err := e.Start(":" + cfg.ServerPort); err != nil {
+		log.Fatalf("Server error: %v", err)
 	}
 }

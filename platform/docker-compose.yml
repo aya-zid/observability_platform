@@ -1,4 +1,26 @@
+# ============================================
+# PLATFORM STACK - Backend + Data Layer
+# ============================================
+# Network topology:
+#   obs-network (external) — shared with infra stack
+#     backend reaches vminsert, loki, tempo by service name
+#   obs-platform-internal — private to this stack
+#     postgres and redis are NOT exposed to the infra network
+#
+# Startup order:
+#   1. Start infra stack first:  cd infrastructure && docker compose up -d
+#   2. Start platform stack:     cd platform      && docker compose up -d
+# ============================================
+
+networks:
+  obs-network:
+    external: true          # shared with infra — gives backend access to vminsert/loki/tempo
+
+  obs-platform-internal:
+    driver: bridge          # postgres + redis only reachable from backend, not from infra
+
 services:
+
   postgres:
     image: postgres:16-alpine
     container_name: obs-postgres
@@ -10,12 +32,28 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"  # 5433 to avoid clashing with any local postgres
+      - "5434:5432"         # exposed for pgadmin / local debugging only
+    networks:
+      - obs-platform-internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U obsuser -d obs_saas_dev"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: obs-redis
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    networks:
+      - obs-platform-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # No port exposed — redis is internal only, never reachable from outside
 
   backend:
     build:
@@ -24,17 +62,42 @@ services:
     container_name: obs-backend
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080:8080"         # agents + frontend connect here
     environment:
+      # ── Database ───────────────────────────────────────────────
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: obsuser
       DB_PASSWORD: pass1234
       DB_NAME: obs_saas_dev
       DB_SSLMODE: disable
+
+      # ── Auth ───────────────────────────────────────────────────
       JWT_SECRET: super-secret-change-me-in-prod-32-chars-min
+
+      # ── Redis ──────────────────────────────────────────────────
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+
+      # ── Infra addresses (resolved via obs-network) ─────────────
+      # These are internal Docker service names — never exposed to agents
+      VMINSERT_HOST: vminsert
+      VMINSERT_PORT: 8480
+      VMSELECT_HOST: vmselect
+      VMSELECT_PORT: 8481
+      LOKI_HOST: loki
+      LOKI_PORT: 3100
+      TEMPO_HOST: tempo
+      TEMPO_PORT: 4318       # OTLP HTTP inside the container (not the mapped host port)
+
+    networks:
+      - obs-network           # to reach vminsert, loki, tempo
+      - obs-platform-internal # to reach postgres and redis
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   pgadmin:
@@ -45,11 +108,14 @@ services:
       PGADMIN_DEFAULT_EMAIL: admin@local.dev
       PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
-      - "5050:80"   # access at http://localhost:5050
+      - "5050:80"
+    networks:
+      - obs-platform-internal
     depends_on:
       - postgres
     volumes:
       - pgadmin-data:/var/lib/pgadmin
+
 volumes:
   postgres-data:
   pgadmin-data:

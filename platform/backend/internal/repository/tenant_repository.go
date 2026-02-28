@@ -1,7 +1,8 @@
+// internal/repository/tenant_repository.go
 package repository
 
 import (
-	"errors"
+	"context"
 
 	"gorm.io/gorm"
 
@@ -20,26 +21,24 @@ func (r *TenantRepository) Create(tenant *domain.Tenant) error {
 	return r.db.Create(tenant).Error
 }
 
-func (r *TenantRepository) FindByUUID(uuid string) (*domain.Tenant, error) {
-	var tenant domain.Tenant
-	err := r.db.Where("uuid = ?", uuid).First(&tenant).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil // not found → return nil, nil
-		}
-		return nil, err
-	}
-	return &tenant, nil
-}
-
 func (r *TenantRepository) FindByEmail(email string) (*domain.Tenant, error) {
 	var tenant domain.Tenant
 	err := r.db.Where("contact_email = ?", email).First(&tenant).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
 	}
-	return &tenant, nil
+	return &tenant, err
+}
+
+// FindByAPIKey resolves an API key to a full Tenant record.
+// Called by IngestMiddleware on cache miss — only hits DB once per 5-minute TTL window.
+func (r *TenantRepository) FindByAPIKey(ctx context.Context, apiKey string) (*domain.Tenant, error) {
+	var tenant domain.Tenant
+	err := r.db.WithContext(ctx).
+		Where("api_key = ?", apiKey).
+		First(&tenant).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	return &tenant, err
 }

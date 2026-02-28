@@ -4,26 +4,15 @@
 apiVersion: 1
 datasources:
   # ============================================
-  # VictoriaMetrics Cluster (via vmselect or vmauth)
+  # VictoriaMetrics Cluster (via vmselect)
   # ============================================
   - name: VictoriaMetrics
     type: prometheus
     access: proxy
-    # Option A: Direct to vmselect (single tenant view)
-    url: http://vmselect:8481/select/1/prometheus
-    
-    # Option B: Through vmauth (enables tenant switching via headers)
-    #url: http://vmauth:8427/select/1/prometheus
-    
+    url: http://vmselect:8481/select/tenant_id_change_me/prometheus # for now this is manualy set but gonna update it soon
     isDefault: true
     editable: true
-    #jsonData:
-      # For multi-tenant: we can add custom headers per datasource
-     # httpHeaderName1: 'Authorization'
-    #secureJsonData:
-      # Basic auth for tenant-1 (base64 encoded)
-     # httpHeaderValue1: 'Basic dGVuYW50LTE6Y2hhbmdlbWUtdGVuYW50LTE='
-
+    
   # ---------------------------------------
   # 2. Loki (Logs) 
   #    Built-in Grafana datasource
@@ -36,13 +25,9 @@ datasources:
     jsonData:
       # Enable for better query performance
       maxLines: 1000
-      # For multi-tenant: we will set headers dynamically via API
-      # or create multiple datasources per tenant
       httpHeaderName1: 'X-Scope-OrgID'
     secureJsonData:
-      # Default tenant for initial setup
-      # In production, our SaaS backend injects this per-user
-      httpHeaderValue1: 'obs_test123'
+      httpHeaderValue1: 'tenant uuid change me'  #for now this is manualy set but gonna update it soon
   # ----------------------------------------
   # 3. Tempo (Traces)
   # Built-in Grafana datasource
@@ -55,4 +40,4 @@ datasources:
     jsonData:
       httpHeaderName1: 'X-Scope-OrgID'
     secureJsonData:
-      httpHeaderValue1: 'obs_test123'
+      httpHeaderValue1: 'tenant uuid change me'  #for now this is manualy set but gonna update it soon

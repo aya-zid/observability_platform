@@ -3,9 +3,13 @@ package infrastructure
 
 import (
 	"context" // added for future context-aware usage
+	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/config"
 )
 
@@ -25,13 +29,21 @@ func InitJWT(c *config.Config) {
 
 // GenerateToken creates a new JWT
 func GenerateToken(userID, tenantID uint, email, role string) (string, error) {
+	// Kept for backward compatibility. New code should treat this as an access token.
+	if cfg == nil {
+		return "", errors.New("config not initialized")
+	}
 	claims := Claims{
 		UserID:   userID,
 		TenantID: tenantID,
 		Email:    email,
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			Issuer:    cfg.JWTIssuer,
+			Subject:   strconv.FormatUint(uint64(userID), 10),
+			Audience:  []string{cfg.JWTAudience},
+			ID:        uuid.NewString(),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(cfg.AccessTokenTTLMinutes) * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -42,7 +54,14 @@ func GenerateToken(userID, tenantID uint, email, role string) (string, error) {
 
 // ParseToken validates and returns claims
 func ParseToken(tokenStr string) (*Claims, error) {
+	if cfg == nil {
+		return nil, errors.New("config not initialized")
+	}
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		// Reject tokens signed with unexpected algorithms.
+		if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return []byte(cfg.JWTSecret), nil
 	})
 
@@ -51,6 +70,19 @@ func ParseToken(tokenStr string) (*Claims, error) {
 	}
 
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
+		if claims.Issuer != cfg.JWTIssuer {
+			return nil, jwt.ErrTokenInvalidIssuer
+		}
+		audOK := false
+		for _, a := range claims.Audience {
+			if a == cfg.JWTAudience {
+				audOK = true
+				break
+			}
+		}
+		if !audOK {
+			return nil, jwt.ErrTokenInvalidAudience
+		}
 		return claims, nil
 	}
 

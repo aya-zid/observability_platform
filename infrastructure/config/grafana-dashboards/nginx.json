@@ -1,0 +1,330 @@
+{
+  "uid": "nginx-overview",
+  "title": "Nginx Overview",
+  "tags": [
+    "nginx"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 20,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "type": "textbox",
+        "label": "Tenant ID",
+        "current": {
+          "value": "0"
+        },
+        "hide": 2
+      },
+      {
+        "name": "org_id",
+        "type": "textbox",
+        "label": "Org ID",
+        "current": {
+          "value": ""
+        },
+        "hide": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Response Time P50/P95/P99",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "quantile_over_time(0.50, {service_name=\"nginx\"} | regexp `rt=(?P<rt>[0-9.]+)$` | unwrap rt [1m]) by ()",
+          "legendFormat": "P50"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "quantile_over_time(0.95, {service_name=\"nginx\"} | regexp `rt=(?P<rt>[0-9.]+)$` | unwrap rt [1m]) by ()",
+          "legendFormat": "P95"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "quantile_over_time(0.99, {service_name=\"nginx\"} | regexp `rt=(?P<rt>[0-9.]+)$` | unwrap rt [1m]) by ()",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Status Code Breakdown Over Time",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "sum(rate({service_name=\"nginx\"} |~ `\" 2\\d\\d \"` [1m]))",
+          "legendFormat": "2xx"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "sum(rate({service_name=\"nginx\"} |~ `\" 3\\d\\d \"` [1m]))",
+          "legendFormat": "3xx"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "sum(rate({service_name=\"nginx\"} |~ `\" 4\\d\\d \"` [1m]))",
+          "legendFormat": "4xx"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "sum(rate({service_name=\"nginx\"} |~ `\" 5\\d\\d \"` [1m]))",
+          "legendFormat": "5xx"
+        }
+      ],
+      "options": {
+        "stacking": {
+          "mode": "normal"
+        }
+      },
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "2xx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "3xx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "4xx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "5xx"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Active Connections",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "obs-victoriametrics"
+          },
+          "expr": "nginx_connections_active",
+          "legendFormat": "Active"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "obs-victoriametrics"
+          },
+          "expr": "nginx_connections_waiting",
+          "legendFormat": "Waiting"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "obs-victoriametrics"
+          },
+          "expr": "nginx_connections_reading",
+          "legendFormat": "Reading"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "obs-victoriametrics"
+          },
+          "expr": "nginx_connections_writing",
+          "legendFormat": "Writing"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Bandwidth Over Time (bytes/s)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "sum(rate({service_name=\"nginx\"} | regexp `^[^ ]+ [^ ]+ [^ ]+ \\[[^\\]]+\\] \"[^\"]*\" \\d+ (?P<bytes>\\d+)` | unwrap bytes [1m]))",
+          "legendFormat": "bytes/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "binBps"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "4xx Error Rate %%",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "(sum(rate({service_name=\"nginx\"} |~ `\" 4\\d\\d \"` [1m])) or vector(0)) / sum(rate({service_name=\"nginx\"}[1m])) * 100",
+          "legendFormat": "4xx Error Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "5xx Error Rate %%",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "obs-loki"
+          },
+          "expr": "(sum(rate({service_name=\"nginx\"} |~ `\" 5\\d\\d \"` [1m])) or vector(0)) / sum(rate({service_name=\"nginx\"}[1m])) * 100",
+          "legendFormat": "5xx Error Rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "max": 100
+        }
+      }
+    }
+  ]
+}

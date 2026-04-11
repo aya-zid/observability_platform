@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 
@@ -17,27 +18,51 @@ func NewTenantRepository(db *gorm.DB) *TenantRepository {
 	return &TenantRepository{db: db}
 }
 
+func (r *TenantRepository) WithDB(db *gorm.DB) *TenantRepository {
+	return &TenantRepository{db: db}
+}
+
 func (r *TenantRepository) Create(tenant *domain.Tenant) error {
 	return r.db.Create(tenant).Error
 }
 
 func (r *TenantRepository) FindByEmail(email string) (*domain.Tenant, error) {
+	return r.FindByEmailCtx(context.Background(), email)
+}
+
+func (r *TenantRepository) FindByEmailCtx(ctx context.Context, email string) (*domain.Tenant, error) {
 	var tenant domain.Tenant
-	err := r.db.Where("contact_email = ?", email).First(&tenant).Error
-	if err == gorm.ErrRecordNotFound {
+	err := r.db.WithContext(ctx).Where("contact_email = ?", email).First(&tenant).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &tenant, err
 }
 
-// FindByAPIKey resolves an API key to a full Tenant record.
-// Called by IngestMiddleware on cache miss — only hits DB once per 5-minute TTL window.
+func (r *TenantRepository) FindByIDCtx(ctx context.Context, id uint) (*domain.Tenant, error) {
+	var tenant domain.Tenant
+	err := r.db.WithContext(ctx).First(&tenant, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &tenant, err
+}
+
+func (r *TenantRepository) UpdateAPIKeyByIDCtx(ctx context.Context, id uint, apiKey string) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.Tenant{}).
+		Where("id = ?", id).
+		Update("api_key", apiKey).
+		Error
+}
+
+// FindByAPIKey resolves a raw API key to a full Tenant record.
 func (r *TenantRepository) FindByAPIKey(ctx context.Context, apiKey string) (*domain.Tenant, error) {
 	var tenant domain.Tenant
 	err := r.db.WithContext(ctx).
 		Where("api_key = ?", apiKey).
 		First(&tenant).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &tenant, err

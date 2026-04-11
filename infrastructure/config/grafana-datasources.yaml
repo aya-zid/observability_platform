@@ -1,43 +1,74 @@
+# ============================================
 # Grafana Datasource Provisioning
-# Auto-configures connections when Grafana starts
+# ============================================
+#
+# IMPORTANT: explicit `uid` is required so dashboard JSON panel references
+# are stable across Grafana restarts and reprovisioning.
+#
+# MULTI-TENANT NOTE:
+# These datasources are configured for a single tenant (the one whose
+# credentials appear below). Grafana does not support per-session tenant
+# switching with static provisioning.
+#
+# Tenant isolation for the React frontend is handled entirely by the Go
+# backend proxy (/api/query/*), which injects the correct tenant ID / UUID
+# server-side. Grafana is an ADMIN tool only.
+#
+# To configure for your tenant:
+#   - VictoriaMetrics URL: replace "1" in the path with your tenant's numeric DB id
+#   - Loki X-Scope-OrgID: replace the UUID with your tenant's UUID from the tenants table
+#
+# Query to find your tenant's id and uuid:
+#   SELECT id, uuid FROM tenants LIMIT 5;
 
 apiVersion: 1
 datasources:
-  # ============================================
-  # VictoriaMetrics Cluster (via vmselect)
-  # ============================================
+
+  # ──────────────────────────────────────────
+  # VictoriaMetrics (metrics)
+  # Tenant isolation: numeric ID in URL path
+  # ──────────────────────────────────────────
   - name: VictoriaMetrics
+    uid: obs-victoriametrics
     type: prometheus
     access: proxy
-    url: http://vmselect:8481/select/tenant_id_change_me/prometheus # for now this is manualy set but gonna update it soon
+    # Replace "1" with your tenant's numeric id from the tenants table
+    url: http://vmselect:8481/select/1/prometheus
     isDefault: true
     editable: true
-    
-  # ---------------------------------------
-  # 2. Loki (Logs) 
-  #    Built-in Grafana datasource
-  # ----------------------------------------
+    basicAuth: false
+    jsonData:
+      timeInterval: "30s"
+
+  # ──────────────────────────────────────────
+  # Loki (logs)
+  # Tenant isolation: UUID in X-Scope-OrgID header
+  # ──────────────────────────────────────────
   - name: Loki
+    uid: obs-loki
     type: loki
     access: proxy
     url: http://loki:3100
     editable: true
+    basicAuth: false
     jsonData:
-      # Enable for better query performance
       maxLines: 1000
-      httpHeaderName1: 'X-Scope-OrgID'
+      httpHeaderName1: X-Scope-OrgID
     secureJsonData:
-      httpHeaderValue1: 'tenant uuid change me'  #for now this is manualy set but gonna update it soon
-  # ----------------------------------------
-  # 3. Tempo (Traces)
-  # Built-in Grafana datasource
-  # ----------------------------------------
+      # Replace with your tenant's UUID from the tenants table
+      httpHeaderValue1: 6885384a-f3b9-46cb-8ccb-757d18db7419
+
+  # ──────────────────────────────────────────
+  # Tempo (traces)
+  # ──────────────────────────────────────────
   - name: Tempo
+    uid: obs-tempo
     type: tempo
     access: proxy
     url: http://tempo:3200
     editable: true
+    basicAuth: false
     jsonData:
-      httpHeaderName1: 'X-Scope-OrgID'
+      httpHeaderName1: X-Scope-OrgID
     secureJsonData:
-      httpHeaderValue1: 'tenant uuid change me'  #for now this is manualy set but gonna update it soon
+      httpHeaderValue1: 6885384a-f3b9-46cb-8ccb-757d18db7419

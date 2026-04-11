@@ -4,6 +4,7 @@ const express = require('express');
 const chalk = require('chalk');
 const cors = require('cors');
 const helmet = require('helmet');
+const morgan = require('morgan');
 const path = require('path');
 
 const keys = require('./config/keys');
@@ -16,6 +17,7 @@ const app = express();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+app.use(morgan('combined'));
 app.use(
   helmet({
     contentSecurityPolicy: false,

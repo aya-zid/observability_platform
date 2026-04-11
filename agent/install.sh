@@ -1,27 +1,47 @@
 #!/bin/bash
 # ============================================
-# OBSERVABILITY PLATFORM - Agent Installer
-# Usage future: curl -sSL https://platform/install.sh | API_KEY=xxx bash 
-# local usage now : sudo API_KEY=obs_test123 PLATFORM_HOST=localhost bash install.sh
-# Runs as root for full system access (logs, metrics, docker, traces)
+# OBSERVABILITY PLATFORM — Agent Installer
+# Usage:
+#   curl -sSL https://platform/install.sh | API_KEY=xxx bash
+#   sudo API_KEY=obs_live_xxx PLATFORM_HOST=localhost bash install.sh
+# Runs as root for full system access
 # ============================================
 
-set -e
+set -uo pipefail
+
+# ============================================
+# PHASE 0 — BOOTSTRAP
+# ============================================
 
 # ---- Colors ----
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 log()     { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
+info()    { echo -e "${CYAN}[i]${NC} $1"; }
 error()   { echo -e "${RED}[✗]${NC} $1"; exit 1; }
-section() { echo -e "\n${BLUE}==>${NC} $1"; }
+section() { echo -e "\n${BOLD}${BLUE}━━━ $1 ━━━${NC}"; }
+fixed()   { echo -e "${GREEN}[fixed]${NC} $1"; }
+skipped() { echo -e "${YELLOW}[skipped]${NC} $1"; }
+manual()  { echo -e "${RED}[manual]${NC} $1"; }
+
+# ---- Ask helper ----
+ask() {
+  local QUESTION=$1
+  echo -en "${YELLOW}[?]${NC} $QUESTION ${BOLD}[y/N]${NC} "
+  read -r REPLY </dev/tty
+  [[ "$REPLY" =~ ^[Yy]$ ]]
+}
+
+# ---- Backup a file before modifying ----
+backup_file() {
+  local FILE=$1
+  [ -f "$FILE" ] && cp "$FILE" "${FILE}.bak.$(date +%s)" && info "Backed up $FILE"
+}
 
 # ============================================
-# CONFIGURATION — injected by backend
+# CONFIGURATION
 # ============================================
 API_KEY="${API_KEY:-}"
 PLATFORM_HOST="${PLATFORM_HOST:-THE_INFRA_IP}"
@@ -30,22 +50,41 @@ OTEL_VERSION="0.119.0"
 AGENT_VERSION="1.0.0"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/otelcol"
+REPORT_FILE="/etc/otelcol/discovery-report.txt"
 
-# Backend ingest endpoints (agents talk ONLY to the backend proxy, not infra directly)
 METRICS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/metrics"
 LOGS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/logs"
 TRACES_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/traces"
+HOST_DISCOVERY_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/discovery/host-services"
+CONTAINER_DISCOVERY_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/discovery/container-services"
+HOST_REGISTER_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/hosts/register"
+HOST_HEARTBEAT_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/hosts/heartbeat"
+
+# ============================================
+# DISCOVERY STATE
+# ============================================
+declare -A LOG_PATHS
+declare -A SVC_PORT
+declare -A SVC_VERSION
+declare -A SVC_STATUS
+declare -A SVC_NOTES
+declare -a MANUAL_STEPS=()
+declare -a ALL_SERVICES=()
+declare -A LOG_FORMAT
+
+FILELOG_RECEIVERS_YAML=""
+declare -a FILELOG_PIPELINE=()
+declare -a METRIC_PIPELINE=("hostmetrics")
 
 # ============================================
 # CHECKS
 # ============================================
 section "Checking requirements"
 
-[ -z "$API_KEY" ] && error "API_KEY is required. Usage: curl -sSL .../install.sh | API_KEY=your_key bash"
+[ -z "$API_KEY" ] && error "API_KEY is required. Usage: API_KEY=your_key bash install.sh"
 [ "$EUID" -ne 0 ] && error "Please run as root or with sudo"
 [ "$(uname -s)" != "Linux" ] && error "This installer only supports Linux"
 
-# Detect architecture
 ARCH=$(uname -m)
 case $ARCH in
   x86_64)  ARCH_NAME="amd64" ;;
@@ -54,275 +93,1785 @@ case $ARCH in
   *)       error "Unsupported architecture: $ARCH" ;;
 esac
 
-# Detect OS
 if [ -f /etc/os-release ]; then
   . /etc/os-release
-  OS_NAME=$NAME
-  OS_ID=$ID
+  OS_NAME=$NAME; OS_ID=$ID; OS_VERSION_ID=${VERSION_ID:-""}
 else
-  OS_NAME="Unknown Linux"
-  OS_ID="unknown"
+  OS_NAME="Unknown Linux"; OS_ID="unknown"; OS_VERSION_ID=""
 fi
 
-# Unique machine identity
-MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo "unknown")
+MACHINE_ID=$(cat /etc/machine-id 2>/dev/null \
+  || cat /proc/sys/kernel/random/boot_id 2>/dev/null \
+  || echo "unknown")
 HOSTNAME_FQDN=$(hostname -f 2>/dev/null || hostname)
 
-log "OS: $OS_NAME"
+log "OS: $OS_NAME $OS_VERSION_ID"
 log "Architecture: $ARCH_NAME"
 log "Hostname: $HOSTNAME_FQDN"
 log "Machine ID: ${MACHINE_ID:0:8}..."
-log "API Key: ${API_KEY:0:8}... (truncated)"
+log "API Key: ${API_KEY:0:8}..."
 log "Platform: $PLATFORM_HOST:$PLATFORM_PORT"
-log "Metrics → $METRICS_ENDPOINT"
-log "Logs    → $LOGS_ENDPOINT"
-log "Traces  → $TRACES_ENDPOINT"
-log "Agent version: $AGENT_VERSION"
 
 # ============================================
-# DOWNLOAD COLLECTOR
+# UTILITY FUNCTIONS
 # ============================================
-section "Downloading OpenTelemetry Collector v${OTEL_VERSION}"
 
-DOWNLOAD_URL="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/otelcol-contrib_${OTEL_VERSION}_linux_${ARCH_NAME}.tar.gz"
-
-cd /tmp
-curl -sSL -o otelcol.tar.gz "$DOWNLOAD_URL" || error "Failed to download collector"
-tar -xzf otelcol.tar.gz otelcol-contrib
-mv otelcol-contrib "$INSTALL_DIR/otelcol"
-chmod +x "$INSTALL_DIR/otelcol"
-rm -f otelcol.tar.gz
-
-log "Collector installed at $INSTALL_DIR/otelcol"
-
-# ============================================
-# DETECT LOG SOURCES
-# ============================================
-section "Detecting log sources"
-
-FILELOG_RECEIVERS=""
-FILELOG_IN_PIPELINE=()
-
-add_filelog() {
-  local NAME=$1
-  local SERVICE=$2
-  local JOB=$3
-  local PATHS=$4
-
-  FILELOG_RECEIVERS="${FILELOG_RECEIVERS}
-  filelog/${NAME}:
-    include:
-${PATHS}
-    include_file_path: true
-    start_at: end
-    resource:
-      service.name: ${SERVICE}
-      job: ${JOB}"
-
-  FILELOG_IN_PIPELINE+=("filelog/${NAME}")
-  log "${SERVICE} logs detected"
+get_unit_pids() {
+  local UNIT=$1
+  local MAIN
+  MAIN=$(systemctl show -p MainPID "$UNIT" 2>/dev/null | cut -d= -f2)
+  [ -n "$MAIN" ] && [ "$MAIN" != "0" ] && echo "$MAIN"
+  local CG
+  CG=$(systemctl show -p ControlGroup "$UNIT" 2>/dev/null | cut -d= -f2)
+  if [ -n "$CG" ]; then
+    local PROCS="/sys/fs/cgroup${CG}/cgroup.procs"
+    [ -f "$PROCS" ] && cat "$PROCS" 2>/dev/null && return
+    local PROCS1="/sys/fs/cgroup/systemd${CG}/cgroup.procs"
+    [ -f "$PROCS1" ] && cat "$PROCS1" 2>/dev/null
+  fi
 }
 
-# ---- SYSLOG (Ubuntu/Debian/CentOS/RHEL) ----
-SYSLOG_PATHS=""
-[ -f /var/log/syslog ]   && SYSLOG_PATHS="      - /var/log/syslog"
-[ -f /var/log/messages ] && SYSLOG_PATHS="${SYSLOG_PATHS}
-      - /var/log/messages"
-[ -n "$SYSLOG_PATHS" ] && add_filelog "system" "system" "syslog" "$SYSLOG_PATHS"
+get_proc_log_files() {
+  local PID=$1
+  [ -d "/proc/${PID}/fd" ] || return
+  for FD in /proc/${PID}/fd/*; do
+    local T
+    T=$(readlink -f "$FD" 2>/dev/null) || continue
+    [[ "$T" == /proc/* ]] || [[ "$T" == /dev/* ]] || \
+    [[ "$T" == /sys/* ]]  || [[ "$T" == anon_inode* ]] || \
+    [[ "$T" == pipe:* ]]  || [[ "$T" == socket:* ]] && continue
+    [ -f "$T" ] || continue
+    if [[ "$T" == *.log* ]] || [[ "$T" == */log/* ]] || [[ "$T" == */logs/* ]]; then
+      echo "$T"
+    fi
+  done
+}
 
-# ---- NGINX ----
-if [ -d /var/log/nginx ]; then
-  add_filelog "nginx" "nginx" "nginx" \
-    "      - /var/log/nginx/access.log
-      - /var/log/nginx/error.log"
-fi
+collect_proc_logs() {
+  local UNIT=$1
+  local PATHS=""
+  for PID in $(get_unit_pids "$UNIT" 2>/dev/null); do
+    local FL
+    FL=$(get_proc_log_files "$PID" 2>/dev/null || true)
+    PATHS="${PATHS}"$'\n'"$FL"
+  done
+  echo "$PATHS" | sort -u | grep -v '^$'
+}
 
-# ---- APACHE ----
-APACHE_PATHS=""
-[ -d /var/log/apache2 ] && APACHE_PATHS="      - /var/log/apache2/access.log
-      - /var/log/apache2/error.log"
-[ -d /var/log/httpd ]   && APACHE_PATHS="${APACHE_PATHS}
-      - /var/log/httpd/access_log
-      - /var/log/httpd/error_log"
-[ -n "$APACHE_PATHS" ] && add_filelog "apache" "apache" "apache" "$APACHE_PATHS"
+path_exists() {
+  local P=$1
+  if [[ "$P" == *"*"* ]]; then
+    compgen -G "$P" &>/dev/null
+  else
+    [ -f "$P" ]
+  fi
+}
 
-# ---- POSTGRESQL ----
-POSTGRES_PATHS=""
-[ -d /var/log/postgresql ]         && POSTGRES_PATHS="      - /var/log/postgresql/*.log"
-[ -d /var/lib/pgsql/data/pg_log ]  && POSTGRES_PATHS="${POSTGRES_PATHS}
-      - /var/lib/pgsql/data/pg_log/*.log"
-[ -d /var/lib/pgsql/14/data/log ]  && POSTGRES_PATHS="${POSTGRES_PATHS}
-      - /var/lib/pgsql/14/data/log/*.log"
-[ -d /var/lib/pgsql/15/data/log ]  && POSTGRES_PATHS="${POSTGRES_PATHS}
-      - /var/lib/pgsql/15/data/log/*.log"
-[ -d /var/lib/pgsql/16/data/log ]  && POSTGRES_PATHS="${POSTGRES_PATHS}
-      - /var/lib/pgsql/16/data/log/*.log"
-[ -n "$POSTGRES_PATHS" ] && add_filelog "postgresql" "postgresql" "postgresql" "$POSTGRES_PATHS"
+filter_existing() {
+  while IFS= read -r P; do
+    [ -z "$P" ] && continue
+    path_exists "$P" && echo "$P"
+  done
+}
 
-# ---- MYSQL / MARIADB ----
-MYSQL_PATHS=""
-[ -f /var/log/mysql/error.log ]     && MYSQL_PATHS="      - /var/log/mysql/error.log"
-[ -f /var/log/mysql/mysql.log ]     && MYSQL_PATHS="${MYSQL_PATHS}
-      - /var/log/mysql/mysql.log"
-[ -f /var/log/mariadb/mariadb.log ] && MYSQL_PATHS="${MYSQL_PATHS}
-      - /var/log/mariadb/mariadb.log"
-[ -f /var/log/mysqld.log ]          && MYSQL_PATHS="${MYSQL_PATHS}
-      - /var/log/mysqld.log"
-[ -n "$MYSQL_PATHS" ] && add_filelog "mysql" "mysql" "mysql" "$MYSQL_PATHS"
+to_yaml_list() {
+  local INDENT="${1:-      }"
+  while IFS= read -r P; do
+    [ -n "$P" ] && echo "${INDENT}- ${P}"
+  done
+}
 
-# ---- MONGODB ----
-MONGO_PATHS=""
-[ -f /var/log/mongodb/mongod.log ] && MONGO_PATHS="      - /var/log/mongodb/mongod.log"
-[ -f /var/log/mongod.log ]         && MONGO_PATHS="${MONGO_PATHS}
-      - /var/log/mongod.log"
-[ -n "$MONGO_PATHS" ] && add_filelog "mongodb" "mongodb" "mongodb" "$MONGO_PATHS"
+trim_one_line() {
+  # Collapse whitespace/newlines to a single safe line.
+  local S=${1-}
+  S=${S//$'\r'/}
+  S=${S//$'\n'/ }
+  S=$(printf '%s' "$S" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//') || true
+  printf '%s' "$S"
+}
 
-# ---- REDIS ----
-REDIS_PATHS=""
-[ -f /var/log/redis/redis-server.log ] && REDIS_PATHS="      - /var/log/redis/redis-server.log"
-[ -f /var/log/redis.log ]              && REDIS_PATHS="${REDIS_PATHS}
-      - /var/log/redis.log"
-[ -n "$REDIS_PATHS" ] && add_filelog "redis" "redis" "redis" "$REDIS_PATHS"
+yaml_quote() {
+  # Double-quote and escape a YAML scalar.
+  local S=${1-}
+  S=${S//$'\r'/}
+  S=${S//\\/\\\\}
+  S=${S//\"/\\\"}
+  S=${S//$'\n'/\\n}
+  S=${S//$'\t'/\\t}
+  printf '"%s"' "$S"
+}
 
-# ---- KAFKA ----
-KAFKA_PATHS=""
-[ -d /var/log/kafka ]        && KAFKA_PATHS="      - /var/log/kafka/*.log"
-[ -d /opt/kafka/logs ]       && KAFKA_PATHS="${KAFKA_PATHS}
-      - /opt/kafka/logs/*.log"
-[ -d /usr/local/kafka/logs ] && KAFKA_PATHS="${KAFKA_PATHS}
-      - /usr/local/kafka/logs/*.log"
-[ -n "$KAFKA_PATHS" ] && add_filelog "kafka" "kafka" "kafka" "$KAFKA_PATHS"
+json_escape() {
+  # Escape a string for safe JSON embedding (without surrounding quotes).
+  local S=${1-}
+  S=${S//\\/\\\\}
+  S=${S//\"/\\\"}
+  S=${S//$'\n'/\\n}
+  S=${S//$'\r'/\\r}
+  S=${S//$'\t'/\\t}
+  printf '%s' "$S"
+}
 
-# ---- ELASTICSEARCH ----
-ELASTIC_PATHS=""
-[ -d /var/log/elasticsearch ] && ELASTIC_PATHS="      - /var/log/elasticsearch/*.log"
-[ -n "$ELASTIC_PATHS" ] && add_filelog "elasticsearch" "elasticsearch" "elasticsearch" "$ELASTIC_PATHS"
+dedupe_array() {
+  local -n ARR_REF=$1
+  local -A SEEN=()
+  local -a OUT=()
+  local ITEM
+  for ITEM in "${ARR_REF[@]}"; do
+    [ -n "${SEEN[$ITEM]:-}" ] && continue
+    SEEN["$ITEM"]=1
+    OUT+=("$ITEM")
+  done
+  ARR_REF=("${OUT[@]}")
+}
 
-# ---- RABBITMQ ----
-RABBIT_PATHS=""
-[ -d /var/log/rabbitmq ] && RABBIT_PATHS="      - /var/log/rabbitmq/*.log"
-[ -n "$RABBIT_PATHS" ] && add_filelog "rabbitmq" "rabbitmq" "rabbitmq" "$RABBIT_PATHS"
+register_service() {
+  local NAME=$1
+  local PATHS=$2
+  local STATUS=$3   # "discovered" | "logs_found" | "no_logs"
+  local PORT=$4
+  local NOTES=$5
+  local VERSION=${6:-}
 
-# ---- HAPROXY ----
-HAPROXY_PATHS=""
-[ -f /var/log/haproxy.log ] && HAPROXY_PATHS="      - /var/log/haproxy.log"
-[ -n "$HAPROXY_PATHS" ] && add_filelog "haproxy" "haproxy" "haproxy" "$HAPROXY_PATHS"
+  ALL_SERVICES+=("$NAME")
+  LOG_PATHS[$NAME]="$PATHS"
+  SVC_PORT[$NAME]="$PORT"
+  SVC_VERSION[$NAME]="$VERSION"
+  SVC_NOTES[$NAME]="$NOTES"
+  SVC_STATUS[$NAME]="$STATUS"
+}
 
-# ---- SSH / AUTH ----
-SSH_PATHS=""
-[ -f /var/log/auth.log ] && SSH_PATHS="      - /var/log/auth.log"
-[ -f /var/log/secure ]   && SSH_PATHS="${SSH_PATHS}
-      - /var/log/secure"
-[ -n "$SSH_PATHS" ] && add_filelog "ssh" "ssh" "ssh" "$SSH_PATHS"
+# ============================================
+# PHASE 1 — SERVICE DISCOVERY (log path only)
+# ============================================
+section "Phase 1: Service discovery"
 
-# ---- DOCKER CONTAINER LOGS ----
-if [ -S /var/run/docker.sock ]; then
-  FILELOG_RECEIVERS="${FILELOG_RECEIVERS}
-  filelog/docker:
+IGNORE_UNITS="systemd-|dbus|NetworkManager|network|firewalld|crond|cron|atd|\
+accounts-daemon|polkit|rsyslog|syslog$|snapd|packagekit|udisks|\
+ModemManager|avahi-daemon|cups|bluetooth|getty|serial-getty|\
+ssh-agent|gpg-agent|user@|session-|auditd|irqbalance|\
+multipathd|lvm2|dm-event|systemd-logind|systemd-resolved|\
+systemd-timesyncd|systemd-udevd|systemd-journald|wpa_supplicant|\
+rtkit-daemon|colord|thermald|fwupd|unattended-upgrades|haveged|\
+ lightdm|smartmontools|pcscd|upower|containerd|docker$|docker.socket|\
+otelcol$|agent-docker-|agent_|agent-prom-|agent-rediscover$"
+
+RUNNING_UNITS=$(systemctl list-units --type=service --state=running \
+  --no-legend --plain 2>/dev/null \
+  | awk '{print $1}' | sed 's/\.service$//' || true)
+
+# ---- Helper: detect if a unit logs to journald / syslog ----
+unit_uses_journald() {
+  local UNIT=$1
+  # Units with StandardOutput=journal or no log file wired → they log to journald
+  local STD_OUT
+  STD_OUT=$(systemctl show -p StandardOutput "${UNIT}.service" 2>/dev/null | cut -d= -f2)
+  [[ "$STD_OUT" == "journal" || "$STD_OUT" == "journal+console" || "$STD_OUT" == "kmsg" ]]
+}
+
+# ---------- NGINX ----------
+discover_nginx() {
+  local UNIT=$1
+  info "  Discovering nginx..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "80")
+  local PATHS=""
+
+  if command -v nginx &>/dev/null; then
+    local ACCESS ERROR
+    ACCESS=$(nginx -T 2>/dev/null \
+      | grep -oP '(?<=access_log\s)[^\s;]+' | grep -v 'off' | head -10 || true)
+    ERROR=$(nginx -T 2>/dev/null \
+      | grep -oP '(?<=error_log\s)[^\s;]+' | grep -v 'off' | head -10 || true)
+    PATHS="${ACCESS}"$'\n'"${ERROR}"
+  fi
+  [ -d /var/log/nginx ] && PATHS="${PATHS}"$'\n'"/var/log/nginx/access.log"$'\n'"/var/log/nginx/error.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  LOG_FORMAT["nginx"]="nginx_combined"
+  local VERSION=""
+  if command -v nginx &>/dev/null; then
+    VERSION=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  fi
+  [ -z "$VERSION" ] && VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "nginx" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- APACHE ----------
+discover_apache() {
+  local UNIT=$1
+  info "  Discovering apache..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "")
+  if [ -z "$PORT" ]; then
+    PORT=$(grep -oP '(?<=^Listen\s)\d+' /etc/apache2/ports.conf 2>/dev/null \
+      | grep -v '443' | head -1 || echo "80")
+  fi
+
+  local PATHS=""
+  if command -v apache2ctl &>/dev/null || command -v apachectl &>/dev/null; then
+    local CMD; command -v apache2ctl &>/dev/null && CMD=apache2ctl || CMD=apachectl
+    local AOUT; AOUT=$($CMD -S 2>/dev/null || true)
+    local ELOGS ALOGS
+    ELOGS=$(echo "$AOUT" | grep -oP '(?<=error log: ).*' || true)
+    ALOGS=$(echo "$AOUT" | grep -oP '(?<=logfile: ).*' || true)
+    PATHS="${ELOGS}"$'\n'"${ALOGS}"
+  fi
+  [ -d /var/log/apache2 ] && PATHS="${PATHS}"$'\n'"/var/log/apache2/access.log"$'\n'"/var/log/apache2/error.log"
+  [ -d /var/log/httpd ]   && PATHS="${PATHS}"$'\n'"/var/log/httpd/access_log"$'\n'"/var/log/httpd/error_log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  LOG_FORMAT["apache"]="apache_combined"
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION=""
+  if command -v apache2 &>/dev/null; then
+    VERSION=$(apache2 -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  elif command -v httpd &>/dev/null; then
+    VERSION=$(httpd -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  fi
+  [ -z "$VERSION" ] && VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "apache" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- POSTGRESQL ----------
+discover_postgresql() {
+  local UNIT=$1
+  info "  Discovering postgresql ($UNIT)..."
+
+  local VERSION; VERSION=$(echo "$UNIT" | grep -oP '(?<=@)\d+' || echo "")
+  local CLUSTER; CLUSTER=$(echo "$UNIT" | grep -oP '(?<=@\d{1,2}-).*' || echo "main")
+  local SAFE_NAME="postgresql"
+  [ -n "$VERSION" ] && SAFE_NAME="postgresql${VERSION}"
+
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "5432")
+
+  local SERVER_VERSION
+  SERVER_VERSION=$(sudo -u postgres psql -p "${PORT}" -tAc "SHOW server_version;" 2>/dev/null | tr -d ' ' || true)
+  [ -n "$SERVER_VERSION" ] && VERSION="$SERVER_VERSION"
+
+  local LOG_DIR DATA_DIR LOG_COLLECTOR
+  LOG_DIR=$(sudo -u postgres psql -p "${PORT}" -tAc "SHOW log_directory;" 2>/dev/null \
+    | tr -d ' ') || true
+  DATA_DIR=$(sudo -u postgres psql -p "${PORT}" -tAc "SHOW data_directory;" 2>/dev/null \
+    | tr -d ' ') || true
+  LOG_COLLECTOR=$(sudo -u postgres psql -p "${PORT}" -tAc "SHOW logging_collector;" 2>/dev/null \
+    | tr -d ' ') || true
+
+  local PATHS=""
+  if [ "$LOG_COLLECTOR" = "on" ] && [ -n "$LOG_DIR" ] && [ -n "$DATA_DIR" ]; then
+    local ABS_LOG_DIR
+    if [[ "$LOG_DIR" == /* ]]; then
+      ABS_LOG_DIR="$LOG_DIR"
+    else
+      ABS_LOG_DIR="${DATA_DIR}/${LOG_DIR}"
+    fi
+    PATHS="${ABS_LOG_DIR}/*.log"
+    log "    logging_collector=on, logs at ${ABS_LOG_DIR}"
+  fi
+  [ -d /var/log/postgresql ] && PATHS="${PATHS}"$'\n'"/var/log/postgresql/*.log"
+
+  LOG_FORMAT["$SAFE_NAME"]="pg_csv"
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local NOTES="port=${PORT} version=${VERSION} cluster=${CLUSTER} logging_collector=${LOG_COLLECTOR:-unknown}"
+  [ "$LOG_COLLECTOR" = "off" ] && NOTES="${NOTES} | logs_via=journald"
+  register_service "$SAFE_NAME" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+  SVC_PORT[$SAFE_NAME]="$PORT"
+}
+
+# ---------- MYSQL / MARIADB ----------
+discover_mysql() {
+  local UNIT=$1
+  info "  Discovering mysql/mariadb ($UNIT)..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "3306")
+  local PATHS=""
+
+  if command -v mysql &>/dev/null; then
+    local LOG_FILE ERR_LOG
+    LOG_FILE=$(mysql -u root --batch --skip-column-names \
+      -e "SELECT @@general_log_file;" 2>/dev/null | tr -d ' ') || true
+    ERR_LOG=$(mysql -u root --batch --skip-column-names \
+      -e "SELECT @@log_error;" 2>/dev/null | tr -d ' ') || true
+    [ -f "$LOG_FILE" ] && PATHS="$LOG_FILE"
+    [ -f "$ERR_LOG"  ] && PATHS="${PATHS}"$'\n'"$ERR_LOG"
+  fi
+  [ -f /var/log/mysql/error.log ]     && PATHS="${PATHS}"$'\n'"/var/log/mysql/error.log"
+  [ -f /var/log/mysql/mysql.log ]     && PATHS="${PATHS}"$'\n'"/var/log/mysql/mysql.log"
+  [ -f /var/log/mariadb/mariadb.log ] && PATHS="${PATHS}"$'\n'"/var/log/mariadb/mariadb.log"
+  [ -f /var/log/mysqld.log ]          && PATHS="${PATHS}"$'\n'"/var/log/mysqld.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  LOG_FORMAT["mysql"]="mysql_log"
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "mysql" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- MONGODB ----------
+discover_mongodb() {
+  local UNIT=$1
+  info "  Discovering mongodb ($UNIT)..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "27017")
+  local PATHS=""
+
+  for CONF in /etc/mongod.conf /etc/mongodb.conf; do
+    if [ -f "$CONF" ]; then
+      local LP
+      LP=$(grep -oP '(?<=path:\s).*' "$CONF" 2>/dev/null | head -1 | tr -d ' ') || true
+      [ -f "$LP" ] && PATHS="$LP"
+    fi
+  done
+  [ -f /var/log/mongodb/mongod.log ] && PATHS="${PATHS}"$'\n'"/var/log/mongodb/mongod.log"
+  [ -f /var/log/mongod.log ]         && PATHS="${PATHS}"$'\n'"/var/log/mongod.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  LOG_FORMAT["mongodb"]="json"
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "mongodb" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- REDIS ----------
+discover_redis() {
+  local UNIT=$1
+  info "  Discovering redis ($UNIT)..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "6379")
+  local PATHS=""
+
+  if command -v redis-cli &>/dev/null; then
+    local LF
+    LF=$(redis-cli -p "${PORT}" CONFIG GET logfile 2>/dev/null | tail -1 | tr -d ' ') || true
+    [ -n "$LF" ] && [ "$LF" != '""' ] && [ -f "$LF" ] && PATHS="$LF"
+  fi
+  for CONF in /etc/redis/redis.conf /etc/redis.conf; do
+    if [ -f "$CONF" ]; then
+      local LP
+      LP=$(grep -oP '(?<=^logfile\s).*' "$CONF" 2>/dev/null | tr -d '"' | tr -d ' ') || true
+      [ -f "$LP" ] && PATHS="${PATHS}"$'\n'"$LP"
+    fi
+  done
+  [ -f /var/log/redis/redis-server.log ] && PATHS="${PATHS}"$'\n'"/var/log/redis/redis-server.log"
+  [ -f /var/log/redis.log ]              && PATHS="${PATHS}"$'\n'"/var/log/redis.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  LOG_FORMAT["redis"]="redis_log"
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "redis" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- PHP-FPM ----------
+discover_phpfpm() {
+  local UNIT=$1
+  info "  Discovering php-fpm ($UNIT)..."
+  local PATHS=""
+
+  for CONF in /etc/php/*/fpm/php-fpm.conf /etc/php-fpm.conf; do
+    [ -f "$CONF" ] || continue
+    local E S A
+    E=$(grep -oP '(?<=^error_log\s*=\s*).*'  "$CONF" 2>/dev/null | tr -d ' ') || true
+    S=$(grep -oP '(?<=^slowlog\s*=\s*).*'    "$CONF" 2>/dev/null | tr -d ' ') || true
+    A=$(grep -oP '(?<=^access\.log\s*=\s*).*' "$CONF" 2>/dev/null | tr -d ' ') || true
+    [ -f "$E" ] && PATHS="${PATHS}"$'\n'"$E"
+    [ -f "$S" ] && PATHS="${PATHS}"$'\n'"$S"
+    [ -f "$A" ] && PATHS="${PATHS}"$'\n'"$A"
+  done
+  for POOL in /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf; do
+    [ -f "$POOL" ] || continue
+    local S A
+    S=$(grep -oP '(?<=^slowlog\s*=\s*).*'    "$POOL" 2>/dev/null | tr -d ' ') || true
+    A=$(grep -oP '(?<=^access\.log\s*=\s*).*' "$POOL" 2>/dev/null | tr -d ' ') || true
+    [ -f "$S" ] && PATHS="${PATHS}"$'\n'"$S"
+    [ -f "$A" ] && PATHS="${PATHS}"$'\n'"$A"
+  done
+  [ -d /var/log/php-fpm ] && PATHS="${PATHS}"$'\n'"/var/log/php-fpm/*.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  LOG_FORMAT["phpfpm"]="phpfpm_log"
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="php-fpm"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "phpfpm" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
+}
+
+# ---------- ELASTICSEARCH ----------
+discover_elasticsearch() {
+  local UNIT=$1
+  info "  Discovering elasticsearch..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "9200")
+  local PATHS=""
+
+  local CONF="/etc/elasticsearch/elasticsearch.yml"
+  if [ -f "$CONF" ]; then
+    local LD
+    LD=$(grep -oP '(?<=^path\.logs:\s).*' "$CONF" 2>/dev/null | tr -d ' ') || true
+    [ -d "$LD" ] && PATHS="${LD}/*.log"
+  fi
+  [ -d /var/log/elasticsearch ] && PATHS="${PATHS}"$'\n'"/var/log/elasticsearch/*.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "elasticsearch" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- RABBITMQ ----------
+discover_rabbitmq() {
+  local UNIT=$1
+  info "  Discovering rabbitmq..."
+  local PATHS=""
+
+  [ -d /var/log/rabbitmq ] && PATHS="/var/log/rabbitmq/*.log"
+  if command -v rabbitmq-diagnostics &>/dev/null; then
+    local LP
+    LP=$(rabbitmq-diagnostics log_location 2>/dev/null \
+      | grep -oP '(?<=Log file: ).*' | head -1) || true
+    [ -f "$LP" ] && PATHS="${PATHS}"$'\n'"$LP"
+  fi
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="management_port=$(get_unit_port "${UNIT}.service" || echo "15672")"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "rabbitmq" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
+}
+
+# ---------- KAFKA ----------
+discover_kafka() {
+  local UNIT=$1
+  info "  Discovering kafka..."
+  local PATHS=""
+
+  for D in /var/log/kafka /opt/kafka/logs /usr/local/kafka/logs /kafka/logs; do
+    [ -d "$D" ] && PATHS="${PATHS}"$'\n'"${D}/*.log"
+  done
+  local KAFKA_PID
+  KAFKA_PID=$(pgrep -f "kafka.Kafka" 2>/dev/null | head -1) || true
+  if [ -n "$KAFKA_PID" ]; then
+    local KLD
+    KLD=$(cat /proc/${KAFKA_PID}/environ 2>/dev/null \
+      | tr '\0' '\n' | grep 'LOG_DIR=' | cut -d= -f2) || true
+    [ -d "$KLD" ] && PATHS="${PATHS}"$'\n'"${KLD}/*.log"
+  fi
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES=""
+  unit_uses_journald "$UNIT" && NOTES="logs_to=journald"
+  register_service "kafka" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
+}
+
+# ---------- HAPROXY ----------
+discover_haproxy() {
+  local UNIT=$1
+  info "  Discovering haproxy..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "")
+  local PATHS=""
+
+  for CONF in /etc/haproxy/haproxy.cfg; do
+    [ -f "$CONF" ] || continue
+    local LP
+    LP=$(grep -oP '(?<=log\s)/[^\s]+' "$CONF" 2>/dev/null | head -3) || true
+    PATHS="$LP"
+  done
+  [ -f /var/log/haproxy.log ] && PATHS="${PATHS}"$'\n'"/var/log/haproxy.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "haproxy" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- TRAEFIK ----------
+discover_traefik() {
+  local UNIT=$1
+  info "  Discovering traefik..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "")
+  local PATHS=""
+
+  for CONF in /etc/traefik/traefik.yml /etc/traefik/traefik.toml; do
+    [ -f "$CONF" ] || continue
+    local LP
+    LP=$(grep -oP '(?<=filePath:\s).*' "$CONF" 2>/dev/null | head -2 | tr -d '"') || true
+    PATHS="${PATHS}"$'\n'"$LP"
+  done
+  [ -f /var/log/traefik/traefik.log ] && PATHS="${PATHS}"$'\n'"/var/log/traefik/traefik.log"
+  [ -f /var/log/traefik/access.log ]  && PATHS="${PATHS}"$'\n'"/var/log/traefik/access.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "traefik" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- VAULT ----------
+discover_vault() {
+  local UNIT=$1
+  info "  Discovering vault..."
+  local PATHS=""
+
+  for CONF in /etc/vault.d/vault.hcl /etc/vault/vault.hcl; do
+    [ -f "$CONF" ] || continue
+    local LP
+    LP=$(grep -oP '(?<=file_path\s*=\s*")[^"]+' "$CONF" 2>/dev/null | head -1) || true
+    [ -f "$LP" ] && PATHS="$LP"
+  done
+  [ -f /var/log/vault/vault.log ] && PATHS="${PATHS}"$'\n'"/var/log/vault/vault.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES=""
+  unit_uses_journald "$UNIT" && NOTES="logs_to=journald"
+  register_service "vault" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
+}
+
+# ---------- CONSUL ----------
+discover_consul() {
+  local UNIT=$1
+  info "  Discovering consul..."
+  local PATHS=""
+
+  for CONF in /etc/consul.d/consul.hcl /etc/consul/consul.hcl; do
+    [ -f "$CONF" ] || continue
+    local LP
+    LP=$(grep -oP '(?<=log_file\s*=\s*")[^"]+' "$CONF" 2>/dev/null | head -1) || true
+    [ -f "$LP" ] && PATHS="$LP"
+  done
+  [ -f /var/log/consul/consul.log ] && PATHS="${PATHS}"$'\n'"/var/log/consul/consul.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES=""
+  unit_uses_journald "$UNIT" && NOTES="logs_to=journald"
+  register_service "consul" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
+}
+
+# ---------- MEMCACHED ----------
+discover_memcached() {
+  local UNIT=$1
+  info "  Discovering memcached..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "11211")
+  local PATHS=""
+  PATHS=$(collect_proc_logs "${UNIT}.service")
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "memcached" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- CADDY ----------
+discover_caddy() {
+  local UNIT=$1
+  info "  Discovering caddy..."
+  local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "")
+  local PATHS=""
+
+  for CONF in /etc/caddy/Caddyfile; do
+    [ -f "$CONF" ] || continue
+    local LP
+    LP=$(grep -oP '(?<=output file\s).*' "$CONF" 2>/dev/null | head -2 | tr -d '"') || true
+    PATHS="${PATHS}"$'\n'"$LP"
+  done
+  [ -d /var/log/caddy ] && PATHS="${PATHS}"$'\n'"/var/log/caddy/*.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=${PORT}"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "caddy" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+}
+
+# ---------- CLICKHOUSE ----------
+discover_clickhouse() {
+  local UNIT=$1
+  info "  Discovering clickhouse..."
+  local PATHS=""
+
+  local CONF="/etc/clickhouse-server/config.xml"
+  if [ -f "$CONF" ]; then
+    local LP
+    LP=$(grep -oP '(?<=<log>)[^<]+' "$CONF" 2>/dev/null | head -1) || true
+    [ -f "$LP" ] && PATHS="$LP"
+  fi
+  [ -d /var/log/clickhouse-server ] && PATHS="${PATHS}"$'\n'"/var/log/clickhouse-server/*.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES="port=8123"
+  unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  register_service "clickhouse" "$PATHS" "$STATUS" "8123" "$NOTES" "$VERSION"
+}
+
+# ---------- CASSANDRA ----------
+discover_cassandra() {
+  local UNIT=$1
+  info "  Discovering cassandra..."
+  local PATHS=""
+  [ -d /var/log/cassandra ] && PATHS="/var/log/cassandra/*.log"
+  PATHS=$(echo "$PATHS" | sort -u | filter_existing)
+  local STATUS="no_logs"
+  [ -n "$PATHS" ] && STATUS="logs_found"
+  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local NOTES=""
+  unit_uses_journald "$UNIT" && NOTES="logs_to=journald"
+  register_service "cassandra" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
+}
+
+# ---- Unit-to-discoverer map ----
+unit_canonical() {
+  local UNIT=$1
+  case "$UNIT" in
+    nginx)                          echo "nginx" ;;
+    apache2|httpd)                  echo "apache" ;;
+    postgresql@*|postgresql)        echo "postgresql" ;;
+    mysql|mysqld|mariadb)           echo "mysql" ;;
+    mongod|mongodb)                 echo "mongodb" ;;
+    redis|redis-server|redis@*)     echo "redis" ;;
+    php*fpm*|php-fpm)               echo "phpfpm" ;;
+    elasticsearch)                  echo "elasticsearch" ;;
+    rabbitmq-server)                echo "rabbitmq" ;;
+    kafka|kafka@*)                  echo "kafka" ;;
+    haproxy)                        echo "haproxy" ;;
+    traefik)                        echo "traefik" ;;
+    vault)                          echo "vault" ;;
+    consul)                         echo "consul" ;;
+    memcached)                      echo "memcached" ;;
+    caddy)                          echo "caddy" ;;
+    clickhouse-server)              echo "clickhouse" ;;
+    cassandra)                      echo "cassandra" ;;
+    *)                              echo "" ;;
+  esac
+}
+
+get_unit_port() {
+  local UNIT=$1
+  for PID in $(get_unit_pids "$UNIT" 2>/dev/null); do
+    local PORT
+    PORT=$(ss -tlnp 2>/dev/null \
+      | grep "pid=${PID}," \
+      | grep -oP '(?<=:)\d+(?=\s)' \
+      | head -1)
+    [ -n "$PORT" ] && echo "$PORT" && return
+  done
+}
+
+get_unit_version() {
+  local UNIT=$1
+  local PID EXE OUT VERSION
+  for PID in $(get_unit_pids "$UNIT" 2>/dev/null); do
+    EXE=$(readlink -f "/proc/${PID}/exe" 2>/dev/null) || continue
+    [ -x "$EXE" ] || continue
+    OUT=$("$EXE" --version 2>&1 | head -1) || true
+    [ -z "$OUT" ] && OUT=$("$EXE" -v 2>&1 | head -1) || true
+    if [ -z "$OUT" ] && [[ "$EXE" == *nginx ]]; then
+      OUT=$(nginx -v 2>&1 | head -1) || true
+    fi
+    VERSION=$(printf '%s' "$OUT" | grep -oE '[0-9]+([.][0-9]+)+' | head -1) || true
+    [ -n "$VERSION" ] && echo "$VERSION" && return
+  done
+}
+
+declare -A PROCESSED_CANONICALS=()
+
+while IFS= read -r UNIT; do
+  [ -z "$UNIT" ] && continue
+  echo "$UNIT" | grep -qE "$IGNORE_UNITS" && continue
+  CANONICAL=$(unit_canonical "$UNIT")
+  if [ -n "$CANONICAL" ]; then
+    case "$CANONICAL" in
+      postgresql)
+        discover_postgresql "$UNIT"
+        ;;
+      *)
+        [ "${PROCESSED_CANONICALS[$CANONICAL]+_}" ] && continue
+        PROCESSED_CANONICALS[$CANONICAL]=1
+        "discover_${CANONICAL}" "$UNIT"
+        ;;
+    esac
+  else
+    # Unknown service — try to find log files via open fd inspection
+    PATHS=$(collect_proc_logs "${UNIT}.service" 2>/dev/null || true)
+    SAFE=$(echo "$UNIT" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_' | sed 's/_$//')
+    UNKNOWN_PORT=$(get_unit_port "${UNIT}.service" 2>/dev/null || echo "")
+    UNKNOWN_VERSION=$(get_unit_version "${UNIT}.service" 2>/dev/null || echo "")
+    local_status="no_logs"
+    [ -n "$PATHS" ] && local_status="logs_found"
+    local_notes="unknown service — auto-discovered port=${UNKNOWN_PORT:-?}"
+    unit_uses_journald "$UNIT" && local_notes="${local_notes} | also_logs_to=journald"
+    if [ -n "$PATHS" ] || unit_uses_journald "$UNIT"; then
+      register_service "$SAFE" "$PATHS" "$local_status" "${UNKNOWN_PORT:-}" "$local_notes" "${UNKNOWN_VERSION:-}"
+      LOG_FORMAT["$SAFE"]="unknown"
+    fi
+  fi
+done <<< "$RUNNING_UNITS"
+
+# ============================================
+# PHASE 1b — DOCKER CONTAINER DISCOVERY
+# ============================================
+section "Phase 1b: Docker container discovery"
+
+# ---- Helper: identify what service a container is running ----
+# Strategy: prefer Docker/Compose labels, then image name.
+# Avoid docker exec here: some minimal/distroless images don't include `ps`/`cat`,
+# and Docker error output can corrupt generated YAML if accidentally captured.
+identify_container_service() {
+  local CID=$1
+  local IMAGE=$2
+
+  # 1. Check image name (fastest, most reliable for known infrastructure images)
+  local IMG_BASE
+  IMG_BASE=$(echo "$IMAGE" | sed 's|.*/||' | cut -d: -f1 | tr '[:upper:]' '[:lower:]')
+  case "$IMG_BASE" in
+    nginx)                                 echo "nginx" ; return ;;
+    apache*|httpd)                         echo "apache" ; return ;;
+    mysql|mariadb)                         echo "mysql" ; return ;;
+    postgres*|postgresql*)                 echo "postgresql" ; return ;;
+    redis*)                                echo "redis" ; return ;;
+    mongo*)                                echo "mongodb" ; return ;;
+    rabbitmq*)                             echo "rabbitmq" ; return ;;
+    kafka*|confluentinc*)                  echo "kafka" ; return ;;
+    elasticsearch*|elastic*)               echo "elasticsearch" ; return ;;
+    clickhouse*)                           echo "clickhouse" ; return ;;
+    vault*)                                echo "vault" ; return ;;
+    consul*)                               echo "consul" ; return ;;
+    memcached*)                            echo "memcached" ; return ;;
+    traefik*)                              echo "traefik" ; return ;;
+    haproxy*)                              echo "haproxy" ; return ;;
+    caddy*)                                echo "caddy" ; return ;;
+    cassandra*)                            echo "cassandra" ; return ;;
+    node|node-*)                           echo "nodejs" ; return ;;
+    python*)                               echo "python" ; return ;;
+    ruby*|rails*)                          echo "ruby" ; return ;;
+    php*)                                  echo "php" ; return ;;
+    java*|openjdk*|eclipse-temurin*)       echo "java" ; return ;;
+  esac
+
+  # 2. Inspect configured command (helps for custom images, e.g. a client image that runs nginx)
+  local CMDLINE CMDLINE_LC
+  CMDLINE=$(docker inspect --format '{{.Path}} {{range .Args}}{{.}} {{end}}' "$CID" 2>/dev/null || true)
+  CMDLINE=$(trim_one_line "$CMDLINE")
+  CMDLINE_LC=$(echo "$CMDLINE" | tr '[:upper:]' '[:lower:]')
+  case "$CMDLINE_LC" in
+    *nginx*)    echo "nginx" ; return ;;
+    *httpd*|*apache*) echo "apache" ; return ;;
+    *postgres*) echo "postgresql" ; return ;;
+    *redis-server*|*redis*) echo "redis" ; return ;;
+    *mongod*)   echo "mongodb" ; return ;;
+    *mysqld*|*mariadbd*) echo "mysql" ; return ;;
+    *loki*)     echo "loki" ; return ;;
+    *tempo*)    echo "tempo" ; return ;;
+    *vmselect*) echo "vmselect" ; return ;;
+    *vminsert*) echo "vminsert" ; return ;;
+    *vmstorage*) echo "vmstorage" ; return ;;
+    *node*)     echo "nodejs" ; return ;;
+    *python*|*gunicorn*|*uvicorn*) echo "python" ; return ;;
+    *java*)     echo "java" ; return ;;
+    *ruby*)     echo "ruby" ; return ;;
+    *php*)      echo "php" ; return ;;
+  esac
+
+  # 3. docker-compose label (useful generic fallback, e.g. "obs-backend")
+  local COMPOSE_SVC
+  COMPOSE_SVC=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$CID" 2>/dev/null || true)
+  COMPOSE_SVC=$(trim_one_line "$COMPOSE_SVC")
+  if [ -n "$COMPOSE_SVC" ] && [ "$COMPOSE_SVC" != "<no value>" ]; then
+    printf '%s\n' "$COMPOSE_SVC"
+    return
+  fi
+
+  echo "unknown"
+}
+
+declare -A CONTAINER_ID_TO_NAME=()
+
+if [ -S /var/run/docker.sock ] && command -v docker &>/dev/null; then
+  CONTAINERS=$(docker ps --format $'{{.ID}}\t{{.Names}}\t{{.Image}}' 2>/dev/null || true)
+
+  while IFS=$'\t' read -r CID_SHORT CNAME CIMAGE; do
+    [ -z "$CID_SHORT" ] && continue
+
+    FULL_CID=$(docker inspect --format '{{.Id}}' "$CID_SHORT" 2>/dev/null || echo "")
+    if [ -z "$FULL_CID" ]; then
+      warn "  Could not resolve full ID for container ${CNAME} — skipping"
+      continue
+    fi
+    CID="$FULL_CID"
+
+    info "  Container: ${CNAME} (${CIMAGE})"
+    CONTAINER_ID_TO_NAME[$CID]="$CNAME"
+
+    # ---- Identify what service this container is running ----
+    CONTAINER_SERVICE=$(identify_container_service "$CID_SHORT" "$CIMAGE")
+    CONTAINER_SERVICE=$(trim_one_line "$CONTAINER_SERVICE")
+    info "    Detected service: ${CONTAINER_SERVICE}"
+
+    SAFE_CNAME=$(echo "${CNAME}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_' | sed 's/_$//')
+
+    # ----------------------------------------------------------------
+    # CONTAINER LOGS — priority order:
+    #   1. Bind-mounted volume log paths on the host (highest quality)
+    #   2. Real-time stdout/stderr via docker logs (fifo/pipe approach)
+    # ----------------------------------------------------------------
+
+    # -- Source 1: Check for bind-mounted log volumes (preferred) --
+    VOLUME_LOG_PATHS=$(docker inspect --format \
+      '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}:{{.Destination}}{{"\n"}}{{end}}{{end}}' \
+      "$CID" 2>/dev/null | while IFS=':' read -r SRC DST; do
+        [[ "$DST" == */log* ]] || [[ "$DST" == *.log ]] || \
+        [[ "$DST" == */logs* ]] || [[ "$DST" == */logging* ]] || continue
+        if [ -d "$SRC" ]; then
+          echo "${SRC}/*.log"
+        elif [ -f "$SRC" ]; then
+          echo "$SRC"
+        fi
+      done 2>/dev/null) || true
+
+    HAS_VOLUME_LOGS=false
+    if [ -n "$VOLUME_LOG_PATHS" ]; then
+      EXISTING_VOLUME_PATHS=$(echo "$VOLUME_LOG_PATHS" | filter_existing)
+      if [ -n "$EXISTING_VOLUME_PATHS" ]; then
+        HAS_VOLUME_LOGS=true
+        VOLUME_PATHS_YAML=$(echo "$EXISTING_VOLUME_PATHS" | while IFS= read -r P; do
+          [ -n "$P" ] && echo "      - $P"
+        done)
+        VOLUME_RECV="filelog/docker_volume_${SAFE_CNAME}"
+        FILELOG_RECEIVERS_YAML="${FILELOG_RECEIVERS_YAML}
+  ${VOLUME_RECV}:
     include:
-      - /var/lib/docker/containers/*/*.log
+${VOLUME_PATHS_YAML}
     include_file_path: true
     start_at: end
     operators:
       - type: json_parser
-        timestamp:
-          parse_from: attributes.time
-          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
-      - type: move
-        from: attributes.log
-        to: body
-      - type: move
-        from: attributes.stream
-        to: attributes[\"docker.stream\"]
+        on_error: send_quiet
+      - type: copy
+        from: attributes.s
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: copy
+        from: attributes.level
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: copy
+        from: attributes.severity
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: severity_parser
+        parse_from: body
+        on_error: send_quiet
     resource:
-      service.name: docker
-      job: docker"
-  FILELOG_IN_PIPELINE+=("filelog/docker")
-  log "Docker detected"
+      service.name: $(yaml_quote "$CNAME")
+      container.id: $(yaml_quote "$CID")
+      container.image: $(yaml_quote "$CIMAGE")
+      container.service: $(yaml_quote "$CONTAINER_SERVICE")
+      log.source: volume
+      job: docker
+"
+        FILELOG_PIPELINE+=("${VOLUME_RECV}")
+        log "    ${CNAME}: volume log receiver → ${VOLUME_RECV}"
+      fi
+    fi
+
+    # -- Source 2: Real-time stdout/stderr via docker logs --
+    # Set up for ALL containers regardless of volume logs.
+    # Containers with volume logs get both receivers (volume=structured file, stdout=app output).
+    # Containers without volume logs get stdout only.
+    FIFO_PATH="/var/lib/otelcol/docker-logs/${SAFE_CNAME}.log"
+    STDOUT_RECV="filelog/docker_stdout_${SAFE_CNAME}"
+
+    FILELOG_RECEIVERS_YAML="${FILELOG_RECEIVERS_YAML}
+  ${STDOUT_RECV}:
+    include:
+      - ${FIFO_PATH}
+    include_file_path: true
+    start_at: beginning
+    operators:
+      # Best-effort JSON parse for apps that log structured JSON (Loki, Tempo, etc.)
+      # on_error: send_quiet ensures plain-text apps pass through unchanged with body intact
+      - type: json_parser
+        on_error: send_quiet
+      - type: copy
+        from: attributes.level
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: copy
+        from: attributes.severity
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: copy
+        from: attributes.msg
+        to: body
+        on_error: send_quiet
+    resource:
+      service.name: $(yaml_quote "$CNAME")
+      container.id: $(yaml_quote "$CID")
+      container.image: $(yaml_quote "$CIMAGE")
+      container.service: $(yaml_quote "$CONTAINER_SERVICE")
+      log.source: stdout
+      job: docker
+"
+    FILELOG_PIPELINE+=("${STDOUT_RECV}")
+    log "    ${CNAME}: real-time stdout receiver → ${STDOUT_RECV}"
+
+    # -- Register service entry for report --
+    if $HAS_VOLUME_LOGS; then
+      ALL_SERVICES+=("docker_${SAFE_CNAME}")
+      LOG_PATHS["docker_${SAFE_CNAME}"]="${EXISTING_VOLUME_PATHS}"
+      SVC_PORT["docker_${SAFE_CNAME}"]=""
+      SVC_STATUS["docker_${SAFE_CNAME}"]="logs_found"
+      SVC_NOTES["docker_${SAFE_CNAME}"]="image=${CIMAGE} service=${CONTAINER_SERVICE} log_source=volume"
+    else
+      ALL_SERVICES+=("docker_${SAFE_CNAME}")
+      LOG_PATHS["docker_${SAFE_CNAME}"]="${FIFO_PATH}"
+      SVC_PORT["docker_${SAFE_CNAME}"]=""
+      SVC_STATUS["docker_${SAFE_CNAME}"]="logs_found"
+      SVC_NOTES["docker_${SAFE_CNAME}"]="image=${CIMAGE} service=${CONTAINER_SERVICE} log_source=stdout"
+    fi
+
+  done <<< "$CONTAINERS"
+
+  # ---- Docker log tailer service ----
+  # Creates a persistent background script per container that tails
+  # docker logs --follow and writes to named files under /var/lib/otelcol/docker-logs/
+  mkdir -p /var/lib/otelcol/docker-logs
+
+  cat > /usr/local/bin/agent-docker-log-tailer <<'DOCKERTAILER'
+#!/bin/bash
+# agent-docker-log-tailer — tail stdout/stderr of ALL running containers
+# Writes plain-text output to /var/lib/otelcol/docker-logs/<n>.log
+# Uses per-container state files to resume from last position on restart,
+# preventing log replay on service restarts.
+
+LOG_DIR="/var/lib/otelcol/docker-logs"
+STATE_DIR="/var/lib/otelcol/docker-log-state"
+mkdir -p "$LOG_DIR" "$STATE_DIR"
+declare -A TAIL_PIDS=()
+
+start_tailer() {
+  local CID_SHORT=$1
+  local CNAME=$2
+  local SAFE
+  SAFE=$(echo "$CNAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_' | sed 's/_$//')
+  local OUT="${LOG_DIR}/${SAFE}.log"
+  local STATE_FILE="${STATE_DIR}/${SAFE}.since"
+
+  # Already tailing this container and process still alive? Skip.
+  if [ -n "${TAIL_PIDS[$CID_SHORT]:-}" ] && kill -0 "${TAIL_PIDS[$CID_SHORT]}" 2>/dev/null; then
+    return
+  fi
+
+  # Build --since arg: resume from last saved timestamp to avoid replaying all logs
+  local SINCE_ARG=""
+  if [ -f "$STATE_FILE" ]; then
+    local LAST_TS
+    LAST_TS=$(cat "$STATE_FILE" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$LAST_TS" ] && SINCE_ARG="--since=${LAST_TS}"
+  fi
+
+  # Tail plain text — NO --timestamps flag; lines are raw app output, not JSON envelopes.
+  # Update state file every 50 lines for cheap resume-point tracking.
+  (
+    LINE_COUNT=0
+    docker logs --follow $SINCE_ARG "$CID_SHORT" 2>&1 | \
+    while IFS= read -r LINE; do
+      printf '%s\n' "$LINE" >> "$OUT"
+      LINE_COUNT=$((LINE_COUNT + 1))
+      if [ $((LINE_COUNT % 50)) -eq 0 ]; then
+        printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATE_FILE}.tmp" && \
+          mv "${STATE_FILE}.tmp" "$STATE_FILE" 2>/dev/null || true
+        LINE_COUNT=0
+      fi
+    done
+    # Save final timestamp when docker logs exits (container stopped)
+    printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${STATE_FILE}.tmp" && \
+      mv "${STATE_FILE}.tmp" "$STATE_FILE" 2>/dev/null || true
+  ) &
+  TAIL_PIDS[$CID_SHORT]=$!
+  logger -t agent-docker-log-tailer "Started tailer for ${CNAME} (${CID_SHORT}) -> ${OUT}${SINCE_ARG:+ (resuming from $SINCE_ARG)}"
+}
+
+stop_tailer() {
+  local CID_SHORT=$1
+  if [ -n "${TAIL_PIDS[$CID_SHORT]:-}" ]; then
+    kill "${TAIL_PIDS[$CID_SHORT]}" 2>/dev/null || true
+    unset TAIL_PIDS[$CID_SHORT]
+  fi
+}
+
+# Initial start for all currently running containers
+while IFS=$'\t' read -r CID CNAME _REST; do
+  [ -z "$CID" ] && continue
+  start_tailer "$CID" "$CNAME"
+done < <(docker ps --format $'{{.ID}}\t{{.Names}}\t{{.Image}}' 2>/dev/null || true)
+
+# Watch docker events for container lifecycle changes
+docker events --filter "event=start" --filter "event=die" --filter "event=stop" \
+  --format '{{.Action}} {{.Actor.ID}} {{index .Actor.Attributes "name"}}' 2>/dev/null \
+  | while read -r ACTION CID CNAME; do
+    case "$ACTION" in
+      start)    start_tailer "$CID" "$CNAME" ;;
+      die|stop) stop_tailer  "$CID" ;;
+    esac
+  done
+DOCKERTAILER
+  chmod +x /usr/local/bin/agent-docker-log-tailer
+
+  cat > /etc/systemd/system/agent-docker-log-tailer.service <<'DOCKERTAILERSVC'
+[Unit]
+Description=Observability Agent — Docker real-time log tailer
+After=docker.service otelcol.service
+Requires=docker.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agent-docker-log-tailer
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-docker-log-tailer
+[Install]
+WantedBy=multi-user.target
+DOCKERTAILERSVC
+
+  systemctl daemon-reload
+  systemctl enable agent-docker-log-tailer
+  if systemctl start agent-docker-log-tailer && sleep 2 && systemctl is-active --quiet agent-docker-log-tailer; then
+    log "  Docker real-time log tailer started"
+  else
+    warn "  Docker log tailer failed to start"
+    MANUAL_STEPS+=("Docker log tailer: systemctl start agent-docker-log-tailer")
+  fi
+
+else
+  info "Docker not available — skipping container discovery"
 fi
 
-# ---- Build pipeline receiver list ----
-PIPELINE_RECEIVERS="journald"
-if [ ${#FILELOG_IN_PIPELINE[@]} -gt 0 ]; then
-  for r in "${FILELOG_IN_PIPELINE[@]}"; do
-    PIPELINE_RECEIVERS="${PIPELINE_RECEIVERS}, ${r}"
+# ============================================
+# DOCKER CONTAINER METRICS
+# ============================================
+# Per-container metrics: cpu, mem, net, block I/O, pids
+# Collected every 30s via docker stats; served as Prometheus text via file server
+# ============================================
+
+if [ -S /var/run/docker.sock ] && command -v docker &>/dev/null; then
+  cat > /usr/local/bin/agent-docker-metrics <<'DOCKERMETRICS'
+#!/bin/bash
+# agent-docker-metrics — collect docker stats every 30s
+
+OUT_DIR="/var/lib/otelcol"
+OUT_FILE="${OUT_DIR}/docker-metrics.prom"
+TMP_FILE="${OUT_FILE}.tmp"
+mkdir -p "$OUT_DIR"
+
+TIMESTAMP=$(date +%s%3N)
+
+parse_bytes() {
+  local RAW="$1"
+  local NUM UNIT
+  NUM=$(echo "$RAW" | grep -oP '[\d.]+' | head -1)
+  UNIT=$(echo "$RAW" | grep -oP '[kKmMgGtT]i?[bB]' | head -1)
+  case "${UNIT,,}" in
+    kib|kb) awk -v n="$NUM" 'BEGIN{printf "%.0f", n*1024}' ;;
+    mib|mb) awk -v n="$NUM" 'BEGIN{printf "%.0f", n*1024*1024}' ;;
+    gib|gb) awk -v n="$NUM" 'BEGIN{printf "%.0f", n*1024*1024*1024}' ;;
+    tib|tb) awk -v n="$NUM" 'BEGIN{printf "%.0f", n*1024*1024*1024*1024}' ;;
+    *)      awk -v n="$NUM" 'BEGIN{printf "%.0f", n}' ;;
+  esac
+}
+
+{
+  echo "# Metrics naming: container_<container_name>_<metric>"
+
+  docker stats --no-stream --format \
+    '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}|{{.PIDs}}' \
+    2>/dev/null | while IFS='|' read -r NAME CPU MEM_USAGE MEM_PERC NET_IO BLOCK_IO PIDS; do
+    [ -z "$NAME" ] && continue
+
+    SAFE=$(echo "$NAME" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_' '_' | sed 's/__*/_/g;s/^_//;s/_$//')
+    [ -z "$SAFE" ] && continue
+
+    CPU_VAL=$(echo "$CPU"          | tr -d '%' | tr -d ' ')
+    MEM_PERC_VAL=$(echo "$MEM_PERC" | tr -d '%' | tr -d ' ')
+
+    MEM_PARTS=$(echo "$MEM_USAGE" | tr '/' '\n')
+    MEM_USED_BYTES=$(parse_bytes "$(echo "$MEM_PARTS" | head -1 | tr -d ' ')")
+    MEM_LIMIT_BYTES=$(parse_bytes "$(echo "$MEM_PARTS" | tail -1 | tr -d ' ')")
+
+    NET_PARTS=$(echo "$NET_IO" | tr '/' '\n')
+    NET_RX_BYTES=$(parse_bytes "$(echo "$NET_PARTS" | head -1 | tr -d ' ')")
+    NET_TX_BYTES=$(parse_bytes "$(echo "$NET_PARTS" | tail -1 | tr -d ' ')")
+
+    BLOCK_PARTS=$(echo "$BLOCK_IO" | tr '/' '\n')
+    BLOCK_R_BYTES=$(parse_bytes "$(echo "$BLOCK_PARTS" | head -1 | tr -d ' ')")
+    BLOCK_W_BYTES=$(parse_bytes "$(echo "$BLOCK_PARTS" | tail -1 | tr -d ' ')")
+
+    PIDS_VAL=$(echo "$PIDS" | tr -d ' ')
+
+    echo "# HELP container_${SAFE}_cpu_percent CPU usage percent"
+    echo "# TYPE container_${SAFE}_cpu_percent gauge"
+    echo "container_${SAFE}_cpu_percent ${CPU_VAL:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_mem_usage_bytes Memory usage in bytes"
+    echo "# TYPE container_${SAFE}_mem_usage_bytes gauge"
+    echo "container_${SAFE}_mem_usage_bytes ${MEM_USED_BYTES:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_mem_limit_bytes Memory limit in bytes"
+    echo "# TYPE container_${SAFE}_mem_limit_bytes gauge"
+    echo "container_${SAFE}_mem_limit_bytes ${MEM_LIMIT_BYTES:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_mem_percent Memory usage percent"
+    echo "# TYPE container_${SAFE}_mem_percent gauge"
+    echo "container_${SAFE}_mem_percent ${MEM_PERC_VAL:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_net_rx_bytes Network bytes received"
+    echo "# TYPE container_${SAFE}_net_rx_bytes counter"
+    echo "container_${SAFE}_net_rx_bytes ${NET_RX_BYTES:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_net_tx_bytes Network bytes transmitted"
+    echo "# TYPE container_${SAFE}_net_tx_bytes counter"
+    echo "container_${SAFE}_net_tx_bytes ${NET_TX_BYTES:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_block_read_bytes Block I/O read bytes"
+    echo "# TYPE container_${SAFE}_block_read_bytes counter"
+    echo "container_${SAFE}_block_read_bytes ${BLOCK_R_BYTES:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_block_write_bytes Block I/O write bytes"
+    echo "# TYPE container_${SAFE}_block_write_bytes counter"
+    echo "container_${SAFE}_block_write_bytes ${BLOCK_W_BYTES:-0} ${TIMESTAMP}"
+
+    echo "# HELP container_${SAFE}_pids Process count"
+    echo "# TYPE container_${SAFE}_pids gauge"
+    echo "container_${SAFE}_pids ${PIDS_VAL:-0} ${TIMESTAMP}"
+
   done
+} > "$TMP_FILE" 2>/dev/null && mv "$TMP_FILE" "$OUT_FILE" || true
+DOCKERMETRICS
+  chmod +x /usr/local/bin/agent-docker-metrics
+
+  cat > /etc/systemd/system/agent-docker-metrics.service <<'DOCKERMETRICSVC'
+[Unit]
+Description=Observability Agent — Docker container metrics collector
+After=docker.service otelcol.service
+Requires=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/agent-docker-metrics
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-docker-metrics
+DOCKERMETRICSVC
+
+  cat > /etc/systemd/system/agent-docker-metrics.timer <<'DOCKERMETRICTIMER'
+[Unit]
+Description=Run docker container metrics collector every 30 seconds
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=30s
+AccuracySec=5s
+[Install]
+WantedBy=timers.target
+DOCKERMETRICTIMER
+
+  systemctl daemon-reload
+  systemctl enable agent-docker-metrics.timer
+  if systemctl start agent-docker-metrics.timer && systemctl start agent-docker-metrics; then
+    log "  Docker container metrics collector started (timer: every 30s)"
+    DOCKER_METRICS_OK=true
+
+    if command -v python3 &>/dev/null; then
+      cat > /usr/local/bin/agent-prom-file-server <<'PROMSERVER'
+#!/usr/bin/env python3
+"""Serve Prometheus text files from /var/lib/otelcol/ on port 19101."""
+import http.server, os, socketserver
+
+PORT = 19101
+PROM_DIR = "/var/lib/otelcol"
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args): pass
+    def do_GET(self):
+        files = {
+            "/docker":  "docker-metrics.prom",
+            "/metrics": None,
+        }
+        if self.path not in files:
+            self.send_response(404); self.end_headers(); return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4")
+        self.end_headers()
+        if files[self.path] is None:
+            fpath = os.path.join(PROM_DIR, "docker-metrics.prom")
+            if os.path.exists(fpath):
+                with open(fpath, "rb") as f:
+                    self.wfile.write(f.read())
+        else:
+            fpath = os.path.join(PROM_DIR, files[self.path])
+            if os.path.exists(fpath):
+                with open(fpath, "rb") as f:
+                    self.wfile.write(f.read())
+
+with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
+    httpd.serve_forever()
+PROMSERVER
+      chmod +x /usr/local/bin/agent-prom-file-server
+
+      cat > /etc/systemd/system/agent-prom-file-server.service <<'PROMSERVERSVC'
+[Unit]
+Description=Observability Agent — Prometheus metrics file server (port 19101)
+After=network.target
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/agent-prom-file-server
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-prom-file-server
+[Install]
+WantedBy=multi-user.target
+PROMSERVERSVC
+
+      systemctl daemon-reload
+      systemctl enable agent-prom-file-server
+      if systemctl start agent-prom-file-server && sleep 1 && systemctl is-active --quiet agent-prom-file-server; then
+        log "  Prometheus file server started on 127.0.0.1:19101"
+        METRIC_PIPELINE+=("prometheus/docker_containers")
+      else
+        warn "  Prometheus file server failed to start"
+        MANUAL_STEPS+=("Start the metrics file server: systemctl start agent-prom-file-server")
+      fi
+    else
+      warn "  python3 not found — cannot start Prometheus file server"
+      if ask "  Install python3 to enable container metrics scraping?"; then
+        apt-get install -y python3 2>/dev/null || yum install -y python3 2>/dev/null || true
+        command -v python3 &>/dev/null && {
+          fixed "  python3 installed"
+          systemctl start agent-prom-file-server 2>/dev/null && \
+            METRIC_PIPELINE+=("prometheus/docker_containers") || true
+        }
+      fi
+    fi
+  else
+    warn "  Docker metrics collector failed to start"
+    MANUAL_STEPS+=("Docker container metrics: systemctl start agent-docker-metrics.timer")
+  fi
+else
+  info "  Docker not available — skipping container metrics collector"
 fi
+
+# ============================================
+# PHASE 2 — INTERACTIVE FIX LOOP (log paths only)
+# ============================================
+section "Phase 2: Fixing discovered issues"
+
+# ---- 2a: PostgreSQL logging_collector ----
+for SVC in "${ALL_SERVICES[@]}"; do
+  [[ "$SVC" == postgresql* ]] || continue
+  PORT="${SVC_PORT[$SVC]:-5432}"
+  COLLECTOR=$(sudo -u postgres psql -p "$PORT" -tAc "SHOW logging_collector;" 2>/dev/null \
+    | tr -d ' ') || true
+  if [ "$COLLECTOR" = "off" ]; then
+    warn "  PostgreSQL (port ${PORT}): logging_collector is OFF — logs going to journald only"
+    if ask "  Enable logging_collector for PostgreSQL on port ${PORT}?"; then
+      sudo -u postgres psql -p "$PORT" -c "ALTER SYSTEM SET logging_collector = on;" 2>/dev/null
+      sudo -u postgres psql -p "$PORT" -c "ALTER SYSTEM SET log_directory = 'log';" 2>/dev/null
+      sudo -u postgres psql -p "$PORT" -c "ALTER SYSTEM SET log_filename = 'postgresql-%Y-%m-%d.log';" 2>/dev/null
+      sudo -u postgres psql -p "$PORT" -c "ALTER SYSTEM SET log_min_messages = 'info';" 2>/dev/null
+      PG_UNIT=$(systemctl list-units --type=service --state=running --no-legend --plain \
+        | grep "postgresql" | awk '{print $1}' | while read U; do
+          UP=$(systemctl show -p MainPID "$U" 2>/dev/null | cut -d= -f2)
+          ACTUAL_PORT=$(ss -tlnp | grep "pid=${UP}," | grep -oP '(?<=:)\d+(?=\s)' | head -1)
+          [ "$ACTUAL_PORT" = "$PORT" ] && echo "$U" && break
+        done)
+      [ -n "$PG_UNIT" ] && sudo systemctl restart "$PG_UNIT" && \
+        fixed "  PostgreSQL ${PORT}: logging_collector enabled"
+      DATA_DIR=$(sudo -u postgres psql -p "$PORT" -tAc "SHOW data_directory;" 2>/dev/null | tr -d ' ') || true
+      [ -n "$DATA_DIR" ] && LOG_PATHS[$SVC]="${DATA_DIR}/log/*.log"
+      SVC_NOTES[$SVC]="${SVC_NOTES[$SVC]/logging_collector=off/logging_collector=on}"
+    else
+      skipped "  PostgreSQL ${PORT}: logging_collector stays off"
+      SVC_NOTES[$SVC]="${SVC_NOTES[$SVC]:-} | logs_via=journald"
+    fi
+  fi
+done
+
+# ---- 2b: Redis log file ----
+if [ "${PROCESSED_CANONICALS[redis]+_}" ] && [ -z "${LOG_PATHS[redis]:-}" ]; then
+  warn "  redis: no log file configured"
+  if ask "  Configure redis log file at /var/log/redis/redis-server.log?"; then
+    mkdir -p /var/log/redis
+    chown redis:adm /var/log/redis 2>/dev/null || chown redis:redis /var/log/redis 2>/dev/null || true
+    for RCONF in /etc/redis/redis.conf /etc/redis.conf; do
+      if [ -f "$RCONF" ]; then
+        backup_file "$RCONF"
+        sed -i 's|^logfile .*|logfile /var/log/redis/redis-server.log|' "$RCONF"
+        systemctl restart redis-server 2>/dev/null || systemctl restart redis 2>/dev/null || true
+        sleep 1
+        [ -f /var/log/redis/redis-server.log ] && {
+          LOG_PATHS["redis"]="/var/log/redis/redis-server.log"
+          fixed "  redis log file configured"
+        }
+        break
+      fi
+    done
+  else
+    skipped "  redis log file not configured"
+  fi
+fi
+
+# ============================================
+# PHASE 3 — BUILD OTELCOL CONFIG
+# ============================================
+section "Phase 3: Generating otelcol configuration"
+
+AUTH_B64=$(echo -n "${API_KEY}:${API_KEY}" | base64 -w 0)
+
+# ---- Non-docker services: report-only, no log collection ----
+# System services (nginx, apache, postgresql, etc.) are discovered and reported
+# but NOT collected — only container logs and system logs are ingested.
+# The discovery loop below is intentionally skipped for non-docker services.
+for SVC in "${ALL_SERVICES[@]}"; do
+  [[ "$SVC" == docker_* ]] && continue
+  # Report only — no filelog receiver generated
+  continue
+
+  # (dead code kept as reference for future per-service collection)
+  PATHS="${LOG_PATHS[$SVC]:-}"
+  [ -z "$PATHS" ] && continue
+
+  M_TYPE_VAL="${SVC_STATUS[$SVC]:-}"
+
+  PATHS_YAML=$(echo "$PATHS" | while IFS= read -r P; do [ -n "$P" ] && echo "      - $P"; done)
+  [ -z "$PATHS_YAML" ] && continue
+
+  FMT="${LOG_FORMAT[$SVC]:-unknown}"
+  RECV_TMP=$(mktemp /tmp/otelcol_recv_XXXXXX)
+
+  case "$FMT" in
+    nginx_combined|apache_combined)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^(?P<client_ip>[:\w.]+(?:::ffff:[\d.]+)?)\s+\S+\s+\S+\s+\[(?P<log_day>\d{2})/\w+/(?P<log_year>\d{4}):(?P<log_hour>\d{2}):\d{2}:\d{2}\s[^\]]+\]\s+"(?P<http_method>[A-Z]+)\s+(?P<request_path>[^\s?]+)(?:[^\s]*)\s+HTTP/[^"]+"\s+(?P<http_status>\d{3})\s+(?P<response_bytes>\d+|-)(?:\s+"(?P<http_referer>[^"]*)"\s+"(?P<user_agent>[^"]*)")?(?:.*?rt=(?P<request_time_s>[\d.]+))?'
+        on_error: send_quiet
+      - type: add
+        field: attributes.log_format
+        value: combined
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: ${FMT}
+RECV
+      ;;
+    json)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: json_parser
+        on_error: send_quiet
+      - type: copy
+        from: attributes.s
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: copy
+        from: attributes.level
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: move
+        from: attributes.msg
+        to: body
+        on_error: send_quiet
+      - type: add
+        field: attributes.log_format
+        value: json
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: json
+RECV
+      ;;
+    pg_csv)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\[]*\[\d+\]\s*(?:(?P<pg_user>\S+)@(?P<pg_database>\S+))?\s+(?P<log_level>LOG|ERROR|FATAL|PANIC|WARNING|NOTICE|INFO|DETAIL|HINT|DEBUG\d*):\s+(?P<pg_message>.{0,600})'
+        on_error: send_quiet
+      - type: regex_parser
+        parse_from: attributes.pg_message
+        regex: '^duration:\s+(?P<duration_ms>[\d.]+)\s+ms'
+        on_error: send_quiet
+      - type: add
+        field: attributes.log_format
+        value: pg_csv
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: pg_csv
+RECV
+      ;;
+    redis_log)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\d+:[A-Z]\s+\d+\s+\w+\s+\d{4}\s+[\d:.]+\s+(?P<redis_level_sym>[*#\-.])\s+(?P<redis_message>.+)'
+        on_error: send_quiet
+      - type: add
+        field: attributes.log_format
+        value: redis_log
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: redis_log
+RECV
+      ;;
+    mysql_log)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.\dZ+:\-]*\s+\d+\s+\[(?P<log_level>System|Warning|ERROR|Note)\](?:\s+\[(?P<mysql_error_code>MY-\d+)\])?\s+\[(?P<mysql_subsystem>\w+)\]\s+(?P<mysql_message>.{0,400})'
+        on_error: send_quiet
+      - type: add
+        field: attributes.log_format
+        value: mysql_log
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: mysql_log
+RECV
+      ;;
+    phpfpm_log)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\[[\d\- :]+\]\s+(?:(?P<fpm_pool>pool \S+):\s+(?P<fpm_message>.{0,300})|(?P<log_level>WARNING|ERROR|NOTICE|ALERT):\s+(?P<fpm_message_plain>.{0,300}))'
+        on_error: send_quiet
+      - type: add
+        field: attributes.log_format
+        value: phpfpm_log
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: phpfpm_log
+RECV
+      ;;
+    syslog)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\w+\s+\d+\s+[\d:]+\s+\S+\s+(?P<syslog_process>[^\[:]+)(?:\[(?P<syslog_pid>\d+)\])?:\s+(?P<syslog_message>.+)'
+        on_error: send_quiet
+      - type: severity_parser
+        parse_from: body
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: syslog
+RECV
+      ;;
+    unknown|*)
+      cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}:
+    include:
+${PATHS_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: json_parser
+        on_error: send_quiet
+      - type: copy
+        from: attributes.level
+        to: attributes.log_level
+        on_error: send_quiet
+      - type: severity_parser
+        parse_from: body
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: unknown
+RECV
+      ;;
+  esac
+
+  FILELOG_RECEIVERS_YAML="${FILELOG_RECEIVERS_YAML}$(cat "$RECV_TMP")"$'\n'
+  rm -f "$RECV_TMP"
+  FILELOG_PIPELINE+=("filelog/${SVC}")
+done
+
+# Add syslog fallback log receiver
+SYSLOG_YAML=""
+[ -f /var/log/syslog ]   && SYSLOG_YAML="      - /var/log/syslog"
+[ -f /var/log/messages ] && SYSLOG_YAML="${SYSLOG_YAML}"$'\n'"      - /var/log/messages"
+if [ -n "$SYSLOG_YAML" ]; then
+  FILELOG_RECEIVERS_YAML="${FILELOG_RECEIVERS_YAML}
+  filelog/syslog:
+    include:
+${SYSLOG_YAML}
+    include_file_path: true
+    start_at: end
+    resource:
+      service.name: system
+      job: syslog
+"
+  FILELOG_PIPELINE+=("filelog/syslog")
+fi
+
+# ---- Docker container metrics receiver (if file server is up) ----
+DOCKER_STATS_YAML=""
+if [ "${DOCKER_METRICS_OK:-false}" = "true" ]; then
+  DOCKER_STATS_YAML="
+  prometheus/docker_containers:
+    config:
+      scrape_configs:
+        - job_name: docker_container_stats
+          static_configs:
+            - targets: ['localhost:19101']
+          metrics_path: /docker
+          scrape_interval: 35s
+"
+fi
+
+# ---- Assemble pipeline receiver lists ----
+METRIC_PIPELINE+=("statsd")
+dedupe_array METRIC_PIPELINE
+dedupe_array FILELOG_PIPELINE
+
+METRIC_RECEIVERS_STR=$(printf '%s, ' "${METRIC_PIPELINE[@]}" | sed 's/, $//')
+
+LOG_RECEIVERS_LIST="journald"
+for R in "${FILELOG_PIPELINE[@]}"; do
+  LOG_RECEIVERS_LIST="${LOG_RECEIVERS_LIST}, ${R}"
+done
 
 # ============================================
 # WRITE CONFIG FILE
 # ============================================
-section "Generating agent configuration"
-
-AUTH_B64=$(echo -n "${API_KEY}:${API_KEY}" | base64 -w 0)
 mkdir -p "$CONFIG_DIR"
 
 cat > "$CONFIG_DIR/config.yaml" <<YAML
 # ============================================
-# OTEL COLLECTOR - Auto-generated by installer
+# OTEL COLLECTOR — Auto-generated by installer
 # Agent Version : ${AGENT_VERSION}
 # Tenant        : ${API_KEY:0:8}...
 # Host          : ${HOSTNAME_FQDN}
 # Machine ID    : ${MACHINE_ID:0:8}...
 # Generated     : $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # ============================================
+# METRIC NAMING CONVENTION
+# ============================================
+# System    : system_cpu_*, system_memory_*, system_disk_*, system_network_*
+# Containers: container_<n>_cpu_percent, container_<n>_mem_usage_bytes,
+#             container_<n>_mem_limit_bytes, container_<n>_mem_percent,
+#             container_<n>_net_rx_bytes, container_<n>_net_tx_bytes,
+#             container_<n>_block_read_bytes, container_<n>_block_write_bytes,
+#             container_<n>_pids
+# Custom    : any StatsD metric sent to localhost:8125
+# ============================================
 
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
 
-# ============================================
-# RECEIVERS
-# ============================================
 receivers:
 
-  # Host metrics — CPU, memory, disk, network, processes
   hostmetrics:
     collection_interval: 30s
     scrapers:
       cpu:
         metrics:
+          system.cpu.time:
+            enabled: true
           system.cpu.utilization:
+            enabled: true
+          system.cpu.logical.count:
+            enabled: true
+          system.cpu.frequency:
             enabled: true
       memory:
         metrics:
+          system.memory.usage:
+            enabled: true
           system.memory.utilization:
             enabled: true
-      disk: {}
+      paging:
+        metrics:
+          system.paging.usage:
+            enabled: true
+          system.paging.operations:
+            enabled: true
+          system.paging.faults:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.operation_time:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+          system.disk.pending_operations:
+            enabled: true
+          system.disk.weighted_io_time:
+            enabled: true
       filesystem:
         metrics:
+          system.filesystem.usage:
+            enabled: true
           system.filesystem.utilization:
             enabled: true
-      network: {}
-      load: {}
-      processes: {}
+          system.filesystem.inodes.usage:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.packets:
+            enabled: true
+          system.network.errors:
+            enabled: true
+          system.network.dropped:
+            enabled: true
+          system.network.connections:
+            enabled: true
+          system.network.conntrack.count:
+            enabled: true
+          system.network.conntrack.max:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+      processes:
+        metrics:
+          system.processes.count:
+            enabled: true
+          system.processes.created:
+            enabled: true
       process:
         mute_process_name_error: true
-        mute_process_exe_error: true
-        mute_process_io_error: true
+        metrics:
+          process.cpu.time:
+            enabled: true
+          process.memory.usage:
+            enabled: true
+          process.memory.virtual:
+            enabled: true
+          process.disk.io:
+            enabled: true
+          process.threads:
+            enabled: true
+          process.open_file_descriptors:
+            enabled: true
+          process.context_switches:
+            enabled: true
 
-  # Systemd journal logs
   journald:
     start_at: end
     resource:
       service.name: journald
       job: journald
 
-  # OTLP — receives traces from instrumented apps
-  # Apps on this host     → localhost:4317 or localhost:4318
-  # Apps inside Docker    → host.docker.internal:4317
-  # Apps on other servers → this_machine_ip:4317
   otlp:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
-${FILELOG_RECEIVERS}
 
-# ============================================
-# PROCESSORS
-# ============================================
+  statsd:
+    endpoint: 0.0.0.0:8125
+    aggregation_interval: 30s
+    enable_metric_type: true
+
+${DOCKER_STATS_YAML}
+${FILELOG_RECEIVERS_YAML}
+
 processors:
 
   batch:
@@ -352,12 +1901,16 @@ processors:
     timeout: 5s
     override: false
 
-# ============================================
-# EXPORTERS
-# ============================================
+  filter/drop_scrape_meta:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name == "up"'
+        - 'name == "target_info"'
+        - 'IsMatch(name, "^scrape_")'
+
 exporters:
 
-  # Metrics → backend proxy → vminsert (backend will inject tenant/DB ID)
   prometheusremotewrite:
     endpoint: "${METRICS_ENDPOINT}"
     tls:
@@ -365,7 +1918,6 @@ exporters:
     headers:
       Authorization: "Basic ${AUTH_B64}"
 
-  # Logs → backend proxy → Loki (backend will inject tenant UUID)
   otlphttp/logs:
     endpoint: "${LOGS_ENDPOINT}"
     tls:
@@ -373,7 +1925,6 @@ exporters:
     headers:
       Authorization: "Basic ${AUTH_B64}"
 
-  # Traces → backend proxy → Tempo (backend will inject tenant UUID)
   otlphttp/traces:
     endpoint: "${TRACES_ENDPOINT}"
     tls:
@@ -381,25 +1932,20 @@ exporters:
     headers:
       Authorization: "Basic ${AUTH_B64}"
 
-# ============================================
-# PIPELINES
-# ============================================
 service:
   extensions: [health_check]
   pipelines:
 
     metrics:
-      receivers: [hostmetrics]
-      processors: [resourcedetection, resource, batch]
+      receivers: [${METRIC_RECEIVERS_STR}]
+      processors: [resourcedetection, resource, filter/drop_scrape_meta, batch]
       exporters: [prometheusremotewrite]
 
     logs:
-      receivers: [${PIPELINE_RECEIVERS}]
+      receivers: [${LOG_RECEIVERS_LIST}]
       processors: [resourcedetection, resource, batch]
       exporters: [otlphttp/logs]
 
-    # Traces from instrumented apps (Node.js, Python, Go, etc.)
-    # Note: only batch processor — apps set their own service.name and tenant.id
     traces:
       receivers: [otlp]
       processors: [batch]
@@ -412,15 +1958,29 @@ service:
       level: none
 YAML
 
-# Config contains API key — root only
 chown root:root "$CONFIG_DIR/config.yaml"
 chmod 600 "$CONFIG_DIR/config.yaml"
-log "Config written to $CONFIG_DIR/config.yaml (permissions: 600, owner: root)"
+log "Config written to $CONFIG_DIR/config.yaml"
 
 # ============================================
-# SYSTEMD SERVICE — runs as root
+# PHASE 4 — DOWNLOAD & INSTALL OTELCOL
 # ============================================
-section "Installing systemd service"
+section "Phase 4: Installing OpenTelemetry Collector v${OTEL_VERSION}"
+
+DOWNLOAD_URL="https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/otelcol-contrib_${OTEL_VERSION}_linux_${ARCH_NAME}.tar.gz"
+
+cd /tmp
+curl -sSL -o otelcol.tar.gz "$DOWNLOAD_URL" || error "Failed to download collector"
+tar -xzf otelcol.tar.gz otelcol-contrib
+mv otelcol-contrib "$INSTALL_DIR/otelcol"
+chmod +x "$INSTALL_DIR/otelcol"
+rm -f otelcol.tar.gz
+log "Collector installed at $INSTALL_DIR/otelcol"
+
+if ! "$INSTALL_DIR/otelcol" validate --config "file:${CONFIG_DIR}/config.yaml" >/dev/null 2>&1; then
+  "$INSTALL_DIR/otelcol" validate --config "file:${CONFIG_DIR}/config.yaml" || true
+  error "Generated otelcol config is invalid — fix ${CONFIG_DIR}/config.yaml then: systemctl restart otelcol"
+fi
 
 cat > /etc/systemd/system/otelcol.service <<EOF
 [Unit]
@@ -433,7 +1993,7 @@ Wants=network.target
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/local/bin/otelcol --config /etc/otelcol/config.yaml
+ExecStart=/usr/local/bin/otelcol --config=file:/etc/otelcol/config.yaml
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -449,47 +2009,358 @@ EOF
 systemctl daemon-reload
 systemctl enable otelcol
 systemctl restart otelcol
-
 sleep 3
 if systemctl is-active --quiet otelcol; then
-  log "Service started successfully"
+  log "otelcol service started"
 else
-  error "Service failed to start. Run: journalctl -u otelcol -n 50"
+  error "otelcol failed to start — run: journalctl -u otelcol -n 50"
 fi
 
 # ============================================
-# SUMMARY
+# PHASE 5 — DOCKER EVENT WATCHER
 # ============================================
-echo ""
-echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}  Agent installed successfully!${NC}"
-echo -e "${GREEN}============================================${NC}"
-echo ""
-echo "  Agent version : $AGENT_VERSION"
-echo "  Collector     : otelcol-contrib v$OTEL_VERSION"
-echo "  Host          : $HOSTNAME_FQDN"
-echo "  Machine ID    : ${MACHINE_ID:0:8}..."
-echo "  Tenant        : ${API_KEY:0:8}..."
-echo "  Platform      : $PLATFORM_HOST"
-echo ""
-echo "  Collecting:"
-echo "    ✓ Host metrics (CPU, memory, disk, network, processes)"
-echo "    ✓ System logs (journald)"
-for r in "${FILELOG_IN_PIPELINE[@]}"; do
-  NAME=$(echo "$r" | sed 's/filelog\///')
-  echo "    ✓ ${NAME} logs"
+section "Phase 5: Docker event watcher"
+
+if [ -S /var/run/docker.sock ] && command -v docker &>/dev/null; then
+  cat > /usr/local/bin/agent-docker-update <<'DOCKERUPDATE'
+#!/bin/bash
+# Updates container name mapping and signals otelcol to reload
+MAP_FILE="/etc/otelcol/docker-names.map"
+LOCK_FILE="/tmp/agent-docker-update.lock"
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+docker ps --format '{{.ID}}={{.Names}}' > "${MAP_FILE}.tmp" 2>/dev/null && mv "${MAP_FILE}.tmp" "$MAP_FILE"
+pkill -HUP -x otelcol 2>/dev/null || true
+logger -t agent-docker-update "Container map updated: $(wc -l < $MAP_FILE) containers"
+DOCKERUPDATE
+  chmod +x /usr/local/bin/agent-docker-update
+
+  cat > /etc/systemd/system/agent-docker-watcher.service <<'DOCKERSVC'
+[Unit]
+Description=Observability Agent — Docker Event Watcher
+After=docker.service otelcol.service
+Requires=docker.service
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'docker events --filter "event=start" --filter "event=die" --filter "event=rename" --format "{{.Type}} {{.Action}} {{.Actor.ID}}" | while read -r LINE; do /usr/local/bin/agent-docker-update; done'
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-docker-watcher
+[Install]
+WantedBy=multi-user.target
+DOCKERSVC
+
+  systemctl daemon-reload
+  systemctl enable agent-docker-watcher
+  if systemctl start agent-docker-watcher && sleep 2 && systemctl is-active --quiet agent-docker-watcher; then
+    log "  Docker event watcher started"
+  else
+    warn "  Docker event watcher failed to start"
+    MANUAL_STEPS+=("Docker watcher: systemctl start agent-docker-watcher")
+  fi
+else
+  info "  Docker not available — skipping docker event watcher"
+fi
+
+# ============================================
+# PHASE 6 — DAILY REDISCOVERY CRON
+# ============================================
+section "Phase 6: Setting up daily service rediscovery"
+
+cat > /usr/local/bin/agent-rediscover <<REDISCOVER
+#!/bin/bash
+KNOWN_FILE="/etc/otelcol/known-services.txt"
+PLATFORM_HOST="${PLATFORM_HOST}"
+PLATFORM_PORT="${PLATFORM_PORT}"
+API_KEY="${API_KEY}"
+AUTH_B64="${AUTH_B64}"
+
+CURRENT=\$(systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | awk '{print \$1}' | sort)
+KNOWN=\$(cat "\$KNOWN_FILE" 2>/dev/null | sort)
+NEW_SVCS=\$(comm -23 <(echo "\$CURRENT") <(echo "\$KNOWN") 2>/dev/null | grep -v '^\$' || true)
+
+if [ -n "\$NEW_SVCS" ]; then
+  logger -t agent-rediscover "New services detected: \$(echo \$NEW_SVCS | tr '\n' ' ')"
+  NEW_JSON=\$(echo "\$NEW_SVCS" | while read SVC; do
+    echo -n "{\"service\":\"\${SVC}\",\"host\":\"\$(hostname -f)\"},"
+  done | sed 's/,\$//')
+  curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Basic \${AUTH_B64}" \
+    -d "{\"api_key\":\"\${API_KEY}\",\"host\":\"\$(hostname -f)\",\"new_services\":[\${NEW_JSON}]}" \
+    "http://\${PLATFORM_HOST}:\${PLATFORM_PORT}/api/agent/new-services" &>/dev/null || true
+fi
+echo "\$CURRENT" > "\$KNOWN_FILE"
+REDISCOVER
+chmod +x /usr/local/bin/agent-rediscover
+
+systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null \
+  | awk '{print $1}' | sort > /etc/otelcol/known-services.txt
+
+cat > /etc/cron.d/observability-agent <<'CRONEOF'
+0 6 * * * root /usr/local/bin/agent-rediscover >> /var/log/agent-rediscover.log 2>&1
+CRONEOF
+
+log "  Rediscovery cron installed — runs daily at 06:00"
+
+# ============================================
+# PHASE 6.5 — HOST REGISTRATION + HEARTBEAT
+# ============================================
+section "Phase 6.5: Registering host and setting heartbeat"
+
+HOST_REGISTER_PAYLOAD=$(cat <<EOF
+{
+  "machine_id": "${MACHINE_ID}",
+  "hostname": "${HOSTNAME_FQDN}",
+  "os_name": "${OS_NAME}",
+  "os_version": "${OS_VERSION_ID}",
+  "arch": "${ARCH_NAME}",
+  "agent_version": "${AGENT_VERSION}"
+}
+EOF
+)
+
+if curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Basic ${AUTH_B64}" \
+    -d "${HOST_REGISTER_PAYLOAD}" \
+    "${HOST_REGISTER_ENDPOINT}" &>/dev/null; then
+  log "Host registered in platform backend"
+else
+  warn "Could not register host now (${HOST_REGISTER_ENDPOINT})"
+fi
+
+cat > /usr/local/bin/agent-heartbeat <<HEARTBEAT
+#!/bin/bash
+set -uo pipefail
+API_KEY="${API_KEY}"
+HOST_HEARTBEAT_ENDPOINT="${HOST_HEARTBEAT_ENDPOINT}"
+MACHINE_ID="${MACHINE_ID}"
+HOSTNAME_FQDN="${HOSTNAME_FQDN}"
+AGENT_VERSION="${AGENT_VERSION}"
+AUTH_B64=\$(echo -n "\${API_KEY}:\${API_KEY}" | base64 -w 0)
+
+PAYLOAD=\$(cat <<JSON
+{
+  "machine_id": "\${MACHINE_ID}",
+  "hostname": "\${HOSTNAME_FQDN}",
+  "agent_version": "\${AGENT_VERSION}"
+}
+JSON
+)
+
+curl -sf -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic \${AUTH_B64}" \
+  -d "\${PAYLOAD}" \
+  "\${HOST_HEARTBEAT_ENDPOINT}" >/dev/null 2>&1 || true
+HEARTBEAT
+chmod +x /usr/local/bin/agent-heartbeat
+
+cat > /etc/systemd/system/agent-heartbeat.service <<'HEARTBEAT_SVC'
+[Unit]
+Description=Observability Agent — Host heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/agent-heartbeat
+HEARTBEAT_SVC
+
+cat > /etc/systemd/system/agent-heartbeat.timer <<'HEARTBEAT_TIMER'
+[Unit]
+Description=Observability Agent — Host heartbeat every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+HEARTBEAT_TIMER
+
+systemctl daemon-reload
+systemctl enable --now agent-heartbeat.timer
+if systemctl is-active --quiet agent-heartbeat.timer; then
+  log "Heartbeat timer enabled (every 5 minutes)"
+else
+  warn "Failed to start heartbeat timer"
+fi
+
+# ============================================
+# PHASE 7 — DISCOVERY REPORT
+# ============================================
+section "Phase 7: Discovery report"
+
+REPORT_LINES=()
+REPORT_LINES+=("OBSERVABILITY AGENT — INSTALLATION REPORT")
+REPORT_LINES+=("Generated : $(date -u +"%Y-%m-%dT%H:%M:%SZ")")
+REPORT_LINES+=("Host      : ${HOSTNAME_FQDN}")
+REPORT_LINES+=("Machine   : ${MACHINE_ID:0:8}...")
+REPORT_LINES+=("Tenant    : ${API_KEY:0:8}...")
+REPORT_LINES+=("Platform  : ${PLATFORM_HOST}:${PLATFORM_PORT}")
+REPORT_LINES+=("")
+REPORT_LINES+=("━━━ DISCOVERED SERVICES ━━━")
+REPORT_LINES+=("(log paths only — metrics are host-level and container-level only)")
+REPORT_LINES+=("")
+
+for SVC in "${ALL_SERVICES[@]}"; do
+  STATUS="${SVC_STATUS[$SVC]:-skipped}"
+  PATHS="${LOG_PATHS[$SVC]:-none}"
+  NOTES="${SVC_NOTES[$SVC]:-}"
+  case $STATUS in
+    logs_found)   ICON="✓" ;;
+    no_logs)      ICON="~" ;;
+    *)            ICON="✗" ;;
+  esac
+  REPORT_LINES+=("  ${ICON} ${SVC} (${STATUS})")
+  REPORT_LINES+=("    logs  : $(echo "$PATHS" | head -3 | tr '\n' ' ')")
+  [ -n "$NOTES" ] && REPORT_LINES+=("    notes : ${NOTES}")
+  REPORT_LINES+=("")
 done
-echo "    ✓ Traces from apps (OTLP gRPC:4317 / HTTP:4318)"
+
+if [ ${#MANUAL_STEPS[@]} -gt 0 ]; then
+  REPORT_LINES+=("")
+  REPORT_LINES+=("━━━ MANUAL STEPS REQUIRED ━━━")
+  for STEP in "${MANUAL_STEPS[@]}"; do
+    REPORT_LINES+=("  ! ${STEP}")
+  done
+fi
+
+REPORT_LINES+=("")
+REPORT_LINES+=("━━━ METRIC NAMING ━━━")
+REPORT_LINES+=("  System     : system_cpu_*, system_memory_*, system_disk_*, system_network_*")
+REPORT_LINES+=("  Containers : container_<name>_cpu_percent, container_<name>_mem_usage_bytes, ...")
+REPORT_LINES+=("               container_<name>_net_rx_bytes, container_<name>_block_read_bytes")
+REPORT_LINES+=("               container_<name>_pids")
+REPORT_LINES+=("")
+REPORT_LINES+=("━━━ AGENT COMPONENTS ━━━")
+REPORT_LINES+=("  otelcol              : $(systemctl is-active otelcol 2>/dev/null || echo unknown)")
+REPORT_LINES+=("  docker-watcher       : $(systemctl is-active agent-docker-watcher 2>/dev/null || echo not installed)")
+REPORT_LINES+=("  docker-metrics       : $(systemctl is-active agent-docker-metrics.timer 2>/dev/null || echo not installed)")
+REPORT_LINES+=("  docker-log-tailer    : $(systemctl is-active agent-docker-log-tailer 2>/dev/null || echo not installed)")
+REPORT_LINES+=("  prom-file-server     : $(systemctl is-active agent-prom-file-server 2>/dev/null || echo not installed)")
+REPORT_LINES+=("")
+REPORT_LINES+=("━━━ OTELCOL COMMANDS ━━━")
+REPORT_LINES+=("  Status  : sudo systemctl status otelcol")
+REPORT_LINES+=("  Logs    : sudo journalctl -u otelcol -f")
+REPORT_LINES+=("  Config  : sudo cat ${CONFIG_DIR}/config.yaml")
+REPORT_LINES+=("  Restart : sudo systemctl restart otelcol")
+REPORT_LINES+=("")
+REPORT_LINES+=("━━━ CUSTOM APP METRICS (StatsD) ━━━")
+REPORT_LINES+=("  Send to localhost:8125 (UDP)")
+REPORT_LINES+=("  Node.js : npm install node-statsd")
+REPORT_LINES+=("  Python  : pip install statsd")
+REPORT_LINES+=("")
+REPORT_LINES+=("━━━ APP TRACES / SDK METRICS (OTLP) ━━━")
+REPORT_LINES+=("  On this host   : OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317")
+REPORT_LINES+=("  Inside Docker  : OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317")
+
 echo ""
-echo "  Commands:"
-echo "    Status  : sudo systemctl status otelcol"
-echo "    Logs    : sudo journalctl -u otelcol -f"
-echo "    Restart : sudo systemctl restart otelcol"
-echo "    Stop    : sudo systemctl stop otelcol"
-echo ""
-echo "  To instrument an app on this host:"
-echo "    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317"
-echo ""
-echo "  To instrument an app in Docker on this host:"
-echo "    OTEL_EXPORTER_OTLP_ENDPOINT=http://host.docker.internal:4317"
-echo ""
+for LINE in "${REPORT_LINES[@]}"; do
+  echo "$LINE"
+done
+
+mkdir -p "$CONFIG_DIR"
+printf '%s\n' "${REPORT_LINES[@]}" > "$REPORT_FILE"
+log "Report saved to $REPORT_FILE"
+
+JSON_HOST_SERVICES=""
+JSON_CONTAINER_SERVICES=""
+for SVC in "${ALL_SERVICES[@]}"; do
+  ESC_NAME=$(json_escape "$SVC")
+  ESC_STATUS=$(json_escape "${SVC_STATUS[$SVC]:-skipped}")
+  ESC_LOG_PATHS=$(json_escape "${LOG_PATHS[$SVC]:-none}")
+  ESC_NOTES=$(json_escape "${SVC_NOTES[$SVC]:-}")
+  ESC_PORT=$(json_escape "${SVC_PORT[$SVC]:-}")
+  ESC_VERSION=$(json_escape "${SVC_VERSION[$SVC]:-}")
+  ITEM="{\"name\":\"${ESC_NAME}\",\"status\":\"${ESC_STATUS}\",\"log_paths\":\"${ESC_LOG_PATHS}\",\"notes\":\"${ESC_NOTES}\",\"port\":$( [ -n "${SVC_PORT[$SVC]:-}" ] && printf '%s' "${SVC_PORT[$SVC]}" || printf 'null' ),\"version\":\"${ESC_VERSION}\"}"
+  if [[ "$SVC" == docker_* ]]; then
+    CNAME="${SVC#docker_}"
+    ESC_CNAME=$(json_escape "$CNAME")
+    ITEM="{\"name\":\"${ESC_CNAME}\",\"status\":\"${ESC_STATUS}\",\"log_paths\":\"${ESC_LOG_PATHS}\",\"notes\":\"${ESC_NOTES}\",\"port\":$( [ -n "${SVC_PORT[$SVC]:-}" ] && printf '%s' "${SVC_PORT[$SVC]}" || printf 'null' ),\"version\":\"${ESC_VERSION}\"}"
+    [ -n "$JSON_CONTAINER_SERVICES" ] && JSON_CONTAINER_SERVICES="${JSON_CONTAINER_SERVICES},"
+    JSON_CONTAINER_SERVICES="${JSON_CONTAINER_SERVICES}${ITEM}"
+  else
+    [ -n "$JSON_HOST_SERVICES" ] && JSON_HOST_SERVICES="${JSON_HOST_SERVICES},"
+    JSON_HOST_SERVICES="${JSON_HOST_SERVICES}${ITEM}"
+  fi
+done
+
+JSON_MANUAL=""
+for STEP in "${MANUAL_STEPS[@]}"; do
+  [ -n "$JSON_MANUAL" ] && JSON_MANUAL="${JSON_MANUAL},"
+  JSON_MANUAL="${JSON_MANUAL}\"$(json_escape "$STEP")\""
+done
+
+ESC_API_KEY=$(json_escape "$API_KEY")
+ESC_HOSTNAME=$(json_escape "$HOSTNAME_FQDN")
+ESC_MACHINE_ID=$(json_escape "$MACHINE_ID")
+ESC_OS_NAME=$(json_escape "$OS_NAME")
+ESC_ARCH_NAME=$(json_escape "$ARCH_NAME")
+ESC_AGENT_VERSION=$(json_escape "$AGENT_VERSION")
+
+HOST_DISCOVERY_PAYLOAD=$(cat <<EOF
+{
+  "api_key": "${ESC_API_KEY}",
+  "host": "${ESC_HOSTNAME}",
+  "machine_id": "${ESC_MACHINE_ID}",
+  "os": "${ESC_OS_NAME}",
+  "arch": "${ESC_ARCH_NAME}",
+  "agent_version": "${ESC_AGENT_VERSION}",
+  "generated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "services": [${JSON_HOST_SERVICES}],
+  "manual_steps": [${JSON_MANUAL}]
+}
+EOF
+)
+
+CONTAINER_DISCOVERY_PAYLOAD=$(cat <<EOF
+{
+  "api_key": "${ESC_API_KEY}",
+  "host": "${ESC_HOSTNAME}",
+  "machine_id": "${ESC_MACHINE_ID}",
+  "os": "${ESC_OS_NAME}",
+  "arch": "${ESC_ARCH_NAME}",
+  "agent_version": "${ESC_AGENT_VERSION}",
+  "generated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "services": [${JSON_CONTAINER_SERVICES}],
+  "manual_steps": [${JSON_MANUAL}]
+}
+EOF
+)
+
+HOST_SENT=false
+if curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Basic ${AUTH_B64}" \
+    -d "$HOST_DISCOVERY_PAYLOAD" \
+    "${HOST_DISCOVERY_ENDPOINT}" &>/dev/null; then
+  HOST_SENT=true
+fi
+
+CONTAINERS_SENT=false
+if curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Basic ${AUTH_B64}" \
+    -d "$CONTAINER_DISCOVERY_PAYLOAD" \
+    "${CONTAINER_DISCOVERY_ENDPOINT}" &>/dev/null; then
+  CONTAINERS_SENT=true
+fi
+
+if [ "$HOST_SENT" = true ]; then
+  log "Host discovered services sent to platform backend"
+else
+  warn "Could not reach ${HOST_DISCOVERY_ENDPOINT} — host discovery kept local"
+fi
+
+if [ "$CONTAINERS_SENT" = true ]; then
+  log "Container discovered services sent to platform backend"
+else
+  warn "Could not reach ${CONTAINER_DISCOVERY_ENDPOINT} — container discovery kept local"
+fi

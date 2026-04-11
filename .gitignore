@@ -1,0 +1,11 @@
+# Workspace/system artifacts
+.codex
+.DS_Store
+Thumbs.db
+
+# IDE settings
+.vscode/
+.idea/
+
+# Backend local build artifacts
+platform/backend/server

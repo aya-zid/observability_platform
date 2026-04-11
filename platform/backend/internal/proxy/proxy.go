@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/cache"
+	custommiddleware "gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/middleware"
 )
 
 // ProxyConfig defines where to forward requests and what headers to inject.
@@ -58,10 +59,8 @@ func NewReverseProxy(cfg ProxyConfig) echo.HandlerFunc {
 }
 
 // getTenant reads the *cache.CachedTenant set by IngestMiddleware.
-// The key "ingest_tenant" and type *cache.CachedTenant must match exactly
-// what IngestMiddleware stores via c.Set(string(TenantContextKey), resolved).
 func getTenant(c echo.Context) *cache.CachedTenant {
-	v := c.Get("ingest_tenant")
+	v := c.Get(custommiddleware.TenantContextKey)
 	if v == nil {
 		return nil
 	}

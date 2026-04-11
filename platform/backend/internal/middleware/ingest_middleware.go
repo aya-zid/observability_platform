@@ -10,10 +10,7 @@ import (
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/repository"
 )
 
-// contextKey is unexported to avoid collisions with other packages
-type contextKey string
-
-const TenantContextKey contextKey = "ingest_tenant"
+const TenantContextKey = "ingest_tenant"
 
 // IngestMiddleware authenticates agent requests via API key.
 //
@@ -25,8 +22,8 @@ const TenantContextKey contextKey = "ingest_tenant"
 func IngestMiddleware(tenantCache *cache.TenantCache, tenantRepo *repository.TenantRepository) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			apiKey, _, ok := c.Request().BasicAuth()
-			if !ok || apiKey == "" {
+			rawAPIKey, _, ok := c.Request().BasicAuth()
+			if !ok || rawAPIKey == "" {
 				return c.JSON(http.StatusUnauthorized, map[string]string{
 					"error": "missing or invalid Authorization header — use Basic auth with your API key",
 				})
@@ -35,36 +32,46 @@ func IngestMiddleware(tenantCache *cache.TenantCache, tenantRepo *repository.Ten
 			ctx := c.Request().Context()
 
 			// ── 1. Redis cache lookup ──────────────────────────────────
-			cached, err := tenantCache.Get(ctx, apiKey)
+			cached, err := tenantCache.Get(ctx, rawAPIKey)
 			if err != nil {
 				// Redis is down — log and fall through to DB (degraded mode)
 				c.Logger().Errorf("[ingest] redis get error: %v", err)
 			}
 
 			if cached != nil {
-				c.Set(string(TenantContextKey), cached)
+				if !cached.IsActive || !cached.APIKeyEnabled {
+					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "api key disabled"})
+				}
+				c.Set(TenantContextKey, cached)
 				return next(c)
 			}
 
 			// ── 2. DB lookup on cache miss ─────────────────────────────
-			tenant, err := tenantRepo.FindByAPIKey(ctx, apiKey)
-			if err != nil || tenant == nil {
-				return c.JSON(http.StatusUnauthorized, map[string]string{
-					"error": "invalid API key",
-				})
+			tenant, err := tenantRepo.FindByAPIKey(ctx, rawAPIKey)
+			if err != nil {
+				c.Logger().Errorf("[ingest] tenant lookup error: %v", err)
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
+			}
+			if tenant == nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
+			}
+			if !tenant.IsActive || !tenant.APIKeyEnabled {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "api key disabled"})
 			}
 
 			resolved := &cache.CachedTenant{
-				ID:   tenant.ID,
-				UUID: tenant.UUID,
+				ID:            tenant.ID,
+				UUID:          tenant.UUID,
+				IsActive:      tenant.IsActive,
+				APIKeyEnabled: tenant.APIKeyEnabled,
 			}
 
 			// ── 3. Populate cache (best-effort — don't fail on Redis error) ──
-			if cacheErr := tenantCache.Set(ctx, apiKey, resolved); cacheErr != nil {
+			if cacheErr := tenantCache.Set(ctx, rawAPIKey, resolved); cacheErr != nil {
 				c.Logger().Warnf("[ingest] redis set error (non-fatal): %v", cacheErr)
 			}
 
-			c.Set(string(TenantContextKey), resolved)
+			c.Set(TenantContextKey, resolved)
 			return next(c)
 		}
 	}
@@ -72,7 +79,7 @@ func IngestMiddleware(tenantCache *cache.TenantCache, tenantRepo *repository.Ten
 
 // GetTenantFromContext is a helper used by proxy handlers to extract the resolved tenant.
 func GetTenantFromContext(c echo.Context) *cache.CachedTenant {
-	v := c.Get(string(TenantContextKey))
+	v := c.Get(TenantContextKey)
 	if v == nil {
 		return nil
 	}

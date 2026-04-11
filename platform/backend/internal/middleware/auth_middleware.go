@@ -8,11 +8,26 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/infrastructure"
+	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/repository"
 )
 
-func AuthMiddleware() echo.MiddlewareFunc {
+func AuthMiddleware(tenantRepo *repository.TenantRepository) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			// Prefer HttpOnly cookie (browser auth). Fallback to Bearer header for non-browser clients.
+			if cookie, err := c.Cookie("access_token"); err == nil && cookie != nil && cookie.Value != "" {
+				claims, err := infrastructure.ParseToken(cookie.Value)
+				if err != nil {
+					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid or expired token"})
+				}
+				tenant, err := tenantRepo.FindByIDCtx(c.Request().Context(), claims.TenantID)
+				if err != nil || tenant == nil || !tenant.IsActive {
+					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "tenant inactive"})
+				}
+				c.Set("claims", claims)
+				return next(c)
+			}
+
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Missing Authorization header"})
@@ -26,6 +41,11 @@ func AuthMiddleware() echo.MiddlewareFunc {
 			claims, err := infrastructure.ParseToken(tokenStr)
 			if err != nil {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid or expired token"})
+			}
+
+			tenant, err := tenantRepo.FindByIDCtx(c.Request().Context(), claims.TenantID)
+			if err != nil || tenant == nil || !tenant.IsActive {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "tenant inactive"})
 			}
 
 			// Store claims in Echo context

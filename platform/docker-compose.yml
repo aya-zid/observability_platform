@@ -1,23 +1,11 @@
 # ============================================
 # PLATFORM STACK - Backend + Data Layer
 # ============================================
-# Network topology:
-#   obs-network (external) — shared with infra stack
-#     backend reaches vminsert, loki, tempo by service name
-#   obs-platform-internal — private to this stack
-#     postgres and redis are NOT exposed to the infra network
-#
-# Startup order:
-#   1. Start infra stack first:  cd infrastructure && docker compose up -d
-#   2. Start platform stack:     cd platform      && docker compose up -d
-# ============================================
-
 networks:
   obs-network:
-    external: true          # shared with infra — gives backend access to vminsert/loki/tempo
-
+    external: true
   obs-platform-internal:
-    driver: bridge          # postgres + redis only reachable from backend, not from infra
+    driver: bridge
 
 services:
 
@@ -32,7 +20,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5434:5432"         # exposed for pgadmin / local debugging only
+      - "5434:5432"
     networks:
       - obs-platform-internal
     healthcheck:
@@ -53,7 +41,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    # No port exposed — redis is internal only, never reachable from outside
 
   backend:
     build:
@@ -62,7 +49,7 @@ services:
     container_name: obs-backend
     restart: unless-stopped
     ports:
-      - "8080:8080"         # agents + frontend connect here
+      - "8080:8080"
     environment:
       # ── Database ───────────────────────────────────────────────
       DB_HOST: postgres
@@ -74,14 +61,14 @@ services:
 
       # ── Auth ───────────────────────────────────────────────────
       JWT_SECRET: super-secret-change-me-in-prod-32-chars-min
+      REFRESH_TOKEN_PEPPER: dev-refresh-token-pepper-32-chars-minimum!!
 
       # ── Redis ──────────────────────────────────────────────────
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
 
-      # ── Infra addresses (resolved via obs-network) ─────────────
-      # These are internal Docker service names — never exposed to agents
+      # ── Infra addresses (docker-internal, never exposed to agents) ─
       VMINSERT_HOST: vminsert
       VMINSERT_PORT: 8480
       VMSELECT_HOST: vmselect
@@ -89,16 +76,39 @@ services:
       LOKI_HOST: loki
       LOKI_PORT: 3100
       TEMPO_HOST: tempo
-      TEMPO_PORT: 4318       # OTLP HTTP inside the container (not the mapped host port)
+      TEMPO_PORT: 4318
+      AGENT_INSTALL_SCRIPT_PATH: /opt/agent/install.sh
+
+      # ── Grafana public URL (must be reachable FROM THE BROWSER) ──
+      # This is returned to the frontend as-is so it must use the host's
+      # IP or hostname — not the docker service name "grafana".
+      # Change to your machine's actual IP if accessing from another device.
+      GRAFANA_URL: http://localhost:3000
 
     networks:
-      - obs-network           # to reach vminsert, loki, tempo
-      - obs-platform-internal # to reach postgres and redis
+      - obs-network
+      - obs-platform-internal
+    volumes:
+      - ../agent:/opt/agent:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: obs-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      NODE_ENV: development
+    depends_on:
+      - backend
 
   pgadmin:
     image: dpage/pgadmin4:latest

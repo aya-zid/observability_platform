@@ -2,6 +2,8 @@
 package handler
 
 import (
+	"time"
+
 	"github.com/labstack/echo/v4"
 
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/cache"
@@ -16,19 +18,57 @@ import (
 func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	tenantRepo := repository.NewTenantRepository(infrastructure.DB)
 	userRepo := repository.NewUserRepository(infrastructure.DB)
+	hostRepo := repository.NewHostRepository(infrastructure.DB)
+	alertsRepo := repository.NewAlertsRepository(infrastructure.DB)
+	tenantCache := cache.NewTenantCache(infrastructure.Redis)
 
 	// ── Auth routes (public) ─────────────────────────────────────────────────
-	authService := service.NewAuthService(tenantRepo, userRepo)
-	authHandler := NewAuthHandler(authService)
+	authService := service.NewAuthService(infrastructure.DB, infrastructure.Redis, cfg, tenantRepo, userRepo)
+	authHandler := NewAuthHandler(authService, cfg)
 
-	e.POST("/signup", authHandler.Signup)
-	e.POST("/login", authHandler.Login)
+	rlWindow := time.Duration(cfg.AuthRateLimitWindowSeconds) * time.Second
+	e.POST("/signup", authHandler.Signup, custommiddleware.RateLimitByIP(infrastructure.Redis, "signup", cfg.AuthSignupRateLimitPerWindow, rlWindow))
+	e.POST("/login", authHandler.Login, custommiddleware.RateLimitByIP(infrastructure.Redis, "login", cfg.AuthLoginRateLimitPerWindow, rlWindow))
+	e.POST("/refresh", authHandler.Refresh, custommiddleware.RateLimitByIP(infrastructure.Redis, "refresh", cfg.AuthRefreshRateLimitPerWindow, rlWindow))
+	e.POST("/logout", authHandler.Logout)
+	installHandler := NewInstallHandler(cfg)
+	integrationHandler := NewIntegrationHandler(cfg, tenantRepo, repository.NewDiscoveryRepository(infrastructure.DB))
+	alertsHandler := NewAlertsHandler(alertsRepo)
+	e.GET("/install.sh", installHandler.AgentInstallScript)
+	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
+	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
+
+	// ── Platform API (browser auth) ───────────────────────────────────────────
+	tenantHandler := NewTenantHandler(tenantRepo, userRepo, tenantCache)
+	discoveryAPIHandler := NewDiscoveryAPIHandler(hostRepo, repository.NewDiscoveryRepository(infrastructure.DB), alertsRepo)
+	queryHandler := NewQueryHandler(cfg, tenantRepo)
+	api := e.Group("/api", custommiddleware.AuthMiddleware(tenantRepo))
+	{
+		api.GET("/me", tenantHandler.GetMe)
+		api.GET("/api-key", tenantHandler.GetAPIKey)
+		api.POST("/api-key/rotate", tenantHandler.RotateAPIKey)
+		api.GET("/alerts/vulnerabilities", alertsHandler.ListVulnerabilityAlerts)
+		api.GET("/catalog", discoveryAPIHandler.ListCatalog)
+		api.GET("/discovery/hosts", discoveryAPIHandler.ListHosts)
+		api.GET("/discovery/services", discoveryAPIHandler.ListServices)
+		api.GET("/discovery/services/:id", discoveryAPIHandler.GetService)
+		api.PATCH("/discovery/services/:id/collection", discoveryAPIHandler.UpdateCollection)
+		api.PATCH("/discovery/services/:id/config", discoveryAPIHandler.UpdateServiceConfig)
+		api.POST("/discovery/services/:id/integration", integrationHandler.CreateInstallCommand)
+
+		// Query routes for dashboards — tenant-isolated via JWT claims
+		api.GET("/query/metrics", queryHandler.QueryMetrics)
+		api.GET("/query/logs", queryHandler.QueryLogs)
+		api.GET("/query/logs/range", queryHandler.QueryLogsRange)
+		api.GET("/query/logs/labels", queryHandler.QueryLogsLabels)
+		api.GET("/grafana/dashboard-url", queryHandler.GrafanaDashboardURL)
+	}
 
 	// ── Health check ─────────────────────────────────────────────────────────
 	e.GET("/health", func(c echo.Context) error {
 		return c.JSON(200, map[string]interface{}{
-			"status":      "healthy",
-			"db_status":   boolStatus(infrastructure.Ping()),
+			"status":       "healthy",
+			"db_status":    boolStatus(infrastructure.Ping()),
 			"redis_status": boolStatus(infrastructure.PingRedis()),
 		})
 	})
@@ -42,11 +82,22 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	//   1. Validates the API key
 	//   2. Resolves tenant (Redis → Postgres)
 	//   3. Attaches CachedTenant to context for proxy handlers
-	tenantCache := cache.NewTenantCache(infrastructure.Redis)
 	ingestAuth := custommiddleware.IngestMiddleware(tenantCache, tenantRepo)
+	hostHandler := NewHostHandler(hostRepo)
+	discoveryHandler := NewDiscoveryHandler(infrastructure.DB)
 
 	ingest := e.Group("/ingest", ingestAuth)
 	{
+		// Host lifecycle (agent startup + periodic liveness heartbeat)
+		ingest.POST("/hosts/register", hostHandler.Register)
+		ingest.POST("/hosts/heartbeat", hostHandler.Heartbeat)
+		// Discovery ingest: split host services and container services into two endpoints.
+		ingest.POST("/discovery/host-services", discoveryHandler.IngestHostServices)
+		ingest.POST("/discovery/container-services", discoveryHandler.IngestContainerServices)
+		// Backward-compatible combined endpoint.
+		ingest.POST("/discovery/report", discoveryHandler.IngestInstallReport)
+		ingest.POST("/integrations/status", integrationHandler.IngestStatus)
+
 		// Prometheus remote_write → VictoriaMetrics vminsert (tenant isolated by URL path)
 		ingest.POST("/metrics", proxy.MetricsProxy(cfg))
 

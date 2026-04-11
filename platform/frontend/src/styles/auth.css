@@ -1,0 +1,33 @@
+:root {
+  --auth-a: rgba(15, 23, 42, 0.96);
+  --auth-b: rgba(30, 41, 59, 0.92);
+  --auth-c: rgba(88, 28, 135, 0.40);
+  --auth-poly: 0.22;
+}
+
+.dark {
+  --auth-a: rgba(2, 6, 23, 0.98);
+  --auth-b: rgba(15, 23, 42, 0.92);
+  --auth-c: rgba(124, 58, 237, 0.34);
+  --auth-poly: 0.28;
+}
+
+.auth-bg {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 520px at 20% 10%, var(--auth-c), transparent 60%),
+    linear-gradient(120deg, var(--auth-a), var(--auth-b));
+}
+
+.auth-bg::before {
+  content: "";
+  position: absolute;
+  inset: -15%;
+  opacity: var(--auth-poly);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='800' viewBox='0 0 1200 800'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.25'%3E%3Cpath d='M0 160 L220 0 L420 120 L260 260 Z'/%3E%3Cpath d='M220 0 L520 0 L420 120 Z'/%3E%3Cpath d='M420 120 L620 240 L260 260 Z'/%3E%3Cpath d='M260 260 L620 240 L540 420 L220 380 Z'/%3E%3Cpath d='M620 240 L820 120 L980 300 L540 420 Z'/%3E%3Cpath d='M820 120 L1200 160 L980 300 Z'/%3E%3Cpath d='M0 520 L220 380 L540 420 L360 640 Z'/%3E%3Cpath d='M540 420 L980 300 L900 560 L640 720 Z'/%3E%3Cpath d='M980 300 L1200 400 L900 560 Z'/%3E%3Cpath d='M360 640 L640 720 L520 800 L240 800 Z'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 1200px 800px;
+  filter: blur(0.3px);
+  pointer-events: none;
+}
+

@@ -1,3 +1,11 @@
+// src/pages/IntegrationServicePage.tsx
+// Changes from previous version:
+//   1. Import NginxVirtualHostsSection
+//   2. Fix useEffect grouping: group rows by domain correctly
+//      (previously could produce duplicate domain entries)
+//   3. Replace the raw <table> virtual hosts block with <NginxVirtualHostsSection>
+//   4. Add configMutation success toast indication (optional — small UX win)
+
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useParams } from "react-router-dom"
@@ -10,6 +18,7 @@ import {
 } from "@/api/discovery"
 import { Button } from "@/components/ui/button"
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
+import NginxVirtualHostsSection, { type VirtualHostEntry } from "@/components/nginx/NginxVirtualHostsSection"
 import { cn } from "@/lib/utils"
 
 function adaptGuideToPort(guide: string, defaultEndpoint: string | undefined, detectedPort?: number) {
@@ -51,6 +60,49 @@ function resolveInitialMetricsMode(
   return "unknown"
 }
 
+/**
+ * Group the flat nginx_virtual_hosts array (one row per log_kind) into
+ * one VirtualHostEntry per domain. Mirrors what the backend now does in
+ * groupVirtualHosts(), but we also do it client-side so editing works correctly.
+ *
+ * The backend already returns merged objects (access_log + error_log on the same
+ * entry) since the fix in discovery_service.go. This function is kept as a
+ * safety net in case the old flat format arrives.
+ */
+function groupVirtualHostsFromAPI(raw: any[]): VirtualHostEntry[] {
+  if (!raw?.length) return []
+
+  // If already merged (both access_log and error_log may be present on same object)
+  // we still need to combine by domain in case two separate objects share a domain.
+  const grouped: Record<string, VirtualHostEntry> = {}
+  const order: string[] = []
+
+  for (const vh of raw) {
+    // The backend now returns one merged object per domain, so the key is just domain.
+    // Using domain+is_default as key handles edge case of two catch-all entries.
+    const key = `${vh.domain}::${String(vh.is_default)}`
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        id: vh.id,
+        domain: vh.domain,
+        access_log: vh.access_log ?? "",
+        error_log: vh.error_log ?? "",
+        enabled: vh.enabled ?? true,
+        is_shared_log: vh.is_shared_log ?? false,
+        is_default: vh.is_default ?? false,
+      }
+      order.push(key)
+    } else {
+      // Merge any missing log paths from a subsequent object with same domain
+      if (!grouped[key].access_log && vh.access_log) grouped[key].access_log = vh.access_log
+      if (!grouped[key].error_log && vh.error_log) grouped[key].error_log = vh.error_log
+    }
+  }
+
+  return order.map((k) => grouped[k])
+}
+
 export default function IntegrationServicePage() {
   const { id = "" } = useParams()
   const queryClient = useQueryClient()
@@ -69,6 +121,7 @@ export default function IntegrationServicePage() {
   const [isJavaApp, setIsJavaApp] = useState(false)
   const [jmxExporterPort, setJMXExporterPort] = useState("")
   const [installCommand, setInstallCommand] = useState("")
+  const [nginxVirtualHosts, setNginxVirtualHosts] = useState<VirtualHostEntry[]>([])
 
   useEffect(() => {
     if (serviceQuery.data) {
@@ -87,6 +140,13 @@ export default function IntegrationServicePage() {
       )
       setIsJavaApp(serviceQuery.data.is_java_app)
       setJMXExporterPort(serviceQuery.data.jmx_exporter_port ? String(serviceQuery.data.jmx_exporter_port) : "")
+
+      // Load Nginx virtual hosts — group by domain before setting state
+      if (serviceQuery.data.service_name === "nginx") {
+        setNginxVirtualHosts(
+          groupVirtualHostsFromAPI((serviceQuery.data as any).nginx_virtual_hosts ?? [])
+        )
+      }
     }
   }, [serviceQuery.data])
 
@@ -103,14 +163,30 @@ export default function IntegrationServicePage() {
   })
 
   const configMutation = useMutation({
-    mutationFn: () =>
-      updateDiscoveryServiceConfig(id, {
+    mutationFn: () => {
+      const payload: any = {
         confirmed_log_path: confirmedLogPath,
         user_metrics_endpoint: metricsEndpoint,
         metrics_mode: metricsMode,
         is_java_app: isJavaApp,
         jmx_exporter_port: jmxExporterPort ? Number(jmxExporterPort) : undefined,
-      }),
+      }
+
+      // Include nginx virtual hosts for nginx services
+      if (data?.service_name === "nginx") {
+        payload.nginx_virtual_hosts = nginxVirtualHosts.map((vh) => ({
+          id: vh.id,
+          domain: vh.domain || "(default)",
+          access_log: vh.access_log,
+          error_log: vh.error_log,
+          enabled: vh.enabled,
+          is_shared_log: vh.is_shared_log,
+          is_default: vh.is_default,
+        }))
+      }
+
+      return updateDiscoveryServiceConfig(id, payload)
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["discovery-service", id] })
       await queryClient.invalidateQueries({ queryKey: ["discovery-services"] })
@@ -237,17 +313,20 @@ export default function IntegrationServicePage() {
                 The metrics endpoint suggestion uses the detected service port when one was found.
               </div>
 
-              <label className="grid gap-1">
-                <span className="text-muted-foreground">Confirmed log path</span>
-                <input
-                  className="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none"
-                  value={confirmedLogPath}
-                  onChange={(e) => setConfirmedLogPath(e.target.value)}
-                  placeholder={data.suggested_log_path || data.detected_log_paths[0] || "/var/log/myapp/app.log"}
-                />
-              </label>
+              {/* Hide single confirmed log path field for nginx — it uses the vhosts table instead */}
+              {data.service_name !== "nginx" ? (
+                <label className="grid gap-1">
+                  <span className="text-muted-foreground">Confirmed log path</span>
+                  <input
+                    className="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none"
+                    value={confirmedLogPath}
+                    onChange={(e) => setConfirmedLogPath(e.target.value)}
+                    placeholder={data.suggested_log_path || data.detected_log_paths[0] || "/var/log/myapp/app.log"}
+                  />
+                </label>
+              ) : null}
 
-              {data.detected_log_paths.length ? (
+              {data.detected_log_paths.length && data.service_name !== "nginx" ? (
                 <div className="grid gap-2">
                   <span className="text-muted-foreground">Detected log paths</span>
                   <div className="flex flex-wrap gap-2">
@@ -328,9 +407,25 @@ export default function IntegrationServicePage() {
                 <Button disabled={configMutation.isPending} onClick={() => configMutation.mutate()}>
                   {configMutation.isPending ? "Confirming..." : "Confirm Configuration"}
                 </Button>
+                {configMutation.isSuccess && (
+                  <span className="ml-3 text-xs text-emerald-600 dark:text-emerald-400">Saved ✓</span>
+                )}
               </div>
             </div>
           </SectionCard>
+
+          {/* Nginx Virtual Hosts — only shown for nginx services */}
+          {data.service_name === "nginx" ? (
+            <SectionCard
+              title="Virtual Hosts (Domains)"
+              description="Map each domain to its log files. The agent auto-detects these from your Nginx config."
+            >
+              <NginxVirtualHostsSection
+                hosts={nginxVirtualHosts}
+                onChange={setNginxVirtualHosts}
+              />
+            </SectionCard>
+          ) : null}
 
           <SectionCard
             title="Version Security"

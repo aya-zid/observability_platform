@@ -50,17 +50,20 @@ ask() {
 }
 
 systemctl_ok() { command -v systemctl &>/dev/null; }
+unit_known() { systemctl status "$1" >/dev/null 2>&1; }
+unit_enabled() { systemctl is-enabled "$1" >/dev/null 2>&1; }
+unit_active() { systemctl is-active "$1" >/dev/null 2>&1; }
 
 stop_disable_unit() {
   local UNIT=$1
   systemctl_ok || return 0
 
-  if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "$UNIT"; then
+  if unit_known "$UNIT" || unit_enabled "$UNIT" || unit_active "$UNIT"; then
     systemctl stop "$UNIT" 2>/dev/null || true
     systemctl disable "$UNIT" 2>/dev/null || true
-    log "Stopped/disabled $UNIT"
+    log "Stop/disable requested for $UNIT"
   else
-    warn "$UNIT not installed, skipping"
+    warn "$UNIT not found, skipping"
   fi
 }
 
@@ -68,12 +71,12 @@ stop_disable_timer() {
   local TIMER=$1
   systemctl_ok || return 0
 
-  if systemctl list-unit-files --type=timer --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "$TIMER"; then
+  if unit_known "$TIMER" || unit_enabled "$TIMER" || unit_active "$TIMER"; then
     systemctl stop "$TIMER" 2>/dev/null || true
     systemctl disable "$TIMER" 2>/dev/null || true
-    log "Stopped/disabled $TIMER"
+    log "Stop/disable requested for $TIMER"
   else
-    warn "$TIMER not installed, skipping"
+    warn "$TIMER not found, skipping"
   fi
 }
 
@@ -112,13 +115,13 @@ echo ""
 echo "  This will remove:"
 echo "    - otelcol systemd service + config"
 echo "    - /usr/local/bin/otelcol binary"
-echo "    - helper services: docker log tailer/metrics/watcher, prom file server"
+echo "    - helper services: docker log tailer/metrics/watcher, prom file server, heartbeat"
 echo "    - helper scripts in /usr/local/bin/"
 echo "    - cron: /etc/cron.d/observability-agent"
 echo "    - /etc/otelcol/ config directory"
 echo ""
 echo "  Optional (--purge):"
-echo "    - /var/lib/otelcol/ (docker-logs + docker-metrics.prom)"
+echo "    - /var/lib/otelcol/ (docker-logs, docker-log-state, docker-metrics.prom)"
 echo "    - /var/log/agent-rediscover.log"
 echo ""
 
@@ -147,7 +150,9 @@ stop_disable_unit agent-docker-log-tailer.service
 stop_disable_unit agent-docker-watcher.service
 stop_disable_unit agent-prom-file-server.service
 stop_disable_unit agent-docker-metrics.service
+stop_disable_unit agent-heartbeat.service
 stop_disable_timer agent-docker-metrics.timer
+stop_disable_timer agent-heartbeat.timer
 
 # ============================================
 # REMOVE SYSTEMD SERVICE FILE
@@ -160,6 +165,8 @@ remove_file /etc/systemd/system/agent-docker-watcher.service
 remove_file /etc/systemd/system/agent-prom-file-server.service
 remove_file /etc/systemd/system/agent-docker-metrics.service
 remove_file /etc/systemd/system/agent-docker-metrics.timer
+remove_file /etc/systemd/system/agent-heartbeat.service
+remove_file /etc/systemd/system/agent-heartbeat.timer
 
 if systemctl_ok; then
   systemctl daemon-reload 2>/dev/null || true
@@ -168,6 +175,7 @@ if systemctl_ok; then
   systemctl reset-failed agent-docker-watcher 2>/dev/null || true
   systemctl reset-failed agent-prom-file-server 2>/dev/null || true
   systemctl reset-failed agent-docker-metrics 2>/dev/null || true
+  systemctl reset-failed agent-heartbeat 2>/dev/null || true
 fi
 
 # ============================================
@@ -181,6 +189,7 @@ remove_file /usr/local/bin/agent-docker-metrics
 remove_file /usr/local/bin/agent-prom-file-server
 remove_file /usr/local/bin/agent-docker-update
 remove_file /usr/local/bin/agent-rediscover
+remove_file /usr/local/bin/agent-heartbeat
 
 # ============================================
 # REMOVE CONFIG DIRECTORY
@@ -214,6 +223,7 @@ if ! $NO_JOURNAL && command -v journalctl &>/dev/null; then
   journalctl --vacuum-time=1s --unit=agent-docker-metrics 2>/dev/null || true
   journalctl --vacuum-time=1s --unit=agent-docker-watcher 2>/dev/null || true
   journalctl --vacuum-time=1s --unit=agent-prom-file-server 2>/dev/null || true
+  journalctl --vacuum-time=1s --unit=agent-heartbeat 2>/dev/null || true
   log "Journald logs cleared for agent services"
 fi
 
@@ -225,9 +235,11 @@ section "Verifying removal"
 LEFTOVERS=0
 [ -f /usr/local/bin/otelcol ] && warn "Binary still exists!" && LEFTOVERS=1
 [ -d /etc/otelcol ] && warn "Config dir still exists!" && LEFTOVERS=1
+[ -n "$(pgrep -x otelcol 2>/dev/null || true)" ] && warn "otelcol process still running!" && LEFTOVERS=1
 [ -f /etc/systemd/system/otelcol.service ] && warn "Service file still exists!" && LEFTOVERS=1
 [ -f /etc/systemd/system/agent-docker-log-tailer.service ] && warn "Tailer service file still exists!" && LEFTOVERS=1
 [ -f /etc/systemd/system/agent-docker-metrics.timer ] && warn "Metrics timer still exists!" && LEFTOVERS=1
+[ -f /etc/systemd/system/agent-heartbeat.timer ] && warn "Heartbeat timer still exists!" && LEFTOVERS=1
 [ -f /etc/cron.d/observability-agent ] && warn "Cron file still exists!" && LEFTOVERS=1
 
 if [ "$LEFTOVERS" -eq 0 ]; then

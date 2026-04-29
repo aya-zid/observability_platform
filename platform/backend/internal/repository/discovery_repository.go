@@ -1,3 +1,4 @@
+// internal/repository/discovery_repository.go
 package repository
 
 import (
@@ -35,15 +36,15 @@ func (r *DiscoveryRepository) UpsertServiceCtx(ctx context.Context, rec domain.D
 				{Name: "service_name"},
 			},
 			DoUpdates: clause.Assignments(map[string]interface{}{
-				"port":                 rec.Port,
-				"version":              rec.Version,
-				"access_log_path":      rec.AccessLogPath,
-				"error_log_path":       rec.ErrorLogPath,
-				"logging_mode":         rec.LoggingMode,
-				"uses_journald":        rec.UsesJournald,
-				"uses_syslog":          rec.UsesSyslog,
-				"last_seen_at":         now,
-				"updated_at":           now,
+				"port":            rec.Port,
+				"version":         rec.Version,
+				"access_log_path": rec.AccessLogPath,
+				"error_log_path":  rec.ErrorLogPath,
+				"logging_mode":    rec.LoggingMode,
+				"uses_journald":   rec.UsesJournald,
+				"uses_syslog":     rec.UsesSyslog,
+				"last_seen_at":    now,
+				"updated_at":      now,
 			}),
 		}).
 		Create(&rec).Error
@@ -73,8 +74,8 @@ func (r *DiscoveryRepository) UpdateServiceConfigCtx(
 		Model(&domain.DiscoveredService{}).
 		Where("id = ? AND tenant_id = ?", serviceID, tenantID).
 		Updates(map[string]interface{}{
-			"confirmed_log_path":   confirmedLogPath,
-			"log_path_source":      logPathSource,
+			"confirmed_log_path":    confirmedLogPath,
+			"log_path_source":       logPathSource,
 			"user_metrics_endpoint": userMetricsEndpoint,
 			"metrics_mode":          metricsMode,
 			"is_java_app":           isJavaApp,
@@ -232,6 +233,93 @@ func (r *DiscoveryRepository) UpdateServiceCollectionByMachineNameCtx(
 	}
 	if tx.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// ── Nginx Virtual Host methods ────────────────────────────────────────────────
+
+// ListVirtualHostsByServiceCtx returns all nginx virtual host rows for a service,
+// ordered by domain then log_kind. Callers group by domain before returning to the UI.
+func (r *DiscoveryRepository) ListVirtualHostsByServiceCtx(
+	ctx context.Context,
+	tenantID uint,
+	serviceID uint,
+) ([]domain.NginxVirtualHost, error) {
+	var rows []domain.NginxVirtualHost
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND discovered_service_id = ?", tenantID, serviceID).
+		Order("domain ASC, log_kind ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+// ReplaceVirtualHostsCtx deletes all existing virtual hosts for a service and
+// inserts the provided list. Used when the user saves the virtual hosts table in the UI.
+func (r *DiscoveryRepository) ReplaceVirtualHostsCtx(
+	ctx context.Context,
+	tenantID uint,
+	serviceID uint,
+	vhosts []domain.NginxVirtualHost,
+) error {
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND discovered_service_id = ?", tenantID, serviceID).
+		Delete(&domain.NginxVirtualHost{}).Error; err != nil {
+		return err
+	}
+	if len(vhosts) == 0 {
+		return nil
+	}
+	for i := range vhosts {
+		vhosts[i].TenantID = tenantID
+		vhosts[i].DiscoveredServiceID = serviceID
+		if err := r.db.WithContext(ctx).Create(&vhosts[i]).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpsertDetectedVirtualHostsCtx inserts agent-detected virtual hosts.
+// On conflict (same tenant + service + domain + log_kind + log_path) it only
+// bumps updated_at, preserving any user edits (source, enabled, is_shared_log).
+//
+// The OnConflict columns MUST exactly match the unique index
+// idx_nginx_vhost_service_domain_kind_path defined in NginxVirtualHost:
+//   tenant_id, discovered_service_id, domain, log_kind, log_path
+func (r *DiscoveryRepository) UpsertDetectedVirtualHostsCtx(
+	ctx context.Context,
+	tenantID uint,
+	serviceID uint,
+	detectedVhosts []domain.NginxVirtualHost,
+) error {
+	now := time.Now()
+	for i := range detectedVhosts {
+		detectedVhosts[i].TenantID = tenantID
+		detectedVhosts[i].DiscoveredServiceID = serviceID
+		detectedVhosts[i].Source = "detected"
+
+		err := r.db.WithContext(ctx).
+			Clauses(clause.OnConflict{
+				// These five columns match the unique index exactly.
+				Columns: []clause.Column{
+					{Name: "tenant_id"},
+					{Name: "discovered_service_id"},
+					{Name: "domain"},
+					{Name: "log_kind"},
+					{Name: "log_path"},
+				},
+				// On conflict: only bump updated_at.
+				// Do NOT overwrite enabled/is_shared_log/source — the user may have
+				// changed those in the UI.
+				DoUpdates: clause.Assignments(map[string]interface{}{
+					"updated_at": now,
+				}),
+			}).
+			Create(&detectedVhosts[i]).Error
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -72,6 +72,9 @@ declare -a MANUAL_STEPS=()
 declare -a ALL_SERVICES=()
 declare -A LOG_FORMAT
 
+# Phase 3: Nginx virtual hosts support
+declare -A NGINX_VHOSTS_JSON
+
 FILELOG_RECEIVERS_YAML=""
 declare -a FILELOG_PIPELINE=()
 declare -a METRIC_PIPELINE=("hostmetrics")
@@ -269,6 +272,143 @@ unit_uses_journald() {
   [[ "$STD_OUT" == "journal" || "$STD_OUT" == "journal+console" || "$STD_OUT" == "kmsg" ]]
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Nginx virtual host detection — pure bash, no python/perl/ruby required.
+# Only uses: bash, grep, sed, find, tr, cut — all present on any Linux distro.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Internal: parses one server block's text and sets VHOST_RESULT to a JSON
+# object, or "" if the block has no useful log info.
+_parse_nginx_server_block() {
+  local block="$1"
+  VHOST_RESULT=""
+
+  # ── server_name ────────────────────────────────────────────────────────
+  local domain="(default)"
+  local is_default="true"
+
+  local sn_line
+  sn_line=$(echo "$block" | grep -m1 -E '^\s*server_name\s+' \
+    | sed 's/^\s*server_name\s*//' | tr -d ';' | xargs 2>/dev/null)
+
+  if [ -n "$sn_line" ]; then
+    # server_name line may have multiple names: take first non-wildcard one
+    for token in $sn_line; do
+      if [ "$token" != "_" ] && [ "$token" != "localhost" ] && [ -n "$token" ]; then
+        domain="$token"
+        is_default="false"
+        break
+      fi
+    done
+  fi
+
+  # ── access_log ─────────────────────────────────────────────────────────
+  local access_log=""
+  local al_line
+  al_line=$(echo "$block" | grep -m1 -E '^\s*access_log\s+' \
+    | sed 's/^\s*access_log\s*//' | tr -d ';' | xargs 2>/dev/null)
+  if [ -n "$al_line" ]; then
+    # First token is path, second (optional) is log format name — ignore it
+    local al_path
+    al_path=$(echo "$al_line" | cut -d' ' -f1)
+    [ "$al_path" != "off" ] && [ -n "$al_path" ] && access_log="$al_path"
+  fi
+
+  # ── error_log ──────────────────────────────────────────────────────────
+  local error_log=""
+  local el_line
+  el_line=$(echo "$block" | grep -m1 -E '^\s*error_log\s+' \
+    | sed 's/^\s*error_log\s*//' | tr -d ';' | xargs 2>/dev/null)
+  if [ -n "$el_line" ]; then
+    local el_path
+    el_path=$(echo "$el_line" | cut -d' ' -f1)
+    [ "$el_path" != "off" ] && [ -n "$el_path" ] && error_log="$el_path"
+  fi
+
+  # Skip blocks with no log info at all (usually catch-all or include stubs)
+  if [ -z "$access_log" ] && [ -z "$error_log" ] && [ "$is_default" = "true" ]; then
+    return 0
+  fi
+
+  # Minimal JSON escaping (backslash and double-quote in paths)
+  access_log="${access_log//\\/\\\\}"; access_log="${access_log//\"/\\\"}"
+  error_log="${error_log//\\/\\\\}";   error_log="${error_log//\"/\\\"}"
+  domain="${domain//\"/\\\"}"
+
+  VHOST_RESULT="{\"domain\":\"${domain}\",\"access_log\":\"${access_log}\",\"error_log\":\"${error_log}\",\"is_default\":${is_default}}"
+}
+
+# Public: scans all Nginx config files and returns a JSON array of virtual hosts.
+# Output format:
+#   [{"domain":"shop.example.com","access_log":"/var/log/nginx/shop.access.log","error_log":"/var/log/nginx/shop.error.log","is_default":false}, ...]
+detect_nginx_vhosts() {
+  local json_array="["
+  local first=true
+  local config_files=()
+
+  # Scan standard Nginx config locations
+  for dir in /etc/nginx/sites-enabled /etc/nginx/conf.d; do
+    [ -d "$dir" ] || continue
+    while IFS= read -r -d '' f; do
+      config_files+=("$f")
+    done < <(find "$dir" -maxdepth 1 \( -type f -o -type l \) -print0 2>/dev/null)
+  done
+  # Also include main config as fallback
+  [ -f /etc/nginx/nginx.conf ] && config_files+=("/etc/nginx/nginx.conf")
+
+  for cfg_file in "${config_files[@]}"; do
+    [ -r "$cfg_file" ] || continue
+
+    # Read file line by line, track brace depth to extract server { } blocks
+    local in_server=false
+    local depth=0
+    local block=""
+
+    while IFS= read -r line || [ -n "$line" ]; do
+      # Strip inline comments before processing
+      line="${line%%#*}"
+
+      # Look for 'server {' at the top level (depth 0)
+      if [ "$in_server" = false ] && [ "$depth" -eq 0 ]; then
+        if echo "$line" | grep -qE '^\s*server\s*\{?\s*$|^\s*server\s+\{'; then
+          in_server=true
+          block=""
+          local o c
+          o=$(echo "$line" | tr -cd '{' | wc -c)
+          c=$(echo "$line" | tr -cd '}' | wc -c)
+          depth=$(( depth + o - c ))
+          continue
+        fi
+      fi
+
+      if [ "$in_server" = true ]; then
+        block="${block}"$'\n'"${line}"
+
+        local o c
+        o=$(echo "$line" | tr -cd '{' | wc -c)
+        c=$(echo "$line" | tr -cd '}' | wc -c)
+        depth=$(( depth + o - c ))
+
+        # When depth hits 0 we've closed the server block
+        if [ "$depth" -le 0 ]; then
+          _parse_nginx_server_block "$block"
+          if [ -n "$VHOST_RESULT" ]; then
+            $first || json_array+=","
+            json_array+="$VHOST_RESULT"
+            first=false
+          fi
+          in_server=false
+          depth=0
+          block=""
+        fi
+      fi
+    done < "$cfg_file"
+  done
+
+  json_array+="]"
+  echo "$json_array"
+}
+
 # ---------- NGINX ----------
 discover_nginx() {
   local UNIT=$1
@@ -297,6 +437,12 @@ discover_nginx() {
   local STATUS="no_logs"
   [ -n "$PATHS" ] && STATUS="logs_found"
   unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  
+  # Phase 3: Parse Nginx virtual hosts for domain-aware config
+  local VHOSTS_JSON
+  VHOSTS_JSON=$(detect_nginx_vhosts)
+  NGINX_VHOSTS_JSON["nginx"]="$VHOSTS_JSON"
+  
   register_service "nginx" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
 }
 
@@ -2279,11 +2425,18 @@ for SVC in "${ALL_SERVICES[@]}"; do
   ESC_NOTES=$(json_escape "${SVC_NOTES[$SVC]:-}")
   ESC_PORT=$(json_escape "${SVC_PORT[$SVC]:-}")
   ESC_VERSION=$(json_escape "${SVC_VERSION[$SVC]:-}")
-  ITEM="{\"name\":\"${ESC_NAME}\",\"status\":\"${ESC_STATUS}\",\"log_paths\":\"${ESC_LOG_PATHS}\",\"notes\":\"${ESC_NOTES}\",\"port\":$( [ -n "${SVC_PORT[$SVC]:-}" ] && printf '%s' "${SVC_PORT[$SVC]}" || printf 'null' ),\"version\":\"${ESC_VERSION}\"}"
+  
+  # Phase 3: Add virtual_hosts for nginx if available
+  VHOSTS_FIELD=""
+  if [[ "$SVC" == "nginx" ]] && [ -n "${NGINX_VHOSTS_JSON[$SVC]:-}" ]; then
+    VHOSTS_FIELD=",\"virtual_hosts\":${NGINX_VHOSTS_JSON[$SVC]}"
+  fi
+  
+  ITEM="{\"name\":\"${ESC_NAME}\",\"status\":\"${ESC_STATUS}\",\"log_paths\":\"${ESC_LOG_PATHS}\",\"notes\":\"${ESC_NOTES}\",\"port\":$( [ -n "${SVC_PORT[$SVC]:-}" ] && printf '%s' "${SVC_PORT[$SVC]}" || printf 'null' ),\"version\":\"${ESC_VERSION}\"${VHOSTS_FIELD}}"
   if [[ "$SVC" == docker_* ]]; then
     CNAME="${SVC#docker_}"
     ESC_CNAME=$(json_escape "$CNAME")
-    ITEM="{\"name\":\"${ESC_CNAME}\",\"status\":\"${ESC_STATUS}\",\"log_paths\":\"${ESC_LOG_PATHS}\",\"notes\":\"${ESC_NOTES}\",\"port\":$( [ -n "${SVC_PORT[$SVC]:-}" ] && printf '%s' "${SVC_PORT[$SVC]}" || printf 'null' ),\"version\":\"${ESC_VERSION}\"}"
+    ITEM="{\"name\":\"${ESC_CNAME}\",\"status\":\"${ESC_STATUS}\",\"log_paths\":\"${ESC_LOG_PATHS}\",\"notes\":\"${ESC_NOTES}\",\"port\":$( [ -n "${SVC_PORT[$SVC]:-}" ] && printf '%s' "${SVC_PORT[$SVC]}" || printf 'null' ),\"version\":\"${ESC_VERSION}\"${VHOSTS_FIELD}}"
     [ -n "$JSON_CONTAINER_SERVICES" ] && JSON_CONTAINER_SERVICES="${JSON_CONTAINER_SERVICES},"
     JSON_CONTAINER_SERVICES="${JSON_CONTAINER_SERVICES}${ITEM}"
   else

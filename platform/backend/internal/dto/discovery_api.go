@@ -1,6 +1,11 @@
+// internal/dto/discovery_api.go
 package dto
 
-import "gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/catalog"
+import (
+	"time"
+
+	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/catalog"
+)
 
 type DiscoveryHostListItem struct {
 	MachineID    string `json:"machine_id"`
@@ -32,38 +37,58 @@ type DiscoveryServiceListItem struct {
 }
 
 type DiscoveryServiceDetailResponse struct {
-	ID                  uint                     `json:"id"`
-	MachineID           string                   `json:"machine_id"`
-	Hostname            string                   `json:"hostname"`
-	ServiceName         string                   `json:"service_name"`
-	Port                *int                     `json:"port,omitempty"`
-	Version             string                   `json:"version,omitempty"`
-	Category            string                   `json:"category"`
-	IsSupported         bool                     `json:"is_supported"`
-	LoggingMode         string                   `json:"logging_mode"`
-	UsesJournald        bool                     `json:"uses_journald"`
-	UsesSyslog          bool                     `json:"uses_syslog"`
-	AccessLogPath       string                   `json:"access_log_path"`
-	ErrorLogPath        string                   `json:"error_log_path"`
-	ConfirmedLogPath    string                   `json:"confirmed_log_path,omitempty"`
-	LogPathSource       string                   `json:"log_path_source"`
-	EffectiveLogPaths   []string                 `json:"effective_log_paths"`
-	SuggestedLogPath    string                   `json:"suggested_log_path,omitempty"`
-	UserMetricsEndpoint string                   `json:"user_metrics_endpoint,omitempty"`
-	SuggestedMetricsEndpoint string              `json:"suggested_metrics_endpoint,omitempty"`
-	MetricsMode         string                   `json:"metrics_mode"`
-	IsJavaApp           bool                     `json:"is_java_app"`
-	JMXExporterPort     *int                     `json:"jmx_exporter_port,omitempty"`
-	DetectedLogPaths    []string                 `json:"detected_log_paths"`
-	LogCollectionOn     bool                     `json:"log_collection_on"`
-	MetricCollectionOn  bool                     `json:"metric_collection_on"`
-	IntegrationStatus   string                   `json:"integration_status"`
-	VulnScanSupported   bool                     `json:"vuln_scan_supported"`
-	VulnScanStatus      string                   `json:"vuln_scan_status"`
-	LastVulnScanAt      string                   `json:"last_vuln_scan_at,omitempty"`
-	VulnStatusMessage   string                   `json:"vuln_status_message"`
-	Vulnerabilities     []ServiceVulnerabilityItem `json:"vulnerabilities"`
-	Catalog             *catalog.ServiceDef      `json:"catalog,omitempty"`
+	ID                       uint                       `json:"id"`
+	MachineID                string                     `json:"machine_id"`
+	Hostname                 string                     `json:"hostname"`
+	ServiceName              string                     `json:"service_name"`
+	Port                     *int                       `json:"port,omitempty"`
+	Version                  string                     `json:"version,omitempty"`
+	Category                 string                     `json:"category"`
+	IsSupported              bool                       `json:"is_supported"`
+	LoggingMode              string                     `json:"logging_mode"`
+	UsesJournald             bool                       `json:"uses_journald"`
+	UsesSyslog               bool                       `json:"uses_syslog"`
+	AccessLogPath            string                     `json:"access_log_path"`
+	ErrorLogPath             string                     `json:"error_log_path"`
+	ConfirmedLogPath         string                     `json:"confirmed_log_path,omitempty"`
+	LogPathSource            string                     `json:"log_path_source"`
+	EffectiveLogPaths        []string                   `json:"effective_log_paths"`
+	SuggestedLogPath         string                     `json:"suggested_log_path,omitempty"`
+	UserMetricsEndpoint      string                     `json:"user_metrics_endpoint,omitempty"`
+	SuggestedMetricsEndpoint string                     `json:"suggested_metrics_endpoint,omitempty"`
+	MetricsMode              string                     `json:"metrics_mode"`
+	IsJavaApp                bool                       `json:"is_java_app"`
+	JMXExporterPort          *int                       `json:"jmx_exporter_port,omitempty"`
+	DetectedLogPaths         []string                   `json:"detected_log_paths"`
+	LogCollectionOn          bool                       `json:"log_collection_on"`
+	MetricCollectionOn       bool                       `json:"metric_collection_on"`
+	IntegrationStatus        string                     `json:"integration_status"`
+	VulnScanSupported        bool                       `json:"vuln_scan_supported"`
+	VulnScanStatus           string                     `json:"vuln_scan_status"`
+	LastVulnScanAt           string                     `json:"last_vuln_scan_at,omitempty"`
+	VulnStatusMessage        string                     `json:"vuln_status_message"`
+	Vulnerabilities          []ServiceVulnerabilityItem `json:"vulnerabilities"`
+	Catalog                  *catalog.ServiceDef        `json:"catalog,omitempty"`
+	NginxVirtualHosts        []NginxVirtualHostResponse `json:"nginx_virtual_hosts,omitempty"`
+}
+
+// NginxVirtualHostResponse represents a merged virtual host (one per domain)
+// in API responses. One DB row per log_kind is merged into a single object
+// with both access_log and error_log fields.
+type NginxVirtualHostResponse struct {
+	ID          uint   `json:"id"`
+	Domain      string `json:"domain"`
+	AccessLog   string `json:"access_log,omitempty"`
+	ErrorLog    string `json:"error_log,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	IsSharedLog bool   `json:"is_shared_log"`
+	IsDefault   bool   `json:"is_default"`
+	Source      string `json:"source"` // "detected" or "user"
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+
+	// Internal helper used during grouping in groupVirtualHosts(); not serialized.
+	UpdatedAt_t time.Time `json:"-"`
 }
 
 type ServiceVulnerabilityItem struct {
@@ -81,9 +106,22 @@ type UpdateCollectionRequest struct {
 }
 
 type UpdateServiceConfigRequest struct {
-	ConfirmedLogPath   string `json:"confirmed_log_path"`
-	UserMetricsEndpoint string `json:"user_metrics_endpoint"`
-	MetricsMode         string `json:"metrics_mode"`
-	IsJavaApp           bool   `json:"is_java_app"`
-	JMXExporterPort     *int   `json:"jmx_exporter_port"`
+	ConfirmedLogPath    string                    `json:"confirmed_log_path"`
+	UserMetricsEndpoint string                    `json:"user_metrics_endpoint"`
+	MetricsMode         string                    `json:"metrics_mode"`
+	IsJavaApp           bool                      `json:"is_java_app"`
+	JMXExporterPort     *int                      `json:"jmx_exporter_port"`
+	NginxVirtualHosts   []NginxVirtualHostRequest `json:"nginx_virtual_hosts,omitempty"`
+}
+
+// NginxVirtualHostRequest is used when saving the virtual hosts table from the UI.
+// One entry per domain row; the backend splits it into separate DB rows per log_kind.
+type NginxVirtualHostRequest struct {
+	ID          uint   `json:"id,omitempty"`
+	Domain      string `json:"domain" validate:"required"`
+	AccessLog   string `json:"access_log"`
+	ErrorLog    string `json:"error_log"`
+	Enabled     bool   `json:"enabled"`
+	IsSharedLog bool   `json:"is_shared_log"`
+	IsDefault   bool   `json:"is_default"`
 }

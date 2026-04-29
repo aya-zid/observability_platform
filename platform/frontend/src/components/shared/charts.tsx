@@ -95,7 +95,7 @@ export function ResponseTimeChart({ data, loading }: { data: ResponseTimeData[],
           <XAxis dataKey="time" tick={{ fontSize: 10 }} tickLine={false} />
           <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} label={{ value: 'ms', angle: -90, position: 'insideLeft' }} />
           <Tooltip
-            formatter={(v: any) => v?.toFixed?.(1) ?? '0' + ' ms'}
+            formatter={(value) => typeof value === 'number' ? `${value.toFixed(1)} ms` : `${value} ms`}
             contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8 }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -131,7 +131,7 @@ export function BandwidthChart({ data, loading }: { data: BandwidthData[], loadi
           <XAxis dataKey="time" tick={{ fontSize: 10 }} tickLine={false} />
           <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} label={{ value: 'MB/s' }} />
           <Tooltip
-            formatter={(v: any) => v?.toFixed?.(2) ?? '0' + ' MB/s'}
+            formatter={(value) => typeof value === 'number' ? `${value.toFixed(2)} MB/s` : `${value} MB/s`}
             contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8 }}
           />
           <Bar dataKey="mb_per_sec" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />

@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useSearchParams } from "react-router-dom"
 
@@ -85,9 +85,9 @@ export default function IntegrationsPage() {
     enabled: !!selectedHost,
   })
 
-  const hosts = hostsQuery.data ?? []
-  const catalog = catalogQuery.data ?? []
-  const services = servicesQuery.data ?? []
+  const hosts = useMemo(() => hostsQuery.data ?? [], [hostsQuery.data])
+  const catalog = useMemo(() => catalogQuery.data ?? [], [catalogQuery.data])
+  const services = useMemo(() => servicesQuery.data ?? [], [servicesQuery.data])
 
   const categoryLabelByKey: Record<string, string> = {}
   for (const item of catalog) categoryLabelByKey[item.category] = item.category

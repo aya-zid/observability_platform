@@ -1,12 +1,25 @@
 package dto
 
+// NginxVirtualHostDiscovered represents a detected Nginx virtual host during discovery
+// Used to map domains to their access/error log files
+type NginxVirtualHostDiscovered struct {
+	Domain    string `json:"domain"`               // e.g., "shop.example.com" or "(default)"
+	AccessLog string `json:"access_log,omitempty"` // e.g., "/var/log/nginx/shop.access.log"
+	ErrorLog  string `json:"error_log,omitempty"`  // e.g., "/var/log/nginx/shop.error.log"
+	IsDefault bool   `json:"is_default"`           // true if this is the default/catch-all server block
+}
+
 type InstallDiscoveryService struct {
 	Name     string `json:"name"`
 	Status   string `json:"status"`
-	LogPaths string `json:"log_paths"`
-	Notes    string `json:"notes"`
-	Port     *int   `json:"port,omitempty"`
-	Version  string `json:"version,omitempty"`
+	LogPaths string `json:"log_paths"` // Legacy: flat comma-separated paths
+
+	// Phase 2: Nginx-specific virtual hosts (optional, for backward compatibility)
+	VirtualHosts []NginxVirtualHostDiscovered `json:"virtual_hosts,omitempty"`
+
+	Notes   string `json:"notes"`
+	Port    *int   `json:"port,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 type InstallDiscoveryReportRequest struct {

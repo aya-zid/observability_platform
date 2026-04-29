@@ -140,8 +140,6 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
-      - ./config/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
-      - ./config/grafana-dashboards:/etc/grafana/dashboards:ro
     networks:
       - obs-network
     depends_on:

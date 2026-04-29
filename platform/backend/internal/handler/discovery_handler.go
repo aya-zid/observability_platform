@@ -1,3 +1,7 @@
+// internal/handler/discovery_handler.go
+// Only the persistHostServices function changes — specifically the nginx fallback block.
+// Everything else is identical to your current file.
+
 package handler
 
 import (
@@ -117,7 +121,6 @@ func (h *DiscoveryHandler) runIngest(
 		hostRepo := repository.NewHostRepository(tx)
 		discoveryRepo := repository.NewDiscoveryRepository(tx)
 
-		// Ensure host row exists/updated when install report arrives.
 		if err := hostRepo.UpsertByTenantMachineCtx(
 			c.Request().Context(),
 			tenant.ID,
@@ -177,6 +180,154 @@ func persistHostServices(ctx context.Context, tenantID uint, machineID string, s
 		if err := discoveryRepo.ReplaceServiceLogPathsCtx(ctx, tenantID, upserted.ID, paths); err != nil {
 			return err
 		}
+
+		if svcName != "nginx" {
+			continue
+		}
+
+		// ── Nginx virtual host persistence ────────────────────────────────────
+		//
+		// The agent sends virtual_hosts when it successfully parsed sites-enabled/.
+		// We build per-domain rows from that structured data.
+		//
+		// Fallback: if the agent sent no virtual_hosts (old agent version, or
+		// detection failed), we try to infer domains from the flat log path list.
+		// We match "access" paths to "error" paths by their common prefix
+		// (e.g. shop.access.log ↔ shop.error.log) instead of using findAccessError
+		// which incorrectly picks a single access + a single error path.
+
+		if len(svc.VirtualHosts) > 0 {
+			// ── Happy path: agent sent structured vhost data ──────────────────
+			detectedVhosts := make([]domain.NginxVirtualHost, 0, len(svc.VirtualHosts)*2)
+			for _, vh := range svc.VirtualHosts {
+				domainName := strings.TrimSpace(vh.Domain)
+				if domainName == "" {
+					domainName = "(default)"
+				}
+				if vh.AccessLog != "" {
+					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
+						Domain:    domainName,
+						LogKind:   "access",
+						LogPath:   strings.TrimSpace(vh.AccessLog),
+						Source:    "detected",
+						Enabled:   true,
+						IsDefault: vh.IsDefault,
+					})
+				}
+				if vh.ErrorLog != "" {
+					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
+						Domain:    domainName,
+						LogKind:   "error",
+						LogPath:   strings.TrimSpace(vh.ErrorLog),
+						Source:    "detected",
+						Enabled:   true,
+						IsDefault: vh.IsDefault,
+					})
+				}
+			}
+			if len(detectedVhosts) > 0 {
+				if err := discoveryRepo.UpsertDetectedVirtualHostsCtx(ctx, tenantID, upserted.ID, detectedVhosts); err != nil {
+					return err
+				}
+			}
+		} else if len(paths) > 0 {
+			// ── Fallback: infer domains from the flat log path list ───────────
+			//
+			// Strategy: build a map from "stem" → {access, error} path.
+			// Stem is the filename without the access/error suffix.
+			// e.g. "/var/log/nginx/shop.access.log" → stem "shop"
+			//      "/var/log/nginx/shop.error.log"  → same stem "shop"
+			//
+			// This correctly groups shop.access.log with shop.error.log,
+			// and access.log with error.log (the default vhost), etc.
+
+			type logPair struct {
+				access    string
+				errorPath string
+				isDefault bool
+			}
+			// stem → pair, plus ordered keys to keep deterministic output
+			pairs := map[string]*logPair{}
+			order := []string{}
+
+			for _, p := range paths {
+				base := p
+				// Take just the filename
+				if idx := strings.LastIndex(p, "/"); idx >= 0 {
+					base = p[idx+1:]
+				}
+				base = strings.TrimSuffix(base, ".log")
+
+				var stem string
+				var kind string
+				if strings.HasSuffix(base, ".access") {
+					stem = strings.TrimSuffix(base, ".access")
+					kind = "access"
+				} else if strings.HasSuffix(base, ".error") {
+					stem = strings.TrimSuffix(base, ".error")
+					kind = "error"
+				} else if base == "access" {
+					stem = "default"
+					kind = "access"
+				} else if base == "error" {
+					stem = "default"
+					kind = "error"
+				} else {
+					// Unrecognised pattern — put under its own stem
+					stem = base
+					kind = "access"
+				}
+
+				if _, ok := pairs[stem]; !ok {
+					pairs[stem] = &logPair{}
+					order = append(order, stem)
+				}
+				if kind == "access" {
+					pairs[stem].access = p
+				} else {
+					pairs[stem].errorPath = p
+				}
+			}
+
+			detectedVhosts := make([]domain.NginxVirtualHost, 0, len(pairs)*2)
+			for _, stem := range order {
+				pair := pairs[stem]
+				// Build a human-readable domain name from the stem
+				domainName := stem
+				isDefault := false
+				if stem == "default" {
+					domainName = "(default)"
+					isDefault = true
+				}
+
+				if pair.access != "" {
+					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
+						Domain:    domainName,
+						LogKind:   "access",
+						LogPath:   pair.access,
+						Source:    "detected",
+						Enabled:   true,
+						IsDefault: isDefault,
+					})
+				}
+				if pair.errorPath != "" {
+					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
+						Domain:    domainName,
+						LogKind:   "error",
+						LogPath:   pair.errorPath,
+						Source:    "detected",
+						Enabled:   true,
+						IsDefault: isDefault,
+					})
+				}
+			}
+
+			if len(detectedVhosts) > 0 {
+				if err := discoveryRepo.UpsertDetectedVirtualHostsCtx(ctx, tenantID, upserted.ID, detectedVhosts); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -217,7 +368,6 @@ func (h *DiscoveryHandler) bindDiscoveryRequest(c echo.Context) (dto.InstallDisc
 	return req, nil
 }
 
-// IngestHostServices stores host-level discovered services (non-docker).
 func (h *DiscoveryHandler) IngestHostServices(c echo.Context) error {
 	req, err := h.bindDiscoveryRequest(c)
 	if err != nil {
@@ -226,7 +376,6 @@ func (h *DiscoveryHandler) IngestHostServices(c echo.Context) error {
 	return h.runIngest(c, req, "ingest host services", persistHostServices)
 }
 
-// IngestContainerServices stores container-level discovered services.
 func (h *DiscoveryHandler) IngestContainerServices(c echo.Context) error {
 	req, err := h.bindDiscoveryRequest(c)
 	if err != nil {
@@ -235,7 +384,6 @@ func (h *DiscoveryHandler) IngestContainerServices(c echo.Context) error {
 	return h.runIngest(c, req, "ingest container services", persistContainerServices)
 }
 
-// IngestInstallReport keeps backward compatibility by ingesting both host + container services.
 func (h *DiscoveryHandler) IngestInstallReport(c echo.Context) error {
 	req, err := h.bindDiscoveryRequest(c)
 	if err != nil {

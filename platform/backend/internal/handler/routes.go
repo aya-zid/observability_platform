@@ -20,11 +20,15 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	userRepo := repository.NewUserRepository(infrastructure.DB)
 	hostRepo := repository.NewHostRepository(infrastructure.DB)
 	alertsRepo := repository.NewAlertsRepository(infrastructure.DB)
+	discoveryRepo := repository.NewDiscoveryRepository(infrastructure.DB)
 	tenantCache := cache.NewTenantCache(infrastructure.Redis)
 
 	// ── Auth routes (public) ─────────────────────────────────────────────────
 	authService := service.NewAuthService(infrastructure.DB, infrastructure.Redis, cfg, tenantRepo, userRepo)
 	authHandler := NewAuthHandler(authService, cfg)
+	queryService := service.NewQueryService(cfg, tenantRepo)
+	discoveryService := service.NewDiscoveryService(hostRepo, discoveryRepo, alertsRepo)
+	integrationService := service.NewIntegrationService(cfg, tenantRepo, discoveryRepo)
 
 	rlWindow := time.Duration(cfg.AuthRateLimitWindowSeconds) * time.Second
 	e.POST("/signup", authHandler.Signup, custommiddleware.RateLimitByIP(infrastructure.Redis, "signup", cfg.AuthSignupRateLimitPerWindow, rlWindow))
@@ -32,16 +36,22 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	e.POST("/refresh", authHandler.Refresh, custommiddleware.RateLimitByIP(infrastructure.Redis, "refresh", cfg.AuthRefreshRateLimitPerWindow, rlWindow))
 	e.POST("/logout", authHandler.Logout)
 	installHandler := NewInstallHandler(cfg)
-	integrationHandler := NewIntegrationHandler(cfg, tenantRepo, repository.NewDiscoveryRepository(infrastructure.DB))
+	integrationHandler := NewIntegrationHandler(integrationService)
 	alertsHandler := NewAlertsHandler(alertsRepo)
+	nginxDashboardService := service.NewNginxDashboardService(cfg, infrastructure.Redis)
+	nginxDashboardHandler := NewNginxDashboardHandler(
+		nginxDashboardService,
+		discoveryRepo,
+		tenantRepo,
+	)
 	e.GET("/install.sh", installHandler.AgentInstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
 
 	// ── Platform API (browser auth) ───────────────────────────────────────────
 	tenantHandler := NewTenantHandler(tenantRepo, userRepo, tenantCache)
-	discoveryAPIHandler := NewDiscoveryAPIHandler(hostRepo, repository.NewDiscoveryRepository(infrastructure.DB), alertsRepo)
-	queryHandler := NewQueryHandler(cfg, tenantRepo)
+	discoveryAPIHandler := NewDiscoveryAPIHandler(discoveryService)
+	queryHandler := NewQueryHandler(queryService)
 	api := e.Group("/api", custommiddleware.AuthMiddleware(tenantRepo))
 	{
 		api.GET("/me", tenantHandler.GetMe)
@@ -62,6 +72,11 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/query/logs/range", queryHandler.QueryLogsRange)
 		api.GET("/query/logs/labels", queryHandler.QueryLogsLabels)
 		api.GET("/grafana/dashboard-url", queryHandler.GrafanaDashboardURL)
+		api.GET("/nginx/:id/domains", nginxDashboardHandler.Domains)
+		api.GET("/nginx/:id/dashboard", nginxDashboardHandler.Dashboard)
+		api.GET("/nginx/:id/explorer", nginxDashboardHandler.Explorer)
+		api.GET("/nginx/:id/error-logs", nginxDashboardHandler.ErrorLogs)
+		api.GET("/nginx/:id/ip-investigation", nginxDashboardHandler.IPInvestigation)
 	}
 
 	// ── Health check ─────────────────────────────────────────────────────────

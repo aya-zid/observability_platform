@@ -25,6 +25,7 @@ services:
       - obs-platform-internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U obsuser -d obs_saas_dev"]
+      start_period: 60s
       interval: 5s
       timeout: 5s
       retries: 5

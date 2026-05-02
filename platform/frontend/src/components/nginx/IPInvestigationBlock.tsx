@@ -91,7 +91,7 @@ function mapTs(points: NginxTimePoint[]): Record<string, number | string>[] {
   return (points ?? []).map((pt) => {
     const row: Record<string, number | string> = {}
     for (const [k, v] of Object.entries(pt)) {
-      row[k] = k === 'time' ? fmtTime(Number(v)) : v
+      row[k] = k === 'time' ? fmtTime(Number(v ?? 0)) : (v ?? 0)
     }
     return row
   })
@@ -442,7 +442,7 @@ export function IPInvestigationBlock({
             </div>
 
             {/* ── Charts ────────────────────────────────────────────────── */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4">
 
               {/* Requests per minute */}
               <div className="rounded-lg border border-border bg-card p-4 shadow-sm">

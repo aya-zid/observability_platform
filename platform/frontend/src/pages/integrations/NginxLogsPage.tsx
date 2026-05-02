@@ -406,12 +406,6 @@ export function NginxLogsPage() {
   // Unparseable lines (parsed === null) are always hidden from the log list
   // because we can't filter or display them meaningfully — but they should
   // not inflate the "Loaded" counter either.
-  const hasActiveFilter =
-    filters.method !== null ||
-    filters.statusCode !== null ||
-    filters.searchPath !== null ||
-    filters.searchIP !== null
-
   const filteredEntries = allEntries.filter(({ parsed }) => {
     if (!parsed) return false // skip lines that couldn't be parsed regardless
     if (filters.method && parsed.method !== filters.method) return false

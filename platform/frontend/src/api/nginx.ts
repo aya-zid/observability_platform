@@ -1,7 +1,7 @@
 // src/api/nginx.ts
 import client from "@/api/client"
 
-export type NginxTimePoint = Record<string, number>
+export type NginxTimePoint = Record<string, number | null>
 
 export type NginxLabelCount = {
   label: string
@@ -24,12 +24,13 @@ export type NginxSuspiciousIP = {
 
 export type NginxSlowRequest = {
   path: string
+  normalized_path: string
   method: string
   status: number
   ip: string
   rt: number // seconds
   referer?: string // HTTP referer header
-  userAgent?: string // HTTP user-agent header
+  user_agent?: string // HTTP user-agent header
   timestamp?: string // Log timestamp
 }
 
@@ -57,6 +58,9 @@ export type NginxDashboardSummary = {
   top_statuses: NginxLabelCount[]
   top_methods: NginxLabelCount[]
   top_error_paths: NginxErrorPathStat[]
+  // Normalized path aggregations
+  top_normalized_paths: NginxLabelCount[]
+  top_normalized_error_paths: NginxErrorPathStat[]
   suspicious_ips: NginxSuspiciousIP[]
 
   // Latest scalar connection values for stat cards (from nginx status endpoint)
@@ -72,6 +76,8 @@ export type NginxDashboardSummary = {
 
   // Slow requests table (top 100, rt > 1s, computed server-side)
   slow_requests: NginxSlowRequest[]
+  // Slow requests with normalized paths
+  slow_requests_normalized: NginxSlowRequest[]
 }
 
 export type NginxExplorerResult = {
@@ -142,8 +148,6 @@ export async function getNginxErrorLogs(
   return data
 }
 
-// src/api/nginx.ts — ADD these types and function (append to existing file)
-
 export type NginxIPPathStat = {
   path: string
   method: string
@@ -151,7 +155,7 @@ export type NginxIPPathStat = {
   errors: number
   avg_rt: number
   status: string
-  status_breakdown: Record<string, number> // e.g. {"200": 42, "404": 8}
+  status_breakdown: Record<string, number>
 }
 
 export type NginxIPInvestigationResult = {
@@ -180,6 +184,88 @@ export async function getNginxIPInvestigation(
   params: NginxIPInvestigationParams,
 ): Promise<NginxIPInvestigationResult> {
   const { data } = await client.get<NginxIPInvestigationResult>(`/api/nginx/${id}/ip-investigation`, {
+    params,
+  })
+  return data
+}
+
+// ─── Performance chart types (Charts 1, 2, 3) ────────────────────────────────
+
+/** Chart 1: RT Intensity Heatmap
+ *  Top-20 normalized paths × 20 three-minute buckets, cell = P95 RT in ms.
+ */
+export type NginxRTHeatmap = {
+  paths: string[]    // length ≤ 20, y-axis labels
+  buckets: string[]  // length = 20, x-axis labels e.g. "09:00"
+  matrix: number[][] // matrix[pathIdx][bucketIdx] = P95 RT ms (0 = no data)
+}
+
+/** Chart 2: Raw RT Scatter — individual/aggregated request dots.
+ */
+export type NginxScatterPoint = {
+  time: number           // unix ms within the selected hour
+  rt: number             // response time in ms
+  status: number         // HTTP status code
+  path: string           // raw path (individual dots) or "" (aggregate dots)
+  method: string
+  normalized_path?: string
+  is_aggregate?: boolean // true = avg dot, false = individual dot
+  count?: number         // for aggregate dots: how many requests it represents
+  window_label?: string  // e.g. "09:00–09:03" for aggregate dots
+}
+
+export type NginxRTScatter = {
+  points: NginxScatterPoint[]
+}
+
+/** Chart 3: RT Distribution by Status — Avg / P95 / P99 per status class. */
+export type NginxRTStatusMetrics = {
+  avg: number
+  p95: number
+  p99: number
+  count: number
+  status_breakdown?: Record<string, number>
+}
+
+export type NginxRTDistribution = {
+  "2xx": NginxRTStatusMetrics
+  "3xx": NginxRTStatusMetrics
+  "4xx": NginxRTStatusMetrics
+  "5xx": NginxRTStatusMetrics
+}
+
+// Common params for all three performance endpoints
+export type NginxPerformanceParams = {
+  start: string   // nanoseconds as string
+  end: string     // nanoseconds as string
+  domain?: string
+}
+
+export async function getNginxRTHeatmap(
+  id: string,
+  params: NginxPerformanceParams,
+): Promise<NginxRTHeatmap> {
+  const { data } = await client.get<NginxRTHeatmap>(`/api/nginx/${id}/performance/heatmap`, {
+    params,
+  })
+  return data
+}
+
+export async function getNginxRTScatter(
+  id: string,
+  params: NginxPerformanceParams,
+): Promise<NginxRTScatter> {
+  const { data } = await client.get<NginxRTScatter>(`/api/nginx/${id}/performance/scatter`, {
+    params,
+  })
+  return data
+}
+
+export async function getNginxRTDistribution(
+  id: string,
+  params: NginxPerformanceParams,
+): Promise<NginxRTDistribution> {
+  const { data } = await client.get<NginxRTDistribution>(`/api/nginx/${id}/performance/dist`, {
     params,
   })
   return data

@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -28,26 +27,19 @@ type NginxIPPathStat struct {
 }
 
 type NginxIPInvestigationResult struct {
-	TotalRequests float64 `json:"total_requests"`
-	Total4xx      float64 `json:"total_4xx"`
-	Total5xx      float64 `json:"total_5xx"`
-	ErrorRate     float64 `json:"error_rate"`
-	FirstSeenToday string `json:"first_seen_today"`
-	LastSeenToday  string `json:"last_seen_today"`
+	TotalRequests  float64 `json:"total_requests"`
+	Total4xx       float64 `json:"total_4xx"`
+	Total5xx       float64 `json:"total_5xx"`
+	ErrorRate      float64 `json:"error_rate"`
+	FirstSeenToday string  `json:"first_seen_today"`
+	LastSeenToday  string  `json:"last_seen_today"`
 
 	ReqRateTimeseries []TimePoint `json:"req_rate_timeseries"`
 	StatusTimeseries  []TimePoint `json:"status_timeseries"`
 	RTTimeseries      []TimePoint `json:"rt_timeseries"`
 
-	Paths []NginxIPPathStat `json:"paths"`
-}
-
-type pathAcc struct {
-	Count    float64
-	Errors   float64
-	RTSum    float64
-	Methods  map[string]float64
-	Statuses map[string]float64
+	Paths    []NginxIPPathStat `json:"paths"`
+	Warnings []string          `json:"warnings,omitempty"`
 }
 
 // ─── Main Function ────────────────────────────────────────────────────────────
@@ -66,12 +58,7 @@ func (s *NginxDashboardService) GetIPInvestigation(
 	ipFilter := fmt.Sprintf(`%s %s | ip = "%s"`, base, parseExpr, lokiLabelValue(ip))
 	ipFilterRT := fmt.Sprintf(`%s %s %s | ip = "%s"`, base, parseExpr, rtParseExpr, lokiLabelValue(ip))
 
-	// Exact counts + paths from raw logs (limit 5000 is usually enough)
-	rawLogs, _ := s.lokiQueryLogLinesDir(ctx, tenantUUID, ipFilter, startNs, endNs, 5000, "backward")
-	parsed := parseNginxLogLinesForIP(rawLogs, ip)
-	result := computeExactStatsFromLogs(parsed)
-
-	// ── Timeseries (fixed 1m buckets for clean per-minute counts) ─────────────
+	// All queries via metric aggregation — no raw log fetch, no line-count limit.
 	const countInterval = "1m"
 
 	type lR struct {
@@ -85,20 +72,79 @@ func (s *NginxDashboardService) GetIPInvestigation(
 	}
 
 	var wg sync.WaitGroup
-	var reqRate, st2xx, st3xx, st4xx, st5xx, avgRT lR
+	var (
+		reqRate, st2xx, st3xx, st4xx, st5xx, avgRT lR
+		pathCounts, pathErrors, pathAvgRT           lR
+		pathMethodCounts, pathStatusCounts          lR
+	)
 
-	wg.Add(6)
-	go func() { defer wg.Done(); reqRate = lq(fmt.Sprintf(`sum(count_over_time(%s [%s]))`, ipFilter, countInterval)) }()
-	go func() { defer wg.Done(); st2xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "2.." [%s]))`, ipFilter, countInterval)) }()
-	go func() { defer wg.Done(); st3xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "3.." [%s]))`, ipFilter, countInterval)) }()
-	go func() { defer wg.Done(); st4xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "4.." [%s]))`, ipFilter, countInterval)) }()
-	go func() { defer wg.Done(); st5xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "5.." [%s]))`, ipFilter, countInterval)) }()
-	go func() { defer wg.Done(); avgRT = lq(fmt.Sprintf(`avg(avg_over_time(%s | unwrap rt [%s]))`, ipFilterRT, countInterval)) }()
+	wg.Add(11)
+
+	// Timeseries
+	go func() {
+		defer wg.Done()
+		reqRate = lq(fmt.Sprintf(`sum(count_over_time(%s [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		st2xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "2.." [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		st3xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "3.." [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		st4xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "4.." [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		st5xx = lq(fmt.Sprintf(`sum(count_over_time(%s | status =~ "5.." [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		avgRT = lq(fmt.Sprintf(`avg(avg_over_time(%s | unwrap rt [%s]))`, ipFilterRT, countInterval))
+	}()
+
+	// Per-path aggregations — Loki groups by the parsed "path" label
+	go func() {
+		defer wg.Done()
+		pathCounts = lq(fmt.Sprintf(`sum by (path) (count_over_time(%s [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		pathErrors = lq(fmt.Sprintf(`sum by (path) (count_over_time(%s | status =~ "4..|5.." [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		pathAvgRT = lq(fmt.Sprintf(`avg by (path) (avg_over_time(%s | unwrap rt [%s]))`, ipFilterRT, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		pathMethodCounts = lq(fmt.Sprintf(`sum by (path, method) (count_over_time(%s [%s]))`, ipFilter, countInterval))
+	}()
+	go func() {
+		defer wg.Done()
+		pathStatusCounts = lq(fmt.Sprintf(`sum by (path, status) (count_over_time(%s [%s]))`, ipFilter, countInterval))
+	}()
+
 	wg.Wait()
 
+	result := &NginxIPInvestigationResult{}
+
+	// ── Scalar totals ────────────────────────────────────────────────────────
+	result.TotalRequests = sumLokiSeries(reqRate.data)
+	result.Total4xx = sumLokiSeries(st4xx.data)
+	result.Total5xx = sumLokiSeries(st5xx.data)
+	if result.TotalRequests > 0 {
+		result.ErrorRate = ((result.Total4xx + result.Total5xx) / result.TotalRequests) * 100
+	}
+
+	// ── Timeseries ───────────────────────────────────────────────────────────
 	if len(reqRate.data) > 0 {
 		for _, pt := range reqRate.data[0].Values {
-			result.ReqRateTimeseries = append(result.ReqRateTimeseries, TimePoint{"time": pt[0], "req": pt[1]})
+			result.ReqRateTimeseries = append(result.ReqRateTimeseries,
+				TimePoint{"time": pt[0], "req": pt[1]})
 		}
 	}
 
@@ -108,11 +154,21 @@ func (s *NginxDashboardService) GetIPInvestigation(
 
 	if len(avgRT.data) > 0 {
 		for _, pt := range avgRT.data[0].Values {
-			result.RTTimeseries = append(result.RTTimeseries, TimePoint{"time": pt[0], "avg_rt": pt[1] * 1000})
+			result.RTTimeseries = append(result.RTTimeseries,
+				TimePoint{"time": pt[0], "avg_rt": pt[1] * 1000})
 		}
 	}
 
-	// ── First / Last seen today (reliable Loki timestamp) ─────────────────────
+	// ── Path breakdown ───────────────────────────────────────────────────────
+	result.Paths = buildPathStats(
+		pathCounts.data,
+		pathErrors.data,
+		pathAvgRT.data,
+		pathMethodCounts.data,
+		pathStatusCounts.data,
+	)
+
+	// ── First / Last seen today ──────────────────────────────────────────────
 	todayStartNs := ipInvTodayMidnightNs()
 	nowNs := time.Now().UnixNano()
 
@@ -139,179 +195,151 @@ func (s *NginxDashboardService) GetIPInvestigation(
 	return result, nil
 }
 
-// ─── Log Parsing (unchanged) ──────────────────────────────────────────────────
+// ─── sumLokiSeries ────────────────────────────────────────────────────────────
+// Values is [][2]float64 — pt[0] = timestamp, pt[1] = value.
 
-func parseNginxLogLinesForIP(lines []string, targetIP string) []struct {
-	Path   string
-	Status int
-	RT     float64
-	Method string
-} {
-	var parsed []struct {
-		Path   string
-		Status int
-		RT     float64
-		Method string
-	}
-	for _, line := range lines {
-		p := parseNginxLogLineGo(line)
-		if p != nil && p.IP == targetIP {
-			parsed = append(parsed, struct {
-				Path   string
-				Status int
-				RT     float64
-				Method string
-			}{
-				Path:   p.Path,
-				Status: p.Status,
-				RT:     p.RT,
-				Method: p.Method,
-			})
+func sumLokiSeries(series []LokiMatrixSeries) float64 {
+	var total float64
+	for _, s := range series {
+		for _, pt := range s.Values {
+			total += pt[1]
 		}
 	}
-	return parsed
+	return total
 }
 
-func parseNginxLogLineGo(line string) *struct {
-	IP     string
-	Method string
-	Path   string
-	Status int
-	RT     float64
-} {
-	// ... (your existing implementation — keep it as-is)
-	// I'll omit repeating the whole function for brevity. Use the one you already have.
-	fields := strings.Fields(line)
-	if len(fields) < 6 {
-		return nil
-	}
-	ip := fields[0]
+// ─── buildPathStats ───────────────────────────────────────────────────────────
+// Reconstructs per-path stats from five separate metric query results.
+// Uses s.Metric["path"] (and "method" / "status") to read the label values,
+// matching the real LokiMatrixSeries struct that already works in the rest of
+// the codebase (see nginx_performance_service.go: series.Metric["status"]).
 
-	requestStart := strings.Index(line, `"`)
-	if requestStart == -1 {
-		return nil
-	}
-	requestEnd := strings.Index(line[requestStart+1:], `"`)
-	if requestEnd == -1 {
-		return nil
-	}
-	requestLine := line[requestStart+1 : requestStart+1+requestEnd]
-	reqParts := strings.Fields(requestLine)
-	if len(reqParts) < 2 {
-		return nil
+func buildPathStats(
+	countSeries []LokiMatrixSeries,
+	errorSeries []LokiMatrixSeries,
+	rtSeries []LokiMatrixSeries,
+	methodSeries []LokiMatrixSeries,
+	statusSeries []LokiMatrixSeries,
+) []NginxIPPathStat {
+
+	type acc struct {
+		count    float64
+		errors   float64
+		rtSum    float64
+		rtCount  float64
+		methods  map[string]float64
+		statuses map[string]float64
 	}
 
-	method := reqParts[0]
-	path := reqParts[1]
-
-	after := line[requestStart+1+requestEnd+1:]
-	statusFields := strings.Fields(after)
-	status := 0
-	if len(statusFields) > 0 {
-		fmt.Sscanf(statusFields[0], "%d", &status)
-	}
-
-	rt := 0.0
-	if rtIdx := strings.LastIndex(line, "rt="); rtIdx != -1 {
-		fmt.Sscanf(line[rtIdx+3:], "%f", &rt)
-	}
-
-	return &struct {
-		IP     string
-		Method string
-		Path   string
-		Status int
-		RT     float64
-	}{
-		IP:     ip,
-		Method: method,
-		Path:   path,
-		Status: status,
-		RT:     rt,
-	}
-}
-
-// ─── Stats Computation (unchanged) ────────────────────────────────────────────
-
-func computeExactStatsFromLogs(parsed []struct {
-	Path   string
-	Status int
-	RT     float64
-	Method string
-}) *NginxIPInvestigationResult {
-	// ... (keep your existing implementation)
-	result := &NginxIPInvestigationResult{}
-	pathMap := make(map[string]*pathAcc)
-
-	for _, l := range parsed {
-		result.TotalRequests++
-		if l.Status >= 400 {
-			if l.Status < 500 {
-				result.Total4xx++
-			} else {
-				result.Total5xx++
-			}
+	pathMap := make(map[string]*acc)
+	get := func(path string) *acc {
+		if a, ok := pathMap[path]; ok {
+			return a
 		}
+		a := &acc{
+			methods:  make(map[string]float64),
+			statuses: make(map[string]float64),
+		}
+		pathMap[path] = a
+		return a
+	}
 
-		if l.Path == "" {
+	// Total count per path
+	for _, s := range countSeries {
+		path := s.Metric["path"]
+		if path == "" {
 			continue
 		}
-
-		acc, ok := pathMap[l.Path]
-		if !ok {
-			acc = &pathAcc{
-				Methods:  make(map[string]float64),
-				Statuses: make(map[string]float64),
-			}
-			pathMap[l.Path] = acc
+		a := get(path)
+		for _, pt := range s.Values {
+			a.count += pt[1]
 		}
-		acc.Count++
-		acc.RTSum += l.RT
-		if l.Status >= 400 {
-			acc.Errors++
-		}
-		acc.Methods[l.Method]++
-		acc.Statuses[strconv.Itoa(l.Status)]++
 	}
 
-	if result.TotalRequests > 0 {
-		result.ErrorRate = ((result.Total4xx + result.Total5xx) / result.TotalRequests) * 100
+	// Error count per path (4xx + 5xx)
+	for _, s := range errorSeries {
+		path := s.Metric["path"]
+		if path == "" {
+			continue
+		}
+		a := get(path)
+		for _, pt := range s.Values {
+			a.errors += pt[1]
+		}
 	}
 
-	// Top 20 paths
+	// Average RT per path (avg of per-bucket avgs, good enough approximation)
+	for _, s := range rtSeries {
+		path := s.Metric["path"]
+		if path == "" {
+			continue
+		}
+		a := get(path)
+		for _, pt := range s.Values {
+			a.rtSum += pt[1]
+			a.rtCount++
+		}
+	}
+
+	// Dominant method per path
+	for _, s := range methodSeries {
+		path := s.Metric["path"]
+		method := s.Metric["method"]
+		if path == "" || method == "" {
+			continue
+		}
+		a := get(path)
+		for _, pt := range s.Values {
+			a.methods[method] += pt[1]
+		}
+	}
+
+	// Status breakdown per path
+	for _, s := range statusSeries {
+		path := s.Metric["path"]
+		status := s.Metric["status"]
+		if path == "" || status == "" {
+			continue
+		}
+		a := get(path)
+		for _, pt := range s.Values {
+			a.statuses[status] += pt[1]
+		}
+	}
+
+	// Sort by count desc, keep top 20
 	type entry struct {
 		path string
-		acc  *pathAcc
+		acc  *acc
 	}
-	var list []entry
+	list := make([]entry, 0, len(pathMap))
 	for p, a := range pathMap {
 		list = append(list, entry{p, a})
 	}
-
 	sort.Slice(list, func(i, j int) bool {
-		return list[i].acc.Count > list[j].acc.Count
+		return list[i].acc.count > list[j].acc.count
 	})
 	if len(list) > 20 {
 		list = list[:20]
 	}
 
+	stats := make([]NginxIPPathStat, 0, len(list))
 	for _, e := range list {
 		avgRT := 0.0
-		if e.acc.Count > 0 {
-			avgRT = (e.acc.RTSum / e.acc.Count) * 1000
+		if e.acc.rtCount > 0 {
+			avgRT = (e.acc.rtSum / e.acc.rtCount) * 1000 // seconds → milliseconds
 		}
-		result.Paths = append(result.Paths, NginxIPPathStat{
+		stats = append(stats, NginxIPPathStat{
 			Path:            e.path,
-			Count:           e.acc.Count,
-			Errors:          e.acc.Errors,
-			Method:          dominantKey(e.acc.Methods),
-			Status:          dominantKey(e.acc.Statuses),
+			Count:           e.acc.count,
+			Errors:          e.acc.errors,
+			Method:          dominantKey(e.acc.methods),
+			Status:          dominantKey(e.acc.statuses),
 			AvgRT:           avgRT,
-			StatusBreakdown: e.acc.Statuses,
+			StatusBreakdown: e.acc.statuses,
 		})
 	}
-
-	return result
+	return stats
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -324,7 +352,6 @@ func ipInvTodayMidnightNs() int64 {
 
 func tsNsToHHMM(ns int64) string {
 	local := time.Unix(0, ns).Local()
-	// Add 1 hour to compensate for the timezone offset bug
 	local = local.Add(time.Hour)
 	return fmt.Sprintf("%02d:%02d", local.Hour(), local.Minute())
 }
@@ -344,7 +371,8 @@ func dominantKey(m map[string]float64) string {
 	return best
 }
 
-// lokiQueryFirstEntryTs and parseLokiFirstEntryTs (Claude's version is good)
+// ─── Loki helpers (unchanged) ─────────────────────────────────────────────────
+
 func (s *NginxDashboardService) lokiQueryFirstEntryTs(
 	ctx context.Context,
 	tenantUUID, query string,
@@ -394,9 +422,6 @@ func parseLokiFirstEntryTs(body []byte) (int64, error) {
 		if len(stream.Values) == 0 {
 			continue
 		}
-
-		// For both forward and backward, we take the first value in the response
-		// because Loki already sorts according to the direction parameter.
 		val := stream.Values[0]
 		if len(val) > 0 {
 			tsNs, err := strconv.ParseInt(val[0], 10, 64)
@@ -408,7 +433,6 @@ func parseLokiFirstEntryTs(body []byte) (int64, error) {
 	return 0, nil
 }
 
-// Keep your existing lokiQueryLogLinesDir + parseLokiStreamLines
 func (s *NginxDashboardService) lokiQueryLogLinesDir(
 	ctx context.Context,
 	tenantUUID, query string,

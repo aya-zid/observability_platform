@@ -571,8 +571,10 @@ if not metrics_key:
 with open(cfg_path, "r", encoding="utf-8") as f:
     text = f.read()
 
-receiver_keys = []
+receiver_keys = []      # access log receivers
+error_receiver_keys = []  # error log receivers
 receiver_blocks = []
+
 for item in vhosts:
     receiver = str(item.get("receiver", "")).strip()
     domain = str(item.get("domain", "")).strip() or "(default)"
@@ -580,23 +582,55 @@ for item in vhosts:
     if not receiver or not paths:
         continue
     log_kind = str(item.get("log_kind", "access")).strip() or "access"
-    receiver_keys.append(receiver)
+
+    if log_kind == "access":
+        receiver_keys.append(receiver)
+    else:
+        error_receiver_keys.append(receiver)
+
     if f"  {receiver}:\n" in text:
         continue
-    include_lines = "\n".join([f"      - {p}" for p in paths])
-    receiver_blocks.append(
-        f"  {receiver}:\n"
-        "    include:\n"
-        f"{include_lines}\n"
-        "    include_file_path: true\n"
-        "    start_at: end\n"
-        "    resource:\n"
-        f"      service.name: {service_name}\n"
-        f"      job: {service_name}\n"
-        f"      vhost: {json.dumps(domain)}\n"
-        f"      log_kind: {json.dumps(log_kind)}\n"
-    )
 
+    include_lines = "\n".join([f"      - {p}" for p in paths])
+
+    if log_kind == "access":
+        # Access logs: parse nginx combined log line with regex_parser.
+        # normalized_path is computed by the transform/normalize_nginx_paths
+        # PROCESSOR downstream — stanza operators do not support replace_pattern().
+        receiver_blocks.append(
+            f"  {receiver}:\n"
+            "    include:\n"
+            f"{include_lines}\n"
+            "    include_file_path: true\n"
+            "    start_at: end\n"
+            "    operators:\n"
+            "      - type: regex_parser\n"
+            "        regex: '^(?P<client_ip>[^ ]+) [^ ]+ [^ ]+ \\[[^\\]]+\\] \"(?P<http_method>[A-Z]+) (?P<request_path>[^ ]+) [^\"]*\" (?P<http_status>\\d{3}) (?P<response_bytes>[\\d-]+)(?:\\s+\"(?P<http_referer>[^\"]*)\"\\s+\"(?P<user_agent>[^\"]*)\")?(?:.*?rt=(?P<request_time_s>[\\d.]+))?'\n"
+            "        on_error: send_quiet\n"
+            "    resource:\n"
+            f"      service.name: {service_name}\n"
+            f"      job: {service_name}\n"
+            f"      vhost: {json.dumps(domain)}\n"
+            f"      log_kind: {json.dumps(log_kind)}\n"
+        )
+    else:
+        # Error logs: ship as-is.
+        receiver_blocks.append(
+            f"  {receiver}:\n"
+            "    include:\n"
+            f"{include_lines}\n"
+            "    include_file_path: true\n"
+            "    start_at: end\n"
+            "    resource:\n"
+            f"      service.name: {service_name}\n"
+            f"      job: {service_name}\n"
+            f"      vhost: {json.dumps(domain)}\n"
+            f"      log_kind: {json.dumps(log_kind)}\n"
+        )
+
+all_nginx_receivers = receiver_keys + error_receiver_keys
+
+# Inject filelog receiver blocks before the processors: section.
 if receiver_blocks:
     block = "\n".join(receiver_blocks)
     marker = "\nprocessors:\n"
@@ -605,6 +639,28 @@ if receiver_blocks:
     else:
         text += "\n" + block + "\n"
 
+# Inject the transform/normalize_nginx_paths PROCESSOR.
+# OTTL replace_pattern() is only valid in processors, not in filelog stanza operators.
+normalize_proc_key = "transform/normalize_nginx_paths"
+if all_nginx_receivers and f"  {normalize_proc_key}:\n" not in text:
+    normalize_proc = (
+        f"  {normalize_proc_key}:\n"
+        "    error_mode: ignore\n"
+        "    log_statements:\n"
+        "      - context: log\n"
+        "        statements:\n"
+        "          - set(attributes[\"normalized_path\"], attributes[\"request_path\"])\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"\\\\?.*$\", \"\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\", \"/:id\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{6,35}\", \"/:id\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/\\\\d{3,}\", \"/:id\")\n"
+    )
+    if "\nprocessors:\n" in text:
+        text = text.replace("\nprocessors:\n", "\nprocessors:\n" + normalize_proc, 1)
+    else:
+        text += "\nprocessors:\n" + normalize_proc
+
+# Inject metrics receiver block if needed.
 if metrics_endpoint and f"  {metrics_key}:\n" not in text:
     parsed = urlparse(metrics_endpoint)
     host_port = parsed.netloc
@@ -632,6 +688,12 @@ if metrics_endpoint and f"  {metrics_key}:\n" not in text:
     else:
         text += "\n" + prom_block + "\n"
 
+# ── Pipeline patching ──────────────────────────────────────────────────────
+# nginx receivers go into a DEDICATED pipeline (logs/nginx) with the normalize
+# processor. A receiver can only belong to ONE pipeline in otelcol — they must
+# NOT be added to the main logs pipeline.
+# metrics_key is added to the main metrics pipeline as before.
+
 lines = text.splitlines()
 current = ""
 for i, line in enumerate(lines):
@@ -643,24 +705,34 @@ for i, line in enumerate(lines):
     elif stripped.endswith(":") and line.startswith("    ") and stripped not in ("metrics:", "logs:"):
         current = ""
 
-    if current not in ("metrics", "logs") or not stripped.startswith("receivers: ["):
-        continue
+    if current == "metrics" and stripped.startswith("receivers: [") and metrics_endpoint:
+        start = stripped.find("[")
+        end = stripped.rfind("]")
+        payload = stripped[start + 1 : end].strip()
+        arr = [x.strip() for x in payload.split(",") if x.strip()]
+        if metrics_key not in arr:
+            arr.append(metrics_key)
+        lines[i] = line[: line.index("receivers:")] + "receivers: [" + ", ".join(arr) + "]"
 
-    start = stripped.find("[")
-    end = stripped.rfind("]")
-    payload = stripped[start + 1 : end].strip()
-    arr = [x.strip() for x in payload.split(",") if x.strip()]
-    if current == "logs":
-        for receiver in receiver_keys:
-            if receiver not in arr:
-                arr.append(receiver)
-    elif metrics_endpoint and metrics_key not in arr:
-        arr.append(metrics_key)
+text = "\n".join(lines) + "\n"
 
-    lines[i] = line[: line.index("receivers:")] + "receivers: [" + ", ".join(arr) + "]"
+# Add the logs/nginx pipeline if it does not exist yet.
+nginx_pipeline_key = "logs/nginx"
+if all_nginx_receivers and f"    {nginx_pipeline_key}:\n" not in text:
+    recv_list = ", ".join(all_nginx_receivers)
+    nginx_pipeline = (
+        f"    {nginx_pipeline_key}:\n"
+        f"      receivers: [{recv_list}]\n"
+        "      processors: [resourcedetection, resource, transform/normalize_nginx_paths, batch]\n"
+        "      exporters: [otlphttp/logs]\n"
+    )
+    if "    traces:\n" in text:
+        text = text.replace("    traces:\n", nginx_pipeline + "    traces:\n", 1)
+    else:
+        text = text.rstrip("\n") + "\n" + nginx_pipeline + "\n"
 
 with open(cfg_path, "w", encoding="utf-8") as f:
-    f.write("\n".join(lines) + "\n")
+    f.write(text)
 PY
 then
   echo "[x] Failed to patch collector config"

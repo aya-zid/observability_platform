@@ -12,8 +12,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Area,
-  AreaChart,
   CartesianGrid,
   Legend,
   Line,
@@ -38,6 +36,7 @@ import {
 } from '@/lib/queryHelpers'
 import { cn } from '@/lib/utils'
 import { IPInvestigationBlock } from '@/components/nginx/IPInvestigationBlock'
+import { NginxPerformanceSection } from '@/components/nginx/NginxPerformanceSection'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -116,22 +115,40 @@ function formatChartTime(unixSeconds: number) {
   })
 }
 
+function readNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
 // Convert backend TimePoint[] (time = unix seconds) to recharts rows.
 function mapTimeseries(points: NginxTimePoint[]): Record<string, number | string>[] {
   return (points ?? []).map((pt) => {
     const row: Record<string, number | string> = {}
     for (const [k, v] of Object.entries(pt)) {
-      row[k] = k === 'time' ? formatChartTime(v) : v
+      row[k] = k === 'time' && typeof v === 'number' ? formatChartTime(v) : (v ?? 0)
     }
     return row
   })
+}
+
+function mapRTTimeseries(points: NginxTimePoint[]): Array<{
+  time: string
+  p50: number | null
+  p95: number | null
+  p99: number | null
+}> {
+  return (points ?? []).map((pt) => ({
+    time: formatChartTime(typeof pt.time === 'number' ? pt.time : 0),
+    p50: readNullableNumber(pt.p50),
+    p95: readNullableNumber(pt.p95),
+    p99: readNullableNumber(pt.p99),
+  }))
 }
 
 // Get the latest value of a named key from a timeseries array.
 function latestFromSeries(points: NginxTimePoint[], key: string): number | null {
   if (!points || points.length === 0) return null
   const last = points[points.length - 1]
-  return typeof last[key] === 'number' ? last[key] : null
+  return readNullableNumber(last[key])
 }
 
 // ─── Reusable components (identical to original) ──────────────────────────────
@@ -377,10 +394,10 @@ function SlowRequestTable({
                             <span className="font-mono break-all">{req.referer}</span>
                           </div>
                         )}
-                        {req.userAgent && (
+                        {req.user_agent && (
                           <div className="md:col-span-2">
                             <span className="text-muted-foreground">User Agent:</span>{' '}
-                            <span className="font-mono break-all text-[10px]">{req.userAgent}</span>
+                            <span className="font-mono break-all text-[10px]">{req.user_agent}</span>
                           </div>
                         )}
                       </div>
@@ -527,7 +544,7 @@ export function NginxDashboardPage() {
 
   // ── Chart data ─────────────────────────────────────────────────────────────
   const statusData   = mapTimeseries(d?.status_timeseries ?? [])
-  const rtData       = mapTimeseries(d?.rt_timeseries ?? [])
+  const rtData       = mapRTTimeseries(d?.rt_timeseries ?? [])
   const reqRateData  = mapTimeseries(d?.req_rate_timeseries ?? [])
   const bandwidthData = mapTimeseries(d?.bandwidth_timeseries ?? [])
   const connData     = mapTimeseries(d?.conn_timeseries ?? [])
@@ -552,13 +569,17 @@ export function NginxDashboardPage() {
   const slowRequests = d?.slow_requests ?? []
 
   // Aggregation tables
-  const aggTopPaths      = d?.top_paths      ?? []
-  const aggTopStatuses   = d?.top_statuses   ?? []
-  const aggTopIPs        = d?.top_ips        ?? []
-  const aggMethods       = d?.top_methods    ?? []
-  const aggMethodTotal   = aggMethods.reduce((s, m) => s + m.count, 0)
-  const aggTopErrorPaths = d?.top_error_paths ?? []
-  const aggSuspiciousIPs = d?.suspicious_ips  ?? []
+  const aggTopPaths            = d?.top_paths            ?? []
+  const aggTopStatuses         = d?.top_statuses        ?? []
+  const aggTopIPs              = d?.top_ips             ?? []
+  const aggMethods             = d?.top_methods         ?? []
+  const aggMethodTotal         = aggMethods.reduce((s, m) => s + m.count, 0)
+  const aggTopErrorPaths       = d?.top_error_paths     ?? []
+  const aggSuspiciousIPs       = d?.suspicious_ips      ?? []
+  // Normalized path aggregations
+  const aggTopNormalizedPaths      = d?.top_normalized_paths      ?? []
+  const aggTopNormalizedErrorPaths = d?.top_normalized_error_paths ?? []
+  const slowRequestsNormalized     = d?.slow_requests_normalized   ?? []
 
   // ── Guard renders ─────────────────────────────────────────────────────────
   if (!id) return <div className="p-6 text-sm text-red-600">Missing service id.</div>
@@ -846,7 +867,7 @@ export function NginxDashboardPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
             <DataTable
               title="Top Paths"
               subtitle={aggTotalsLabel}
@@ -878,6 +899,60 @@ export function NginxDashboardPage() {
                 percent: totalRequests > 0 ? (item.count / totalRequests) * 100 : 0,
               }))}
             />
+            <DataTable
+              title="Top Normalized Paths"
+              subtitle={aggTotalsLabel}
+              loading={isLoading}
+              rows={aggTopNormalizedPaths.map((item) => ({
+                label: item.label,
+                value: formatNumber(Math.round(item.count), 0),
+                percent: totalRequests > 0 ? (item.count / totalRequests) * 100 : 0,
+              }))}
+            />
+          </div>
+
+          {/* Slow Requests — both tables side by side */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <SlowRequestTable rows={slowRequests} loading={isLoading} />
+            <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+              <h3 className="mb-1 text-sm font-semibold text-foreground">Slow Requests (Normalized Paths)</h3>
+              <p className="mb-3 text-xs text-muted-foreground">Worst RT per normalized path pattern (rt &gt; 1s), e.g. <span className="font-mono">/products/:id</span></p>
+              <div className="max-h-64 space-y-1 overflow-y-auto">
+                {isLoading ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
+                ) : slowRequestsNormalized.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">No slow requests</p>
+                ) : (
+                  slowRequestsNormalized.slice(0, 20).map((req, idx) => {
+                    const displayPath = req.normalized_path && req.normalized_path !== req.path
+                      ? req.normalized_path
+                      : req.normalized_path || req.path
+                    const isNormalized = req.normalized_path && req.normalized_path !== req.path
+                    return (
+                      <div key={idx} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-muted/50 transition-colors text-xs">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1">
+                            {isNormalized ? (
+                              <span className="rounded bg-blue-100 px-1 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 flex-shrink-0">
+                                norm
+                              </span>
+                            ) : null}
+                            <span className="truncate font-mono text-xs" title={displayPath}>{displayPath}</span>
+                          </div>
+                          <div className="text-muted-foreground text-xs mt-0.5">{req.method} • {req.status}</div>
+                        </div>
+                        <div className={cn(
+                          'flex-shrink-0 ml-2 font-semibold tabular-nums',
+                          req.rt >= 5 ? 'text-red-500' : req.rt >= 2 ? 'text-amber-500' : 'text-primary',
+                        )}>
+                          {(req.rt * 1000).toFixed(0)}ms
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -914,6 +989,32 @@ export function NginxDashboardPage() {
               </div>
             </div>
 
+            <div className="rounded-lg border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/20 shadow-sm">
+              <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">IPs with High 4xx/5xx Rate</h3>
+              <div className="max-h-64 space-y-2 overflow-y-auto">
+                {isLoading ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
+                ) : aggSuspiciousIPs.length > 0 ? (
+                  aggSuspiciousIPs.map((item) => (
+                    <div key={item.ip} className="flex items-center justify-between rounded-lg border-l-2 border-red-500 bg-white px-3 py-2 dark:bg-muted/30 transition-colors hover:bg-red-50 dark:hover:bg-red-950/10">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">{item.rate.toFixed(0)}%</span>
+                        <span className="font-mono text-sm">{item.ip}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {formatNumber(Math.round(item.errors), 0)}/{formatNumber(Math.round(item.total), 0)} errors
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="py-4 text-center text-sm text-muted-foreground">No suspicious IPs found in the selected range.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Top Error Paths (raw and normalized) side by side */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
               <h3 className="mb-1 text-sm font-semibold text-foreground">Top Paths by Error Rate</h3>
               <p className="mb-4 text-xs text-muted-foreground">{aggTotalsLabel}</p>
@@ -945,28 +1046,37 @@ export function NginxDashboardPage() {
                 )}
               </div>
             </div>
-          </div>
 
-          <div className="rounded-lg border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/20 shadow-sm">
-            <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">IPs with High 4xx/5xx Rate</h3>
-            <div className="max-h-48 space-y-2 overflow-y-auto">
-              {isLoading ? (
-                <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
-              ) : aggSuspiciousIPs.length > 0 ? (
-                aggSuspiciousIPs.map((item) => (
-                  <div key={item.ip} className="flex items-center justify-between rounded-lg border-l-2 border-red-500 bg-white px-3 py-2 dark:bg-muted/30 transition-colors hover:bg-red-50 dark:hover:bg-red-950/10">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">{item.rate.toFixed(0)}%</span>
-                      <span className="font-mono text-sm">{item.ip}</span>
+            <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
+              <h3 className="mb-1 text-sm font-semibold text-foreground">Top Paths by Error Rate (Normalized)</h3>
+              <p className="mb-4 text-xs text-muted-foreground">{aggTotalsLabel}</p>
+              <div className="max-h-64 space-y-2 overflow-y-auto">
+                {isLoading ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
+                ) : aggTopNormalizedErrorPaths.length > 0 ? (
+                  aggTopNormalizedErrorPaths.map((item) => (
+                    <div key={item.path} className="flex items-center gap-2 rounded px-2 py-2 text-xs hover:bg-muted/50 transition-colors">
+                      <span
+                        className={cn(
+                          'flex-shrink-0 rounded px-2 py-0.5 font-medium',
+                          item.err_pct > 10
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+                        )}
+                      >
+                        {item.err_pct > 10 ? 'ERROR' : 'WARN'}
+                      </span>
+                      <span className="flex-1 truncate font-mono">{item.path}</span>
+                      <span className="flex-shrink-0 text-muted-foreground">
+                        {formatNumber(Math.round(item.errors), 0)}/{formatNumber(Math.round(item.total), 0)}
+                      </span>
+                      <span className="w-14 flex-shrink-0 text-right font-semibold">{item.err_pct.toFixed(1)}%</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">
-                      {formatNumber(Math.round(item.errors), 0)}/{formatNumber(Math.round(item.total), 0)} errors
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="py-4 text-center text-sm text-muted-foreground">No suspicious IPs found in the selected range.</p>
-              )}
+                  ))
+                ) : (
+                  <p className="py-4 text-center text-sm text-muted-foreground">No error-heavy normalized paths found in the selected range.</p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -987,74 +1097,83 @@ export function NginxDashboardPage() {
               </div>
             </ChartBox>
 
-            {/* Response Time + Slow Requests */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <ChartBox
-                title="Response Time P50 / P95 / P99 (ms)"
-                loading={isLoading}
-                empty={rtData.length === 0}
-                hint="Requires nginx log_format to include rt=$request_time"
-              >
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={rtData}>
-                      <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
-                      <XAxis dataKey="time" tick={chartStyle.tick} tickLine={false} axisLine={false} />
-                      <YAxis tick={chartStyle.tick} tickLine={false} axisLine={false} width={40} tickFormatter={(v) => `${v.toFixed(0)}ms` } />
-                      <Tooltip contentStyle={chartStyle.tooltip} formatter={(v) => (typeof v === 'number' ? `${v.toFixed(1)}ms` : v)} />
-                      <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Line dataKey="p50" dot={false} isAnimationActive={false} name="P50" stroke="#22c55e" strokeWidth={2} type="monotone" />
-                      <Line dataKey="p95" dot={false} isAnimationActive={false} name="P95" stroke="#f59e0b" strokeWidth={2} type="monotone" />
-                      <Line dataKey="p99" dot={false} isAnimationActive={false} name="P99" stroke="#ef4444" strokeWidth={2} type="monotone" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </ChartBox>
-
-              <ChartBox title="Bandwidth Over Time" loading={isLoading} empty={bandwidthData.length === 0}>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={bandwidthData}>
-                      <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
-                      <XAxis dataKey="time" tick={chartStyle.tick} tickLine={false} axisLine={false} />
-                      <YAxis
-                        tick={chartStyle.tick}
-                        tickLine={false}
-                        axisLine={false}
-                        width={50}
-                        tickFormatter={(v) => v >= 1048576 ? `${(v / 1048576).toFixed(1)} MB/s` : `${(v / 1024).toFixed(0)} KB/s`}
-                      />
-                      <Tooltip contentStyle={chartStyle.tooltip} formatter={(v) => (typeof v === 'number' ? [`${formatBytes(v)}/s`, 'Bandwidth'] : v)} />
-                      <Line dataKey="bytes" dot={false} isAnimationActive={false} name="Bandwidth" stroke="#2563eb" strokeWidth={2} type="monotone" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </ChartBox>
-            </div>
-
-            {/* Bot vs Human */}
+            {/* Response Time — full width */}
             <ChartBox
-              title="Bot vs Human Request Rate"
+              title="Response Time P50 / P95 / P99 (ms)"
               loading={isLoading}
-              empty={botTrendData.length === 0}
-              hint="Estimated from request strings and user agents in the selected range"
+              empty={rtData.length === 0 || !rtData.some((pt) => pt.p50 !== null || pt.p95 !== null || pt.p99 !== null)}
+              hint="Requires nginx log_format to include rt=$request_time"
             >
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={botTrendData}>
+                  <LineChart data={rtData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
                     <XAxis dataKey="time" tick={chartStyle.tick} tickLine={false} axisLine={false} />
-                    <YAxis tick={chartStyle.tick} tickLine={false} axisLine={false} width={40} tickFormatter={(v) => v.toFixed(2)} />
-                    <Tooltip contentStyle={chartStyle.tooltip} formatter={(v) => (typeof v === 'number' ? `${v.toFixed(3)} req/s` : v)} />
+                    <YAxis
+                      tick={chartStyle.tick}
+                      tickLine={false}
+                      axisLine={false}
+                      width={52}
+                      tickFormatter={(v) => `${Math.round(Number(v))}ms`}
+                      domain={['auto', 'auto']}
+                    />
+                    <Tooltip
+                      contentStyle={chartStyle.tooltip}
+                      formatter={(v: unknown) =>
+                        typeof v === 'number' ? [`${v.toFixed(1)}ms`, ''] : ['—', '']
+                      }
+                    />
                     <Legend wrapperStyle={{ fontSize: '11px' }} />
-                    <Line type="monotone" dataKey="humanRate" stroke="#22c55e" strokeWidth={2.5} dot={{ r: 3, fill: '#22c55e' }} activeDot={{ r: 5, strokeWidth: 0 }} name="Human" isAnimationActive={false} />
-                    <Line type="monotone" dataKey="botRate" stroke="#ef4444" strokeWidth={2.5} dot={{ r: 3, fill: '#ef4444' }} activeDot={{ r: 5, strokeWidth: 0 }} name="Bot / Automated" isAnimationActive={false} />
+                    <Line
+                      dataKey="p50"
+                      dot={false}
+                      isAnimationActive={false}
+                      name="P50"
+                      stroke="#22c55e"
+                      strokeWidth={2}
+                      type="monotone"
+                    />
+                    <Line
+                      dataKey="p95"
+                      dot={false}
+                      isAnimationActive={false}
+                      name="P95"
+                      stroke="#f59e0b"
+                      strokeWidth={2}
+                      type="monotone"
+                    />
+                    <Line
+                      dataKey="p99"
+                      dot={false}
+                      isAnimationActive={false}
+                      name="P99"
+                      stroke="#ef4444"
+                      strokeWidth={2}
+                      type="monotone"
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-              <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Human share: {humanPct.toFixed(1)}%</span>
-                <span>Automated share: {botPct.toFixed(1)}%</span>
+            </ChartBox>
+
+            {/* Bandwidth Over Time — full width */}
+            <ChartBox title="Bandwidth Over Time" loading={isLoading} empty={bandwidthData.length === 0}>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={bandwidthData}>
+                    <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
+                    <XAxis dataKey="time" tick={chartStyle.tick} tickLine={false} axisLine={false} />
+                    <YAxis
+                      tick={chartStyle.tick}
+                      tickLine={false}
+                      axisLine={false}
+                      width={50}
+                      tickFormatter={(v) => v >= 1048576 ? `${(v / 1048576).toFixed(1)} MB/s` : `${(v / 1024).toFixed(0)} KB/s`}
+                    />
+                    <Tooltip contentStyle={chartStyle.tooltip} formatter={(v) => (typeof v === 'number' ? [`${formatBytes(v)}/s`, 'Bandwidth'] : v)} />
+                    <Line dataKey="bytes" dot={false} isAnimationActive={false} name="Bandwidth" stroke="#2563eb" strokeWidth={2} type="monotone" />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
             </ChartBox>
 
@@ -1135,27 +1254,7 @@ export function NginxDashboardPage() {
               </div>
             </ChartBox>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <ChartBox title="Bandwidth Over Time" loading={isLoading} empty={bandwidthData.length === 0}>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={bandwidthData}>
-                    <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
-                    <XAxis dataKey="time" tick={chartStyle.tick} tickLine={false} axisLine={false} />
-                    <YAxis
-                      tick={chartStyle.tick}
-                      tickLine={false}
-                      axisLine={false}
-                      width={50}
-                      tickFormatter={(v) => v >= 1048576 ? `${(v / 1048576).toFixed(1)} MB/s` : `${(v / 1024).toFixed(0)} KB/s`}
-                    />
-                    <Tooltip contentStyle={chartStyle.tooltip} formatter={(v) => (typeof v === 'number' ? [`${formatBytes(v)}/s`, 'Bandwidth'] : v)} />
-                    <Line dataKey="bytes" dot={false} isAnimationActive={false} name="Bandwidth" stroke="#2563eb" strokeWidth={2} type="monotone" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </ChartBox>
-
+            {/* Bot vs Human — full width */}
             <ChartBox
               title="Bot vs Human Request Rate"
               loading={isLoading}
@@ -1181,30 +1280,6 @@ export function NginxDashboardPage() {
               </div>
             </ChartBox>
           </div>
-          </div>
-
-          <div className="rounded-lg border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/20 shadow-sm">
-            <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">IPs with High 4xx/5xx Rate</h3>
-            <div className="max-h-48 space-y-2 overflow-y-auto">
-              {isLoading ? (
-                <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
-              ) : aggSuspiciousIPs.length > 0 ? (
-                aggSuspiciousIPs.map((item) => (
-                  <div key={item.ip} className="flex items-center justify-between rounded-lg border-l-2 border-red-500 bg-white px-3 py-2 dark:bg-muted/30 transition-colors hover:bg-red-50 dark:hover:bg-red-950/10">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">{item.rate.toFixed(0)}%</span>
-                      <span className="font-mono text-sm">{item.ip}</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {formatNumber(Math.round(item.errors), 0)}/{formatNumber(Math.round(item.total), 0)} errors
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="py-4 text-center text-sm text-muted-foreground">No suspicious IPs found in the selected range.</p>
-              )}
-            </div>
-          </div>
 
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950/20 shadow-sm text-sm text-blue-800 dark:text-blue-300">
             <p className="mb-1 font-semibold">Data notes</p>
@@ -1213,6 +1288,8 @@ export function NginxDashboardPage() {
               Slow Requests are now expandable so you can inspect each request inline.
             </p>
           </div>
+
+          <NginxPerformanceSection id={id} domain={selectedDomain} />
 
           <IPInvestigationBlock id={id} domain={selectedDomain} />
         </>

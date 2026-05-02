@@ -22,14 +22,15 @@ import (
 
 // SlowRequest is one entry in the slow-requests table on the dashboard.
 type SlowRequest struct {
-	Path      string  `json:"path"`
-	Method    string  `json:"method"`
-	Status    int     `json:"status"`
-	IP        string  `json:"ip"`
-	RT        float64 `json:"rt"`       // seconds
-	Referer   string  `json:"referer"`  // HTTP referer header
-	UserAgent string  `json:"userAgent"` // HTTP user-agent header
-	Timestamp string  `json:"timestamp"` // Log timestamp
+	Path           string  `json:"path"`
+	NormalizedPath string  `json:"normalized_path"`
+	Method         string  `json:"method"`
+	Status         int     `json:"status"`
+	IP             string  `json:"ip"`
+	RT             float64 `json:"rt"`
+	Referer        string  `json:"referer"`
+	UserAgent      string  `json:"user_agent"`
+	Timestamp      string  `json:"timestamp"`
 }
 
 // NginxDashboardSummary is the single JSON payload returned to the frontend.
@@ -76,7 +77,11 @@ type NginxDashboardSummary struct {
 	TopStatuses   []LabelCount    `json:"top_statuses"`
 	TopMethods    []LabelCount    `json:"top_methods"`
 	TopErrorPaths []ErrorPathStat `json:"top_error_paths"`
-	SuspiciousIPs []SuspiciousIP  `json:"suspicious_ips"`
+	// ── Normalized path aggregations ──
+	TopNormalizedPaths      []LabelCount    `json:"top_normalized_paths"`
+	TopNormalizedErrorPaths []ErrorPathStat `json:"top_normalized_error_paths"`
+	SlowRequestsNormalized  []SlowRequest   `json:"slow_requests_normalized"`
+	SuspiciousIPs           []SuspiciousIP  `json:"suspicious_ips"`
 
 	// ── Latest scalar connection values (for stat cards) ──
 	ConnActive  *float64 `json:"conn_active,omitempty"`
@@ -114,6 +119,11 @@ type SuspiciousIP struct {
 	Errors float64 `json:"errors"`
 	Total  float64 `json:"total"`
 	Rate   float64 `json:"rate"`
+}
+
+type LokiLogEntry struct {
+	Line     string
+	Metadata map[string]string
 }
 
 // ─── Explorer types ───────────────────────────────────────────────────────────
@@ -233,9 +243,11 @@ func (s *NginxDashboardService) fetchDashboard(
 	status5xxQ := fmt.Sprintf(`sum(rate(%s %s | status =~ "5.." [%s]))`, base, parseExpr, step)
 
 	// 2. RT percentiles (3 separate goroutines, all parallel)
-	rtP50Q := fmt.Sprintf(`quantile_over_time(0.50, %s %s | unwrap rt [%s])`, base, rtParseExpr, step)
-	rtP95Q := fmt.Sprintf(`quantile_over_time(0.95, %s %s | unwrap rt [%s])`, base, rtParseExpr, step)
-	rtP99Q := fmt.Sprintf(`quantile_over_time(0.99, %s %s | unwrap rt [%s])`, base, rtParseExpr, step)
+	// Aggregate into a single output series across all matching streams so the
+	// frontend gets one clean p50/p95/p99 line instead of a partial multi-stream merge.
+	rtP50Q := fmt.Sprintf(`quantile_over_time(0.50, %s %s | unwrap rt [%s]) by ()`, base, rtParseExpr, step)
+	rtP95Q := fmt.Sprintf(`quantile_over_time(0.95, %s %s | unwrap rt [%s]) by ()`, base, rtParseExpr, step)
+	rtP99Q := fmt.Sprintf(`quantile_over_time(0.99, %s %s | unwrap rt [%s]) by ()`, base, rtParseExpr, step)
 
 	// 3. Request rate over time
 	reqRateQ := fmt.Sprintf(`sum(rate(%s [%s]))`, base, step)
@@ -259,6 +271,14 @@ func (s *NginxDashboardService) fetchDashboard(
 	topAggQ := fmt.Sprintf(
 		`topk(50, sum by (path, status, method, ip) (count_over_time(%s %s [%ds])))`,
 		base, parseExpr, rangeSeconds,
+	)
+	topNormAggQ := fmt.Sprintf(
+		`topk(50, sum by (normalized_path, status, method, ip) (count_over_time(%s | normalized_path!="" %s [%ds])))`,
+		base, parseExpr, rangeSeconds,
+	)
+	slowNormQ := fmt.Sprintf(
+		`topk(100, max by (normalized_path, method, status) (max_over_time(%s | normalized_path!="" %s %s | unwrap rt [%ds])))`,
+		base, parseExpr, rtParseExpr, rangeSeconds,
 	)
 
 	// 7. Slow requests — fetch 500 recent log lines to find rt>1s entries
@@ -285,8 +305,8 @@ func (s *NginxDashboardService) fetchDashboard(
 		err  error
 	}
 	type logR struct {
-		lines []string
-		err   error
+		entries []LokiLogEntry
+		err     error
 	}
 
 	var (
@@ -303,6 +323,8 @@ func (s *NginxDashboardService) fetchDashboard(
 		botRate     lR
 		totalRate   lR
 		topAgg      lR
+		topNormAgg  lR
+		slowNormAgg lR
 		connActive  vR
 		connWaiting vR
 		connReading vR
@@ -323,7 +345,7 @@ func (s *NginxDashboardService) fetchDashboard(
 		return vR{d, e}
 	}
 
-	wg.Add(21)
+	wg.Add(23)
 	go func() { defer wg.Done(); status2xx = lq(status2xxQ) }()
 	go func() { defer wg.Done(); status3xx = lq(status3xxQ) }()
 	go func() { defer wg.Done(); status4xx = lq(status4xxQ) }()
@@ -340,6 +362,16 @@ func (s *NginxDashboardService) fetchDashboard(
 		d, e := s.lokiQueryInstant(ctx, tenantUUID, topAggQ, endNs, 5000)
 		topAgg = lR{d, e}
 	}()
+	go func() {
+		defer wg.Done()
+		d, e := s.lokiQueryInstant(ctx, tenantUUID, topNormAggQ, endNs, 5000)
+		topNormAgg = lR{d, e}
+	}()
+	go func() {
+		defer wg.Done()
+		d, e := s.lokiQueryInstant(ctx, tenantUUID, slowNormQ, endNs, 5000)
+		slowNormAgg = lR{d, e}
+	}()
 	go func() { defer wg.Done(); connActive = vq(connActiveQ) }()
 	go func() { defer wg.Done(); connWaiting = vq(connWaitingQ) }()
 	go func() { defer wg.Done(); connReading = vq(connReadingQ) }()
@@ -350,8 +382,8 @@ func (s *NginxDashboardService) fetchDashboard(
 	go func() { defer wg.Done(); totalConn = vq(totalConnQ) }()
 	go func() {
 		defer wg.Done()
-		lines, err := s.lokiQueryLogLines(ctx, tenantUUID, slowLogsQ, startNs, endNs, 500)
-		slowLogs = logR{lines, err}
+		entries, err := s.lokiQueryLogEntries(ctx, tenantUUID, slowLogsQ, startNs, endNs, 500)
+		slowLogs = logR{entries, err}
 	}()
 	wg.Wait()
 
@@ -474,7 +506,7 @@ func (s *NginxDashboardService) fetchDashboard(
 	summary.TopStatuses = topN(statusCounts, 20)
 	summary.TopMethods = topN(methodCounts, 10)
 
-	// Top error paths (sorted by error rate desc)
+	// Top error paths by raw path (existing — unchanged)
 	for _, pc := range summary.TopPaths {
 		errs := pathErrorCounts[pc.Label]
 		if errs == 0 {
@@ -489,6 +521,40 @@ func (s *NginxDashboardService) fetchDashboard(
 		})
 	}
 	sortErrorPaths(summary.TopErrorPaths)
+
+	normPathCounts := map[string]float64{}
+	normPathErrorCounts := map[string]float64{}
+	for _, series := range topNormAgg.data {
+		normPath := series.Metric["normalized_path"]
+		status := series.Metric["status"]
+		count := lastValue(series.Values)
+		if normPath == "" {
+			continue
+		}
+		normPathCounts[normPath] += count
+		if status == "" {
+			continue
+		}
+		if status[0] == '4' || status[0] == '5' {
+			normPathErrorCounts[normPath] += count
+		}
+	}
+
+	summary.TopNormalizedPaths = topN(normPathCounts, 10)
+	for _, pc := range summary.TopNormalizedPaths {
+		errs := normPathErrorCounts[pc.Label]
+		if errs == 0 {
+			continue
+		}
+		pct := 0.0
+		if pc.Count > 0 {
+			pct = (errs / pc.Count) * 100
+		}
+		summary.TopNormalizedErrorPaths = append(summary.TopNormalizedErrorPaths, ErrorPathStat{
+			Path: pc.Label, Errors: errs, Total: pc.Count, ErrPct: pct,
+		})
+	}
+	sortErrorPaths(summary.TopNormalizedErrorPaths)
 
 	// Suspicious IPs (error rate > 30%)
 	for ip, errs := range ipErrorCounts {
@@ -506,8 +572,11 @@ func (s *NginxDashboardService) fetchDashboard(
 	sortSuspiciousIPs(summary.SuspiciousIPs)
 
 	// ── Slow requests (parse log lines, filter rt > 1s) ───────────────────────
-	summary.SlowRequests = parseSlowRequests(slowLogs.lines, 100)
+	summary.SlowRequests = parseSlowRequests(slowLogs.entries, 100)
 
+	// Slow normalized requests come directly from Loki's normalized_path metadata,
+	// not from regrouping raw paths on the application side.
+	summary.SlowRequestsNormalized = buildSlowRequestsNormalized(slowNormAgg.data, 100)
 	return summary, nil
 }
 
@@ -643,8 +712,6 @@ func (s *NginxDashboardService) GetErrorLogs(
 	return s.lokiQueryLogLines(ctx, tenantUUID, sel, startNs, endNs, limit)
 }
 
-
-//
 // By default it targets access logs only (log_kind="access") — error logs have
 // a completely different format and would corrupt all metric calculations.
 // Pass logKind="error" explicitly to query error logs instead.
@@ -786,6 +853,23 @@ func (s *NginxDashboardService) lokiQueryLogLines(
 	startNs, endNs int64,
 	limit int,
 ) ([]string, error) {
+	entries, err := s.lokiQueryLogEntries(ctx, tenantUUID, query, startNs, endNs, limit)
+	if err != nil {
+		return nil, err
+	}
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		lines = append(lines, entry.Line)
+	}
+	return lines, nil
+}
+
+func (s *NginxDashboardService) lokiQueryLogEntries(
+	ctx context.Context,
+	tenantUUID, query string,
+	startNs, endNs int64,
+	limit int,
+) ([]LokiLogEntry, error) {
 	upstream := fmt.Sprintf("http://%s:%s/loki/api/v1/query_range", s.cfg.LokiHost, s.cfg.LokiPort)
 	params := url.Values{}
 	params.Set("query", query)
@@ -809,7 +893,7 @@ func (s *NginxDashboardService) lokiQueryLogLines(
 	if err != nil {
 		return nil, err
 	}
-	return parseLokiStreamLines(body), nil
+	return parseLokiStreamEntries(body), nil
 }
 
 func (s *NginxDashboardService) vmQueryRange(
@@ -874,25 +958,45 @@ func parseLokiMatrixResponse(body []byte) ([]LokiMatrixSeries, error) {
 
 // parseLokiStreamLines extracts raw log line strings from a Loki streams response.
 func parseLokiStreamLines(body []byte) []string {
+	entries := parseLokiStreamEntries(body)
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		lines = append(lines, entry.Line)
+	}
+	return lines
+}
+
+func parseLokiStreamEntries(body []byte) []LokiLogEntry {
 	var raw struct {
 		Data struct {
 			Result []struct {
-				Values [][]string `json:"values"` // [[ns_timestamp, line], ...]
+				Values [][]interface{} `json:"values"`
 			} `json:"result"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil
 	}
-	var lines []string
+	var entries []LokiLogEntry
 	for _, stream := range raw.Data.Result {
 		for _, v := range stream.Values {
 			if len(v) >= 2 {
-				lines = append(lines, v[1])
+				entry := LokiLogEntry{
+					Line:     fmt.Sprint(v[1]),
+					Metadata: map[string]string{},
+				}
+				if len(v) >= 3 {
+					if rawMeta, ok := v[2].(map[string]interface{}); ok {
+						for key, value := range rawMeta {
+							entry.Metadata[key] = fmt.Sprint(value)
+						}
+					}
+				}
+				entries = append(entries, entry)
 			}
 		}
 	}
-	return lines
+	return entries
 }
 
 func parseVMMatrixResponse(body []byte) ([]VMSeries, error) {
@@ -971,37 +1075,52 @@ func mergeNamedLokiSeries(seriesByName map[string][]LokiMatrixSeries) []TimePoin
 }
 
 func mergeRTSeries(p50, p95, p99 []LokiMatrixSeries) []TimePoint {
-	getVals := func(series []LokiMatrixSeries) [][2]float64 {
-		if len(series) > 0 {
-			return series[0].Values
-		}
-		return nil
-	}
-	timeMap := map[float64]TimePoint{}
-	for _, v := range getVals(p50) {
-		if _, ok := timeMap[v[0]]; !ok {
-			timeMap[v[0]] = TimePoint{"time": v[0]}
-		}
-		timeMap[v[0]]["p50"] = v[1] * 1000
-	}
-	for _, v := range getVals(p95) {
-		if _, ok := timeMap[v[0]]; !ok {
-			timeMap[v[0]] = TimePoint{"time": v[0]}
-		}
-		timeMap[v[0]]["p95"] = v[1] * 1000
-	}
-	if p99 != nil {
-		for _, v := range getVals(p99) {
-			if _, ok := timeMap[v[0]]; !ok {
-				timeMap[v[0]] = TimePoint{"time": v[0]}
+	buildSeriesMap := func(series []LokiMatrixSeries) map[float64]float64 {
+		values := map[float64]float64{}
+		for _, item := range series {
+			for _, sample := range item.Values {
+				values[sample[0]] = sample[1] * 1000
 			}
-			timeMap[v[0]]["p99"] = v[1] * 1000
 		}
+		return values
 	}
-	points := make([]TimePoint, 0, len(timeMap))
-	for _, pt := range timeMap {
-		points = append(points, pt)
+
+	p50Values := buildSeriesMap(p50)
+	p95Values := buildSeriesMap(p95)
+	p99Values := buildSeriesMap(p99)
+
+	allTimes := map[float64]struct{}{}
+	for ts := range p50Values {
+		allTimes[ts] = struct{}{}
 	}
+	for ts := range p95Values {
+		allTimes[ts] = struct{}{}
+	}
+	for ts := range p99Values {
+		allTimes[ts] = struct{}{}
+	}
+
+	points := make([]TimePoint, 0, len(allTimes))
+	for ts := range allTimes {
+		point := TimePoint{"time": ts}
+		if value, ok := p50Values[ts]; ok {
+			point["p50"] = value
+		} else {
+			point["p50"] = nil
+		}
+		if value, ok := p95Values[ts]; ok {
+			point["p95"] = value
+		} else {
+			point["p95"] = nil
+		}
+		if value, ok := p99Values[ts]; ok {
+			point["p99"] = value
+		} else {
+			point["p99"] = nil
+		}
+		points = append(points, point)
+	}
+
 	sortTimePoints(points)
 	return points
 }
@@ -1062,10 +1181,11 @@ func mergeVMConnSeries(active, waiting, reading, writing []VMSeries) []TimePoint
 
 // parseSlowRequests scans raw nginx log lines for ones containing rt=<seconds>
 // where rt >= 1, parses them, and returns the top `limit` sorted by rt desc.
-// This replicates the old frontend logic but runs server-side.
-func parseSlowRequests(lines []string, limit int) []SlowRequest {
+// It now properly uses normalized_path from Loki structured metadata.
+func parseSlowRequests(entries []LokiLogEntry, limit int) []SlowRequest {
 	var result []SlowRequest
-	for _, line := range lines {
+	for _, entry := range entries {
+		line := entry.Line
 		// Quick pre-check
 		rtIdx := findRT(line)
 		if rtIdx < 0 {
@@ -1075,13 +1195,24 @@ func parseSlowRequests(lines []string, limit int) []SlowRequest {
 		if rt < 1.0 {
 			continue
 		}
+
 		parsed := parseNginxCombinedLog(line)
 		if parsed == nil {
 			continue
 		}
+
+		// Use normalized_path from OTel structured metadata (most important fix)
+		if normPath, exists := entry.Metadata["normalized_path"]; exists && normPath != "" {
+			parsed.NormalizedPath = normPath
+		} else {
+			// Fallback: use original path
+			parsed.NormalizedPath = parsed.Path
+		}
+
 		parsed.RT = rt
 		result = append(result, *parsed)
 	}
+
 	// Sort by rt desc
 	for i := 0; i < len(result); i++ {
 		for j := i + 1; j < len(result); j++ {
@@ -1090,10 +1221,55 @@ func parseSlowRequests(lines []string, limit int) []SlowRequest {
 			}
 		}
 	}
+
 	if len(result) > limit {
 		result = result[:limit]
 	}
 	return result
+}
+
+// buildSlowRequestsNormalized uses Loki aggregation over the normalized_path
+// metadata field directly. Each row is the single worst response time seen for
+// that normalized path in the selected window.
+func buildSlowRequestsNormalized(series []LokiMatrixSeries, limit int) []SlowRequest {
+	best := map[string]SlowRequest{}
+	for _, item := range series {
+		normalizedPath := item.Metric["normalized_path"]
+		if normalizedPath == "" {
+			continue
+		}
+
+		status, _ := strconv.Atoi(item.Metric["status"])
+		req := SlowRequest{
+			Path:           normalizedPath,
+			NormalizedPath: normalizedPath,
+			Method:         item.Metric["method"],
+			Status:         status,
+			RT:             lastValue(item.Values),
+		}
+
+		if existing, ok := best[normalizedPath]; !ok || req.RT > existing.RT {
+			best[normalizedPath] = req
+		}
+	}
+
+	out := make([]SlowRequest, 0, len(best))
+	for _, req := range best {
+		out = append(out, req)
+	}
+
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].RT > out[i].RT {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func findRT(line string) int {

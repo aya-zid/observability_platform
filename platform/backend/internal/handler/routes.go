@@ -38,12 +38,21 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	installHandler := NewInstallHandler(cfg)
 	integrationHandler := NewIntegrationHandler(integrationService)
 	alertsHandler := NewAlertsHandler(alertsRepo)
+
 	nginxDashboardService := service.NewNginxDashboardService(cfg, infrastructure.Redis)
 	nginxDashboardHandler := NewNginxDashboardHandler(
 		nginxDashboardService,
 		discoveryRepo,
 		tenantRepo,
 	)
+
+	nginxPerformanceService := service.NewNginxPerformanceService(cfg, infrastructure.Redis)
+	nginxPerformanceHandler := NewNginxPerformanceHandler(
+		nginxPerformanceService,
+		discoveryRepo,
+		tenantRepo,
+	)
+
 	e.GET("/install.sh", installHandler.AgentInstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
@@ -72,11 +81,18 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/query/logs/range", queryHandler.QueryLogsRange)
 		api.GET("/query/logs/labels", queryHandler.QueryLogsLabels)
 		api.GET("/grafana/dashboard-url", queryHandler.GrafanaDashboardURL)
+
+		// Nginx dashboard routes
 		api.GET("/nginx/:id/domains", nginxDashboardHandler.Domains)
 		api.GET("/nginx/:id/dashboard", nginxDashboardHandler.Dashboard)
 		api.GET("/nginx/:id/explorer", nginxDashboardHandler.Explorer)
 		api.GET("/nginx/:id/error-logs", nginxDashboardHandler.ErrorLogs)
 		api.GET("/nginx/:id/ip-investigation", nginxDashboardHandler.IPInvestigation)
+
+		// Nginx performance chart routes (Chart 1, 2, 3)
+		api.GET("/nginx/:id/performance/heatmap", nginxPerformanceHandler.Heatmap)
+		api.GET("/nginx/:id/performance/scatter", nginxPerformanceHandler.Scatter)
+		api.GET("/nginx/:id/performance/dist", nginxPerformanceHandler.Distribution)
 	}
 
 	// ── Health check ─────────────────────────────────────────────────────────

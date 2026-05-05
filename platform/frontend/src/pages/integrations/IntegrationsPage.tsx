@@ -22,7 +22,7 @@ function ServiceRow({ service }: { service: DiscoveryService }) {
   return (
     <div className="rounded-xl border border-border bg-card/50 p-3">
       <Link
-        to={`/integrations/services/${service.id}`}
+        to={`/services/${service.id}`}
         className="block hover:border-primary/40 hover:bg-card transition-colors"
       >
         <div className="flex items-center justify-between gap-3">

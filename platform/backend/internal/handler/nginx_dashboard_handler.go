@@ -1,13 +1,4 @@
 // internal/handler/nginx_dashboard_handler.go
-//
-// NEW handler for the consolidated Nginx dashboard API.
-//
-// Routes to add in routes.go (inside the `api` group):
-//   api.GET("/nginx/:id/dashboard", nginxDashboardHandler.Dashboard)
-//   api.GET("/nginx/:id/explorer",  nginxDashboardHandler.Explorer)
-//
-// These two endpoints replace the 22 separate /api/query/* calls
-// the frontend was making before.
 
 package handler
 
@@ -45,12 +36,14 @@ func NewNginxDashboardHandler(
 //
 // GET /api/nginx/:id/dashboard
 //
-//	?start=<unix_ns>&end=<unix_ns>&step=<duration>
+//	?start=<unix_ns>&end=<unix_ns>&step=<duration>&min_rt=<seconds>
 //
 // Response: NginxDashboardSummary JSON (see nginx_dashboard_service.go)
 //
 // The backend caches the result for 20s in Redis.
 // The frontend should poll this endpoint every 20–30s.
+//
+// min_rt (optional): slow-request threshold in seconds. Default is 1.0.
 func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 	claims, ok := getClaims(c)
 	if !ok {
@@ -77,6 +70,12 @@ func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
+	// Parse configurable slow-request threshold (default 1.0s)
+	minRT := 0.0
+	if minRTStr := c.QueryParam("min_rt"); minRTStr != "" {
+		minRT, _ = strconv.ParseFloat(minRTStr, 64)
+	}
+
 	summary, err := h.svc.GetDashboardSummary(
 		c.Request().Context(),
 		tenant.UUID,
@@ -86,6 +85,7 @@ func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 		startNs,
 		endNs,
 		step,
+		minRT,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-dashboard] summary failed: %v", err)
@@ -93,6 +93,80 @@ func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, summary)
+}
+
+// SlowRequests returns a paginated list of slow requests for the "View More" page.
+//
+// GET /api/nginx/:id/slow-requests
+//
+//	?start=<unix_ns>&end=<unix_ns>&min_rt=<seconds>&page=<int>&per_page=<int>
+//
+// Response: SlowRequestsListResult JSON (see nginx_dashboard_service.go)
+//
+// NOT cached — user-driven pagination, always fetches fresh.
+func (h *NginxDashboardHandler) SlowRequests(c echo.Context) error {
+	claims, ok := getClaims(c)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+	}
+
+	serviceID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid service id"})
+	}
+
+	svc, err := h.discoveryRepo.FindServiceByIDTenantCtx(c.Request().Context(), claims.TenantID, uint(serviceID))
+	if err != nil || svc == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "service not found"})
+	}
+
+	tenant, err := h.tenantRepo.FindByIDCtx(c.Request().Context(), claims.TenantID)
+	if err != nil || tenant == nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "tenant not found"})
+	}
+
+	startNs, endNs, _, err := parseTimeParams(c)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	// Parse configurable slow-request threshold (default 1.0s)
+	minRT := 0.0
+	if minRTStr := c.QueryParam("min_rt"); minRTStr != "" {
+		minRT, _ = strconv.ParseFloat(minRTStr, 64)
+	}
+
+	// Pagination params
+	page := 1
+	if pageStr := c.QueryParam("page"); pageStr != "" {
+		if parsed, parseErr := strconv.Atoi(pageStr); parseErr == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	perPage := 100
+	if perPageStr := c.QueryParam("per_page"); perPageStr != "" {
+		if parsed, parseErr := strconv.Atoi(perPageStr); parseErr == nil && parsed > 0 {
+			perPage = parsed
+		}
+	}
+
+	result, err := h.svc.GetSlowRequestsList(
+		c.Request().Context(),
+		tenant.UUID,
+		svc.ServiceName,
+		c.QueryParam("domain"),
+		startNs,
+		endNs,
+		minRT,
+		page,
+		perPage,
+	)
+	if err != nil {
+		c.Logger().Errorf("[nginx-slow-requests] query failed: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch slow requests"})
+	}
+
+	return c.JSON(http.StatusOK, result)
 }
 
 // Explorer runs on-demand filtered queries for the drilldown/research tab.
@@ -300,8 +374,15 @@ func parseTimeParams(c echo.Context) (startNs, endNs int64, step string, err err
 	if err != nil {
 		return 0, 0, "", err
 	}
+	if startNs <= 0 || endNs <= 0 {
+		return 0, 0, "", echo.NewHTTPError(http.StatusBadRequest, "start and end must be positive unix nanoseconds")
+	}
+	if endNs <= startNs {
+		return 0, 0, "", echo.NewHTTPError(http.StatusBadRequest, "end must be after start")
+	}
 	return startNs, endNs, step, nil
 }
+
 // In internal/handler/nginx_dashboard_handler.go — add this method
 
 func (h *NginxDashboardHandler) IPInvestigation(c echo.Context) error {

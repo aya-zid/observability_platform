@@ -5,7 +5,7 @@ import LoginPage from "@/pages/auth/LoginPage"
 import SignupPage from "@/pages/auth/SignupPage"
 import AlertsPage from "@/pages/alerts/AlertsPage"
 import IntegrationsPage from "@/pages/integrations/IntegrationsPage"
-import IntegrationServicePage from "@/pages/integrations/IntegrationServicePage"
+import ServiceConfigPage from "@/pages/services/ServiceConfigPage"
 import { NginxDashboardPage } from "@/pages/integrations/NginxDashboardPage"
 import { NginxLogsPage } from "@/pages/integrations/NginxLogsPage"
 import LogsPage from "@/pages/logs/LogsPage"
@@ -39,7 +39,7 @@ export const router = createBrowserRouter([
           { path: "/traces", element: <TracesPage /> },
           { path: "/alerts", element: <AlertsPage /> },
           { path: "/integrations", element: <IntegrationsPage /> },
-          { path: "/integrations/services/:id", element: <IntegrationServicePage /> },
+          { path: "/services/:id", element: <ServiceConfigPage /> },
           { path: "/integrations/nginx-dashboard/:id", element: <NginxDashboardPage /> },
           { path: "/integrations/nginx-logs/:id", element: <NginxLogsPage /> },
           { path: "/settings/api-keys", element: <ApiKeysPage /> },

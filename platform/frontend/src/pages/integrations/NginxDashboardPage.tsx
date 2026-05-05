@@ -29,6 +29,9 @@ import {
   formatBytes,
   formatNumber,
   formatPercent,
+  dateTimeInputToSeconds,
+  formatDateInputValue,
+  formatTimeInputValue,
   getStatusBadgeClass,
   getNowSeconds,
   getStartSeconds,
@@ -75,6 +78,9 @@ const STATUS_COLORS = {
 } as const
 
 type TimeRange = (typeof TIME_RANGES)[number]
+type DashboardTimeSelection =
+  | { mode: 'preset'; preset: TimeRange }
+  | { mode: 'manual'; date: string; startTime: string; endTime: string }
 type DashboardViewMode = 'server' | 'domain'
 
 function buildDomainHref(basePath: string, domain: string | null) {
@@ -106,6 +112,52 @@ function getStep(rangeSeconds: number) {
   if (rangeSeconds <= 3600) return '30s'
   if (rangeSeconds <= 21600) return '2m'
   return '5m'
+}
+
+function createDefaultManualSelection(): DashboardTimeSelection {
+  const end = new Date()
+  const start = new Date(end.getTime() - 60 * 60 * 1000)
+
+  return {
+    mode: 'manual',
+    date: formatDateInputValue(end),
+    startTime: formatTimeInputValue(start),
+    endTime: formatTimeInputValue(end),
+  }
+}
+
+function getTimeWindow(selection: DashboardTimeSelection) {
+  if (selection.mode === 'preset') {
+    const end = getNowSeconds()
+    const start = getStartSeconds(selection.preset.seconds)
+    return {
+      start,
+      end,
+      seconds: selection.preset.seconds,
+      step: getStep(selection.preset.seconds),
+      isManual: false,
+      error: '',
+    }
+  }
+
+  const start = dateTimeInputToSeconds(selection.date, selection.startTime)
+  const end = dateTimeInputToSeconds(selection.date, selection.endTime)
+  if (start === null || end === null) {
+    return { start: 0, end: 0, seconds: 0, step: '30s', isManual: true, error: 'Use DD-MM-YYYY and HH:mm.' }
+  }
+  if (end <= start) {
+    return { start, end, seconds: 0, step: '30s', isManual: true, error: 'End time must be after start time.' }
+  }
+
+  const seconds = end - start
+  return {
+    start,
+    end,
+    seconds,
+    step: getStep(seconds),
+    isManual: true,
+    error: '',
+  }
 }
 
 function formatChartTime(unixSeconds: number) {
@@ -196,26 +248,76 @@ function TimeRangeSelector({
   selected,
   onChange,
 }: {
-  selected: TimeRange
-  onChange: (range: TimeRange) => void
+  selected: DashboardTimeSelection
+  onChange: (selection: DashboardTimeSelection) => void
 }) {
+  const manual = selected.mode === 'manual' ? selected : createDefaultManualSelection()
+
   return (
-    <div className="flex gap-1 rounded-lg border border-border bg-muted p-1 shadow-sm">
-      {TIME_RANGES.map((range) => (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex gap-1 rounded-lg border border-border bg-muted p-1 shadow-sm">
+        {TIME_RANGES.map((range) => (
+          <button
+            key={range.label}
+            type="button"
+            onClick={() => onChange({ mode: 'preset', preset: range })}
+            className={cn(
+              'rounded px-3 py-1.5 text-sm font-medium transition-all duration-200',
+              selected.mode === 'preset' && selected.preset.seconds === range.seconds
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
+            )}
+          >
+            {range.label}
+          </button>
+        ))}
         <button
-          key={range.label}
           type="button"
-          onClick={() => onChange(range)}
+          onClick={() => onChange(manual)}
           className={cn(
             'rounded px-3 py-1.5 text-sm font-medium transition-all duration-200',
-            selected.seconds === range.seconds
+            selected.mode === 'manual'
               ? 'bg-primary text-primary-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
           )}
         >
-          {range.label}
+          Manual
         </button>
-      ))}
+      </div>
+
+      {selected.mode === 'manual' ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2 py-1 shadow-sm">
+          <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            Date
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="DD-MM-YYYY"
+              value={selected.date}
+              onChange={(event) => onChange({ ...selected, date: event.target.value })}
+              className="h-8 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            Start
+            <input
+              type="time"
+              value={selected.startTime}
+              onChange={(event) => onChange({ ...selected, startTime: event.target.value })}
+              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            End
+            <input
+              type="time"
+              value={selected.endTime}
+              onChange={(event) => onChange({ ...selected, endTime: event.target.value })}
+              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+            />
+          </label>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -418,7 +520,10 @@ function SlowRequestTable({
 export function NginxDashboardPage() {
   const { id = '' } = useParams<{ id?: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [timeRange, setTimeRange] = useState<TimeRange>(TIME_RANGES[1])
+  const [timeSelection, setTimeSelection] = useState<DashboardTimeSelection>({
+    mode: 'preset',
+    preset: TIME_RANGES[1],
+  })
 
   const serviceQuery = useQuery({
     queryKey: ['discovery-service', id],
@@ -473,6 +578,8 @@ export function NginxDashboardPage() {
     }
   }, [domains.length, requestedDomain, searchParams, selectedDomain, setSearchParams])
 
+  const timeWindow = useMemo(() => getTimeWindow(timeSelection), [timeSelection])
+
   // ── Single backend call replacing all 22 frontend queries ─────────────────
   const dashQuery = useQuery<NginxDashboardSummary>({
     // Include the actual epoch minute in the key so that each auto-refresh
@@ -483,22 +590,21 @@ export function NginxDashboardPage() {
       id,
       serviceName,
       selectedDomain,
-      timeRange.seconds,
+      timeSelection,
+      timeWindow.start,
+      timeWindow.end,
     ],
-    enabled: serviceReady && (domains.length > 0 || domainsQuery.isSuccess),
+    enabled: serviceReady && (domains.length > 0 || domainsQuery.isSuccess) && !timeWindow.error,
     queryFn: () => {
-      // Both timestamps computed fresh inside queryFn (never at render time).
-      const end = getNowSeconds()
-      const start = getStartSeconds(timeRange.seconds)
       return getNginxDashboardSummary(id, {
-        start: secondsToNanos(start),
-        end: secondsToNanos(end),
-        step: getStep(timeRange.seconds),
+        start: secondsToNanos(timeWindow.start),
+        end: secondsToNanos(timeWindow.end),
+        step: timeWindow.step,
         domain: selectedDomain || undefined,
       })
     },
     staleTime: 20_000,
-    refetchInterval: 25_000, // slightly above the 20 s Redis cache TTL on backend
+    refetchInterval: timeWindow.isManual ? false : 25_000, // slightly above the 20 s Redis cache TTL on backend
     refetchOnWindowFocus: false,
   })
 
@@ -603,7 +709,7 @@ export function NginxDashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <TimeRangeSelector selected={timeRange} onChange={setTimeRange} />
+          <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
           <Link
             to={buildDomainHref(`/integrations/nginx-logs/${id}`, selectedDomain || null)}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 transition-colors"
@@ -612,6 +718,12 @@ export function NginxDashboardPage() {
           </Link>
         </div>
       </div>
+
+      {timeWindow.error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+          {timeWindow.error}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-col gap-3">

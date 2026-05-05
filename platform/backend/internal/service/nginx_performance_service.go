@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,19 +43,24 @@ type RTStatusMetrics struct {
 // ─── Scatter types ────────────────────────────────────────────────────────────
 
 type RTScatterPoint struct {
-	Time           int64   `json:"time"`             // unix milliseconds
-	RT             float64 `json:"rt"`               // response time in ms
-	Status         int     `json:"status"`           // HTTP status code
-	Path           string  `json:"path"`             // raw request path (empty for aggregate dots)
-	Method         string  `json:"method"`           // HTTP method (empty for aggregate dots)
-	NormalizedPath string  `json:"normalized_path"`  // normalized path (empty for aggregate dots)
-	IsAggregate    bool    `json:"is_aggregate"`     // true = aggregate dot
-	Count          int     `json:"count,omitempty"`  // for aggregate dots: number of requests averaged
+	Time           int64   `json:"time"`                   // unix milliseconds
+	RT             float64 `json:"rt"`                     // response time in ms
+	Status         int     `json:"status"`                 // HTTP status code
+	Path           string  `json:"path"`                   // raw request path (empty for aggregate dots)
+	Method         string  `json:"method"`                 // HTTP method (empty for aggregate dots)
+	NormalizedPath string  `json:"normalized_path"`        // normalized path (empty for aggregate dots)
+	IP             string  `json:"ip,omitempty"`           // client IP (individual dots only)
+	IsAggregate    bool    `json:"is_aggregate"`           // true = aggregate dot
+	Count          int     `json:"count,omitempty"`        // for aggregate dots: number of requests averaged
 	WindowLabel    string  `json:"window_label,omitempty"` // e.g. "10:00–10:03"
 }
 
+// RTScatter is the top-level response for Chart 2.
+// TotalRequests = sum of all individual points + sum of Count across all aggregate dots.
+// This lets the UI verify no requests are silently dropped.
 type RTScatter struct {
-	Points []RTScatterPoint `json:"points"`
+	Points        []RTScatterPoint `json:"points"`
+	TotalRequests int              `json:"total_requests"`
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -167,7 +175,7 @@ func (s *NginxPerformanceService) fetchRTIntensityHeatmap(
 		buckets[i] = time.Unix(bucketStartSec, 0).In(loc).Format("15:04")
 	}
 
-	// Step 3: P95 per path (unchanged)
+	// Step 3: P95 per path
 	matrix := make([][]float64, len(paths))
 	for i := range matrix {
 		matrix[i] = make([]float64, bucketCount)
@@ -232,7 +240,7 @@ func (s *NginxPerformanceService) fetchRTIntensityHeatmap(
 }
 
 // ─── Chart 3: RT Distribution by Status ──────────────────────────────────────
-// (unchanged - no time label issues)
+
 func (s *NginxPerformanceService) GetRTDistributionByStatus(
 	ctx context.Context,
 	tenantUUID string,
@@ -450,12 +458,105 @@ func firstInstantValue(series []LokiMatrixSeries) float64 {
 // ─── Chart 2: Raw RT Scatter ──────────────────────────────────────────────────
 
 const (
-	scatterBucketSize      = 3 * time.Minute
-	scatterBucketCount     = 20
-	scatterErrorBudget     = 150
-	scatterTotalDotBudget  = 3000
+	scatterBucketSize     = 3 * time.Minute
+	scatterBucketCount    = 20
+	scatterErrorBudget    = 150
+	scatterTotalDotBudget = 3000
 )
 
+func (s *NginxPerformanceService) lokiQueryLogEntriesAll(
+	ctx context.Context,
+	tenantUUID, query string,
+	startNs, endNs int64,
+) ([]LokiLogEntry, error) {
+	const pageSize = 5000
+	var all []LokiLogEntry
+	curStart := startNs
+
+	for {
+		upstream := fmt.Sprintf("http://%s:%s/loki/api/v1/query_range",
+			s.cfg.LokiHost, s.cfg.LokiPort)
+		params := url.Values{}
+		params.Set("query", query)
+		params.Set("start", strconv.FormatInt(curStart, 10))
+		params.Set("end", strconv.FormatInt(endNs, 10))
+		params.Set("limit", strconv.Itoa(pageSize))
+		params.Set("direction", "forward")
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream+"?"+params.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("X-Scope-OrgID", tenantUUID)
+
+		resp, err := s.dashboard.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		// Parse inline — v[0] is the timestamp string, v[1] is the log line.
+		// parseLokiStreamEntries does NOT store v[0], so the cursor would
+		// never advance if we used it. We store v[0] ourselves.
+		var raw struct {
+			Data struct {
+				Result []struct {
+					Values [][]interface{} `json:"values"`
+				} `json:"result"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return nil, err
+		}
+
+		var page []LokiLogEntry
+		var latestNs int64
+		for _, stream := range raw.Data.Result {
+			for _, v := range stream.Values {
+				if len(v) < 2 {
+					continue
+				}
+				tsStr := fmt.Sprint(v[0])
+				entry := LokiLogEntry{
+					Line:     fmt.Sprint(v[1]),
+					Metadata: map[string]string{"__timestamp_ns__": tsStr},
+				}
+				// Also copy any structured metadata from v[2] if present
+				if len(v) >= 3 {
+					if meta, ok := v[2].(map[string]interface{}); ok {
+						for k, val := range meta {
+							entry.Metadata[k] = fmt.Sprint(val)
+						}
+					}
+				}
+				page = append(page, entry)
+
+				// Track the latest timestamp for cursor advancement
+				if ts, err2 := strconv.ParseInt(tsStr, 10, 64); err2 == nil && ts > latestNs {
+					latestNs = ts
+				}
+			}
+		}
+
+		if len(page) == 0 {
+			break
+		}
+		all = append(all, page...)
+		if len(page) < pageSize {
+			break // last page
+		}
+		if latestNs <= curStart {
+			break // no progress — safety guard
+		}
+		curStart = latestNs + 1 // exclude last entry from next page
+	}
+
+	return all, nil
+}
 func (s *NginxPerformanceService) GetRTScatter(
 	ctx context.Context,
 	tenantUUID string,
@@ -500,6 +601,7 @@ type scatterRawPoint struct {
 	path           string
 	method         string
 	normalizedPath string
+	ip             string
 }
 
 func (s *NginxPerformanceService) fetchRTScatter(
@@ -517,7 +619,7 @@ func (s *NginxPerformanceService) fetchRTScatter(
 		return &RTScatter{Points: []RTScatterPoint{}}, nil
 	}
 
-	// Baseline for outliers
+	// Baseline for outliers (P95 per normalized path over the full window)
 	baselineQ := fmt.Sprintf(
 		`quantile_over_time(0.95, %s %s | normalized_path!="" %s | unwrap rt [%ds]) by (normalized_path)`,
 		base, parseExpr, rtParseExpr, rangeSec,
@@ -534,9 +636,10 @@ func (s *NginxPerformanceService) fetchRTScatter(
 		}
 	}
 
-	// Windows
+	// Divide the hour into fixed windows
 	bucketSizeNs := int64(scatterBucketSize)
 	totalRange := endNs - startNs
+
 	numBuckets := int(totalRange / bucketSizeNs)
 	if numBuckets > scatterBucketCount {
 		numBuckets = scatterBucketCount
@@ -566,12 +669,18 @@ func (s *NginxPerformanceService) fetchRTScatter(
 				winEnd = endNs
 			}
 
+			// FIX 1: use {{.ip}} — the parseExpr regexp captures the remote address
+			// into the label named "ip" ((?P<ip>[^ ]+)), not "remote_addr".
 			logQ := fmt.Sprintf(
-				`%s %s | status!="" %s | rt!="" | line_format "{{.status}}\t{{.rt}}\t{{.method}}\t{{.path}}\t{{.normalized_path}}"`,
+				`%s %s | status!="" %s | rt!="" | line_format "{{.status}}\t{{.rt}}\t{{.method}}\t{{.path}}\t{{.normalized_path}}\t{{.ip}}"`,
 				base, parseExpr, rtParseExpr,
 			)
 
-			lines, queryErr := s.dashboard.lokiQueryLogEntries(ctx, tenantUUID, logQ, winStart, winEnd, 5000)
+			// FIX 2: no per-window limit — fetch all log lines so every request is
+			// either shown as an individual dot or folded into an aggregate dot.
+			// Requests beyond the dot budget are averaged (never silently dropped),
+			// so TotalRequests = Σ individual + Σ aggregate.Count = true total.
+			lines, queryErr := s.lokiQueryLogEntriesAll(ctx, tenantUUID, logQ, winStart, winEnd)
 			if queryErr != nil {
 				windowCh <- windowResult{bucketIdx: idx, err: queryErr}
 				return
@@ -579,7 +688,8 @@ func (s *NginxPerformanceService) fetchRTScatter(
 
 			raw := make([]scatterRawPoint, 0, len(lines))
 			for _, line := range lines {
-				parts := strings.SplitN(line.Line, "\t", 5)
+				// 6 fields: status, rt, method, path, normalized_path, ip
+				parts := strings.SplitN(line.Line, "\t", 6)
 				if len(parts) < 4 {
 					continue
 				}
@@ -594,8 +704,12 @@ func (s *NginxPerformanceService) fetchRTScatter(
 				method := parts[2]
 				path := parts[3]
 				normalizedPath := ""
-				if len(parts) == 5 {
+				if len(parts) >= 5 {
 					normalizedPath = parts[4]
+				}
+				ip := ""
+				if len(parts) >= 6 {
+					ip = strings.TrimSpace(parts[5])
 				}
 
 				tsMs := winStart/int64(time.Millisecond) + int64(scatterBucketSize/time.Millisecond)/2
@@ -612,6 +726,7 @@ func (s *NginxPerformanceService) fetchRTScatter(
 					path:           path,
 					method:         method,
 					normalizedPath: normalizedPath,
+					ip:             ip,
 				})
 			}
 
@@ -637,7 +752,6 @@ func (s *NginxPerformanceService) fetchRTScatter(
 		winStartMs := (startNs + int64(idx)*bucketSizeNs) / int64(time.Millisecond)
 		winEndMs := winStartMs + int64(scatterBucketSize/time.Millisecond)
 
-		// Use Tunis local time for labels
 		startT := time.UnixMilli(winStartMs).In(loc)
 		endT := time.UnixMilli(winEndMs).In(loc)
 		winLabel := fmt.Sprintf("%s–%s",
@@ -686,7 +800,10 @@ func (s *NginxPerformanceService) fetchRTScatter(
 		sortDescByRT(errors5xx)
 		sortDescByRT(outliers)
 
-		addSampled := func(pts []scatterRawPoint, budget int, overrideStatus int) {
+		// addSampled shows top-budget individual dots and collapses the remainder.
+		// For 4xx and 5xx the overflow is aggregated PER EXACT STATUS CODE so that
+		// e.g. 401 and 404 get separate avg dots (not one blended dot).
+		addSampled := func(pts []scatterRawPoint, budget int) {
 			if len(pts) == 0 {
 				return
 			}
@@ -697,46 +814,46 @@ func (s *NginxPerformanceService) fetchRTScatter(
 				aggregated = pts[budget-1:]
 			}
 			for _, p := range indiv {
-				st := p.status
-				if overrideStatus != 0 {
-					st = overrideStatus
-				}
 				allPoints = append(allPoints, RTScatterPoint{
 					Time:           p.timestampMs,
 					RT:             p.rtMs,
-					Status:         st,
+					Status:         p.status,
 					Path:           p.path,
 					Method:         p.method,
 					NormalizedPath: p.normalizedPath,
+					IP:             p.ip,
 					IsAggregate:    false,
 				})
 			}
 			if len(aggregated) > 0 {
-				var sumRT float64
+				// Group overflow by exact status code for per-code aggregate dots.
+				byCode := make(map[int][]scatterRawPoint)
 				for _, p := range aggregated {
-					sumRT += p.rtMs
-				}
-				avgRT := sumRT / float64(len(aggregated))
-				st := aggregated[0].status
-				if overrideStatus != 0 {
-					st = overrideStatus
+					byCode[p.status] = append(byCode[p.status], p)
 				}
 				midMs := winStartMs + int64(scatterBucketSize/time.Millisecond)/2
-				allPoints = append(allPoints, RTScatterPoint{
-					Time:        midMs,
-					RT:          avgRT,
-					Status:      st,
-					IsAggregate: true,
-					Count:       len(aggregated),
-					WindowLabel: winLabel,
-				})
+				for code, group := range byCode {
+					var sumRT float64
+					for _, p := range group {
+						sumRT += p.rtMs
+					}
+					allPoints = append(allPoints, RTScatterPoint{
+						Time:        midMs,
+						RT:          sumRT / float64(len(group)),
+						Status:      code,
+						IsAggregate: true,
+						Count:       len(group),
+						WindowLabel: winLabel,
+					})
+				}
 			}
 		}
 
-		addSampled(errors5xx, scatterErrorBudget, 0)
-		addSampled(errors4xx, scatterErrorBudget, 0)
-		addSampled(outliers, scatterErrorBudget, 0)
+		addSampled(errors5xx, scatterErrorBudget)
+		addSampled(errors4xx, scatterErrorBudget)
+		addSampled(outliers, scatterErrorBudget)
 
+		// 2xx and 3xx normals: single avg dot per window (all folded — count preserved)
 		if len(normal2xx) > 0 {
 			var sumRT float64
 			for _, p := range normal2xx {
@@ -770,7 +887,8 @@ func (s *NginxPerformanceService) fetchRTScatter(
 		}
 	}
 
-	// Global budget enforcement
+	// FIX 3: global budget — keep top-RT individual dots, convert overflow into
+	// per-window per-status aggregate dots so no request count is ever lost.
 	if len(allPoints) > scatterTotalDotBudget {
 		var aggDots, indivDots []RTScatterPoint
 		for _, pt := range allPoints {
@@ -785,12 +903,46 @@ func (s *NginxPerformanceService) fetchRTScatter(
 			remaining = 0
 		}
 		if len(indivDots) > remaining {
+			// Sort individual dots desc by RT — keep the most interesting ones.
 			for i := 1; i < len(indivDots); i++ {
 				for j := i; j > 0 && indivDots[j].RT > indivDots[j-1].RT; j-- {
 					indivDots[j], indivDots[j-1] = indivDots[j-1], indivDots[j]
 				}
 			}
+			overflow := indivDots[remaining:]
 			indivDots = indivDots[:remaining]
+
+			// Convert overflow into per-window per-status aggregate dots so their
+			// counts are preserved and TotalRequests stays accurate.
+			type aggKey struct {
+				windowMs int64
+				status   int
+			}
+			byKey := make(map[aggKey][]RTScatterPoint)
+			startMs := startNs / int64(time.Millisecond)
+			bucketMs := int64(scatterBucketSize / time.Millisecond)
+			for _, pt := range overflow {
+				windowIdx := (pt.Time - startMs) / bucketMs
+				if windowIdx < 0 {
+					windowIdx = 0
+				}
+				midMs := startMs + windowIdx*bucketMs + bucketMs/2
+				key := aggKey{windowMs: midMs, status: pt.Status} // pt.Status — exported field
+				byKey[key] = append(byKey[key], pt)
+			}
+			for key, group := range byKey {
+				var sumRT float64
+				for _, p := range group {
+					sumRT += p.RT
+				}
+				aggDots = append(aggDots, RTScatterPoint{
+					Time:        key.windowMs,
+					RT:          sumRT / float64(len(group)),
+					Status:      key.status,
+					IsAggregate: true,
+					Count:       len(group),
+				})
+			}
 		}
 		allPoints = append(aggDots, indivDots...)
 	}
@@ -799,5 +951,19 @@ func (s *NginxPerformanceService) fetchRTScatter(
 		allPoints = []RTScatterPoint{}
 	}
 
-	return &RTScatter{Points: allPoints}, nil
+	// TotalRequests: every individual dot = 1, every aggregate dot = its Count.
+	// With the three fixes above this now equals the true number of requests fetched.
+	totalRequests := 0
+	for _, pt := range allPoints {
+		if pt.IsAggregate {
+			totalRequests += pt.Count
+		} else {
+			totalRequests++
+		}
+	}
+
+	return &RTScatter{
+		Points:        allPoints,
+		TotalRequests: totalRequests,
+	}, nil
 }

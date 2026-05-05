@@ -88,7 +88,7 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/nginx/:id/explorer", nginxDashboardHandler.Explorer)
 		api.GET("/nginx/:id/error-logs", nginxDashboardHandler.ErrorLogs)
 		api.GET("/nginx/:id/ip-investigation", nginxDashboardHandler.IPInvestigation)
-
+		api.GET("/nginx/:id/slow-requests",  nginxDashboardHandler.SlowRequests)
 		// Nginx performance chart routes (Chart 1, 2, 3)
 		api.GET("/nginx/:id/performance/heatmap", nginxPerformanceHandler.Heatmap)
 		api.GET("/nginx/:id/performance/scatter", nginxPerformanceHandler.Scatter)

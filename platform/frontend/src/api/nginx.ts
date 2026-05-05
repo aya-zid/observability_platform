@@ -74,10 +74,17 @@ export type NginxDashboardSummary = {
   vm_accepted_total?: number
   vm_handled_total?: number
 
-  // Slow requests table (top 100, rt > 1s, computed server-side)
+  // Slow requests table (top 100, rt > slow_requests_min_rt, computed server-side)
   slow_requests: NginxSlowRequest[]
-  // Slow requests with normalized paths
+  // Total slow requests found in the time range (before truncation to 100)
+  slow_requests_total: number
+  // Slow requests with normalized paths (top 100)
   slow_requests_normalized: NginxSlowRequest[]
+  // Total normalized slow requests found in the time range (before truncation to 100)
+  slow_requests_normalized_total: number
+  // The threshold used to compute the above two lists (seconds)
+  // Echoed back so the frontend can label the section correctly, e.g. "Slow (> 2s)"
+  slow_requests_min_rt: number
 }
 
 export type NginxExplorerResult = {
@@ -106,11 +113,39 @@ export type NginxDomainItem = {
   is_shared_log: boolean
 }
 
+export type NginxSlowRequestsListResult = {
+  items: NginxSlowRequest[]
+  total: number
+  page: number
+  per_page: number
+  total_pages: number
+  min_rt: number
+}
+
+export type NginxSlowRequestsParams = {
+  start: string
+  end: string
+  domain?: string
+  min_rt?: string
+  page?: string
+  per_page?: string
+}
+
 export async function getNginxDashboardSummary(
   id: string,
-  params: { start: string; end: string; step: string; domain?: string }
+  params: { start: string; end: string; step: string; domain?: string; min_rt?: string }
 ): Promise<NginxDashboardSummary> {
   const { data } = await client.get<NginxDashboardSummary>(`/api/nginx/${id}/dashboard`, {
+    params,
+  })
+  return data
+}
+
+export async function getNginxSlowRequests(
+  id: string,
+  params: NginxSlowRequestsParams
+): Promise<NginxSlowRequestsListResult> {
+  const { data } = await client.get<NginxSlowRequestsListResult>(`/api/nginx/${id}/slow-requests`, {
     params,
   })
   return data
@@ -201,21 +236,34 @@ export type NginxRTHeatmap = {
 }
 
 /** Chart 2: Raw RT Scatter — individual/aggregated request dots.
+ *
+ * Individual dots  → real request, carries path / method / ip / status.
+ * Aggregate dots   → avg of requests that exceeded the per-window budget.
+ *   - 2xx / 3xx normals: one avg dot per window (status 200 / 301).
+ *   - 4xx / 5xx overflow + outliers: one avg dot PER EXACT STATUS CODE per window
+ *     (e.g. separate dots for 401, 403, 404 within the same window).
  */
 export type NginxScatterPoint = {
-  time: number           // unix ms within the selected hour
-  rt: number             // response time in ms
-  status: number         // HTTP status code
-  path: string           // raw path (individual dots) or "" (aggregate dots)
+  time: number              // unix ms within the selected hour
+  rt: number                // response time in ms
+  status: number            // HTTP status code
+  path: string              // raw path (individual dots) or "" (aggregate dots)
   method: string
   normalized_path?: string
-  is_aggregate?: boolean // true = avg dot, false = individual dot
-  count?: number         // for aggregate dots: how many requests it represents
-  window_label?: string  // e.g. "09:00–09:03" for aggregate dots
+  ip?: string               // client IP — individual dots only
+  is_aggregate?: boolean    // true = avg dot, false = individual dot
+  count?: number            // for aggregate dots: how many requests it represents
+  window_label?: string     // e.g. "09:00–09:03" for aggregate dots
 }
 
 export type NginxRTScatter = {
   points: NginxScatterPoint[]
+  /**
+   * Server-computed total request count that this scatter response represents.
+   * = Σ(individual dots × 1) + Σ(aggregate dot.count)
+   * Use this to verify no requests were silently dropped.
+   */
+  total_requests: number
 }
 
 /** Chart 3: RT Distribution by Status — Avg / P95 / P99 per status class. */

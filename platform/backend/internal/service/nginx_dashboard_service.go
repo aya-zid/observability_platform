@@ -94,8 +94,17 @@ type NginxDashboardSummary struct {
 	VMAcceptedTotal *float64 `json:"vm_accepted_total,omitempty"`
 	VMHandledTotal  *float64 `json:"vm_handled_total,omitempty"`
 
-	// ── Slow requests table (top 100, rt > 1s) ──
+	// ── Slow requests table (top 100, rt > minRT) ──
 	SlowRequests []SlowRequest `json:"slow_requests"`
+	// Total slow requests found in the time range (before truncation to 100).
+	// Use this to render the "Showing 100 of N" label and gate the "View More" button.
+	SlowRequestsTotal int `json:"slow_requests_total"`
+	// ── Normalized slow requests (top 100) ──
+	// SlowRequestsNormalized is already defined above; this is just the total count.
+	SlowRequestsNormalizedTotal int `json:"slow_requests_normalized_total"`
+	// ── The threshold used to compute the above two lists (seconds) ──
+	// Echoed back so the frontend can label the section correctly, e.g. "Slow (> 2s)".
+	SlowRequestsMinRT float64 `json:"slow_requests_min_rt"`
 }
 
 // TimePoint is a generic map for chart data points.
@@ -177,12 +186,17 @@ func (s *NginxDashboardService) GetDashboardSummary(
 	domain string,
 	startNs, endNs int64,
 	step string,
+	minRT float64, // slow-request threshold in seconds; 0 means use default (1.0)
 ) (*NginxDashboardSummary, error) {
+	if minRT <= 0 {
+		minRT = 1.0
+	}
 	// Floor startNs/endNs to the nearest second to prevent per-millisecond cache misses.
 	// Two fetches 1 second apart for the same range should hit the same cache entry.
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
-	cacheKey := fmt.Sprintf("nginx:dash:%s:%s:%s:%d:%d:%s", tenantUUID, serviceName, domain, startSec, endSec, step)
+	// Include minRT in cache key so different thresholds don't share a cached result.
+	cacheKey := fmt.Sprintf("nginx:dash:%s:%s:%s:%d:%d:%s:%.3f", tenantUUID, serviceName, domain, startSec, endSec, step, minRT)
 
 	if s.redis != nil {
 		if cached, err := s.redis.Get(ctx, cacheKey).Bytes(); err == nil {
@@ -193,7 +207,7 @@ func (s *NginxDashboardService) GetDashboardSummary(
 		}
 	}
 
-	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, domain, startNs, endNs, step)
+	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, domain, startNs, endNs, step, minRT)
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +241,7 @@ func (s *NginxDashboardService) fetchDashboard(
 	domain string,
 	startNs, endNs int64,
 	step string,
+	minRT float64,
 ) (*NginxDashboardSummary, error) {
 	// "access" is the default — dashboard metrics must never touch error logs.
 	base := lokiSelector(serviceName, domain, "access")
@@ -281,7 +296,7 @@ func (s *NginxDashboardService) fetchDashboard(
 		base, parseExpr, rtParseExpr, rangeSeconds,
 	)
 
-	// 7. Slow requests — fetch 500 recent log lines to find rt>1s entries
+	// 7. Slow requests — fetch 500 recent log lines to find rt>minRT entries
 	//    These are actual log lines (streams), not metric queries.
 	slowLogsQ := base
 
@@ -571,13 +586,88 @@ func (s *NginxDashboardService) fetchDashboard(
 	}
 	sortSuspiciousIPs(summary.SuspiciousIPs)
 
-	// ── Slow requests (parse log lines, filter rt > 1s) ───────────────────────
-	summary.SlowRequests = parseSlowRequests(slowLogs.entries, 100)
+	// ── Slow requests (parse log lines, filter rt > minRT) ───────────────────
+	slowReqs, slowTotal := parseSlowRequests(slowLogs.entries, 100, minRT)
+	summary.SlowRequests = slowReqs
+	summary.SlowRequestsTotal = slowTotal
+	summary.SlowRequestsMinRT = minRT
 
 	// Slow normalized requests come directly from Loki's normalized_path metadata,
 	// not from regrouping raw paths on the application side.
-	summary.SlowRequestsNormalized = buildSlowRequestsNormalized(slowNormAgg.data, 100)
+	slowNorm, slowNormTotal := buildSlowRequestsNormalized(slowNormAgg.data, 100, minRT)
+	summary.SlowRequestsNormalized = slowNorm
+	summary.SlowRequestsNormalizedTotal = slowNormTotal
+
 	return summary, nil
+}
+
+// ─── SlowRequestsList (not cached — used by "View More" page) ────────────────
+
+// SlowRequestsListResult is the paginated response for the full slow-requests page.
+type SlowRequestsListResult struct {
+	Items      []SlowRequest `json:"items"`
+	Total      int           `json:"total"`
+	Page       int           `json:"page"`
+	PerPage    int           `json:"per_page"`
+	TotalPages int           `json:"total_pages"`
+	MinRT      float64       `json:"min_rt"`
+}
+
+// GetSlowRequestsList fetches up to 5 000 log lines and returns a paginated list
+// of slow requests. It is the backing service for the "View More" full-page view.
+func (s *NginxDashboardService) GetSlowRequestsList(
+	ctx context.Context,
+	tenantUUID string,
+	serviceName string,
+	domain string,
+	startNs, endNs int64,
+	minRT float64,
+	page, perPage int,
+) (*SlowRequestsListResult, error) {
+	if minRT <= 0 {
+		minRT = 1.0
+	}
+	if perPage <= 0 || perPage > 500 {
+		perPage = 100
+	}
+	if page <= 0 {
+		page = 1
+	}
+	base := lokiSelector(serviceName, domain, "access")
+	// Fetch a generous batch — 5 000 lines covers most time windows even for busy servers.
+	entries, err := s.lokiQueryLogEntries(ctx, tenantUUID, base, startNs, endNs, 5000)
+	if err != nil {
+		return nil, fmt.Errorf("loki query failed: %w", err)
+	}
+	// Parse all matching slow requests (no truncation yet)
+	all, total := parseSlowRequests(entries, len(entries), minRT)
+	// all is already sorted by rt desc
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	var pageItems []SlowRequest
+	if start < total {
+		pageItems = all[start:end]
+	} else {
+		pageItems = []SlowRequest{}
+	}
+	return &SlowRequestsListResult{
+		Items:      pageItems,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: totalPages,
+		MinRT:      minRT,
+	}, nil
 }
 
 // ─── Explorer (not cached) ────────────────────────────────────────────────────
@@ -1180,9 +1270,12 @@ func mergeVMConnSeries(active, waiting, reading, writing []VMSeries) []TimePoint
 }
 
 // parseSlowRequests scans raw nginx log lines for ones containing rt=<seconds>
-// where rt >= 1, parses them, and returns the top `limit` sorted by rt desc.
+// where rt >= minRT, parses them, and returns:
+//   - the top limit sorted by rt desc
+//   - the total number of matching slow requests (before truncation)
+//
 // It now properly uses normalized_path from Loki structured metadata.
-func parseSlowRequests(entries []LokiLogEntry, limit int) []SlowRequest {
+func parseSlowRequests(entries []LokiLogEntry, limit int, minRT float64) ([]SlowRequest, int) {
 	var result []SlowRequest
 	for _, entry := range entries {
 		line := entry.Line
@@ -1192,7 +1285,7 @@ func parseSlowRequests(entries []LokiLogEntry, limit int) []SlowRequest {
 			continue
 		}
 		rt := parseRT(line[rtIdx:])
-		if rt < 1.0 {
+		if rt < minRT {
 			continue
 		}
 
@@ -1222,20 +1315,27 @@ func parseSlowRequests(entries []LokiLogEntry, limit int) []SlowRequest {
 		}
 	}
 
+	total := len(result)
 	if len(result) > limit {
 		result = result[:limit]
 	}
-	return result
+	return result, total
 }
 
 // buildSlowRequestsNormalized uses Loki aggregation over the normalized_path
 // metadata field directly. Each row is the single worst response time seen for
 // that normalized path in the selected window.
-func buildSlowRequestsNormalized(series []LokiMatrixSeries, limit int) []SlowRequest {
+// Returns the list (capped at limit) and the total before truncation.
+func buildSlowRequestsNormalized(series []LokiMatrixSeries, limit int, minRT float64) ([]SlowRequest, int) {
 	best := map[string]SlowRequest{}
 	for _, item := range series {
 		normalizedPath := item.Metric["normalized_path"]
 		if normalizedPath == "" {
+			continue
+		}
+
+		rt := lastValue(item.Values)
+		if rt < minRT {
 			continue
 		}
 
@@ -1245,7 +1345,7 @@ func buildSlowRequestsNormalized(series []LokiMatrixSeries, limit int) []SlowReq
 			NormalizedPath: normalizedPath,
 			Method:         item.Metric["method"],
 			Status:         status,
-			RT:             lastValue(item.Values),
+			RT:             rt,
 		}
 
 		if existing, ok := best[normalizedPath]; !ok || req.RT > existing.RT {
@@ -1266,10 +1366,11 @@ func buildSlowRequestsNormalized(series []LokiMatrixSeries, limit int) []SlowReq
 		}
 	}
 
+	total := len(out)
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out
+	return out, total
 }
 
 func findRT(line string) int {

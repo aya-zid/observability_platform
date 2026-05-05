@@ -20,10 +20,13 @@ var canonicalAliases = map[string]string{
 	"php-fpm":         "phpfpm",
 	"phpfpm":          "phpfpm",
 	"postgresql":      "postgresql",
+	"postgres":        "postgresql",
 	"rabbitmq":        "rabbitmq",
 	"rabbitmq-server": "rabbitmq",
 	"redis-server":    "redis",
 	"sshd":            "openssh",
+	"nginx":      		"nginx",
+	"openresty":  		"nginx",
 }
 
 func Canonicalize(rawName string) (string, bool) {

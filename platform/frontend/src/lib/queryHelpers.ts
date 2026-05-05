@@ -253,6 +253,64 @@ export function formatDuration(seconds: number): string {
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+/**
+ * Format a Date as DD-MM-YYYY for dashboard date inputs.
+ */
+export function formatDateInputValue(date: Date): string {
+  return `${pad2(date.getDate())}-${pad2(date.getMonth() + 1)}-${date.getFullYear()}`
+}
+
+/**
+ * Format a Date as HH:mm for dashboard time inputs.
+ */
+export function formatTimeInputValue(date: Date): string {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+/**
+ * Parse DD-MM-YYYY plus HH:mm into local unix seconds.
+ */
+export function dateTimeInputToSeconds(dateValue: string, timeValue: string): number | null {
+  const dateMatch = dateValue.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/)
+  const timeMatch = timeValue.trim().match(/^(\d{2}):(\d{2})$/)
+
+  if (!dateMatch || !timeMatch) {
+    return null
+  }
+
+  const day = Number(dateMatch[1])
+  const month = Number(dateMatch[2])
+  const year = Number(dateMatch[3])
+  const hour = Number(timeMatch[1])
+  const minute = Number(timeMatch[2])
+
+  if (
+    month < 1 || month > 12 ||
+    day < 1 || day > 31 ||
+    hour < 0 || hour > 23 ||
+    minute < 0 || minute > 59
+  ) {
+    return null
+  }
+
+  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0)
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day ||
+    parsed.getHours() !== hour ||
+    parsed.getMinutes() !== minute
+  ) {
+    return null
+  }
+
+  return Math.floor(parsed.getTime() / 1000)
+}
+
 /**
  * Convert bytes to human-readable format.
  *

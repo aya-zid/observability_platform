@@ -1,6 +1,6 @@
 // src/components/nginx/NginxVirtualHostsSection.tsx
 //
-// Drop-in replacement for the virtual hosts SectionCard in IntegrationServicePage.tsx
+// Drop-in replacement for the virtual hosts SectionCard in ServiceConfigPage.tsx
 // Usage:
 //   import NginxVirtualHostsSection from "@/components/nginx/NginxVirtualHostsSection"
 //   <NginxVirtualHostsSection hosts={nginxVirtualHosts} onChange={setNginxVirtualHosts} />

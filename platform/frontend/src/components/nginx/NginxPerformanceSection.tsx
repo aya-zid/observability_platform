@@ -33,11 +33,54 @@ const STATUS_CLASS_COLORS = {
   '5xx': '#ef4444',
 } as const
 
+// Per-exact-status colors for 4xx and 5xx aggregate dots.
+// Gives each code a distinct shade within its class hue so overlapping agg dots
+// for different codes (e.g. 401 vs 404) are visually distinguishable.
+const STATUS_CODE_COLORS: Record<number, string> = {
+  // 4xx — amber/orange shades
+  400: '#fbbf24',
+  401: '#f59e0b',
+  403: '#d97706',
+  404: '#b45309',
+  408: '#92400e',
+  409: '#e8a020',
+  429: '#c2770f',
+  // 5xx — red shades
+  500: '#ef4444',
+  502: '#dc2626',
+  503: '#b91c1c',
+  504: '#991b1b',
+  // 3xx normals — blue
+  301: '#3b82f6',
+  302: '#2563eb',
+  // 2xx normals — green
+  200: '#22c55e',
+}
+
+function getStatusCodeColor(status: number): string {
+  if (STATUS_CODE_COLORS[status]) return STATUS_CODE_COLORS[status]
+  if (status >= 500) return STATUS_CLASS_COLORS['5xx']
+  if (status >= 400) return STATUS_CLASS_COLORS['4xx']
+  if (status >= 300) return STATUS_CLASS_COLORS['3xx']
+  return STATUS_CLASS_COLORS['2xx']
+}
+
 function getStatusClass(status: number): keyof typeof STATUS_CLASS_COLORS {
   if (status >= 500) return '5xx'
   if (status >= 400) return '4xx'
   if (status >= 300) return '3xx'
   return '2xx'
+}
+
+// Deterministic jitter based on the point's fields — same input → same offset,
+// so the canvas re-renders are stable (no flickering).
+function deterministicJitter(seed: string, range: number): number {
+  let h = 0
+  for (let i = 0; i < seed.length; i++) {
+    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0
+  }
+  // Map to [-range/2, +range/2]
+  return ((h & 0xffff) / 0xffff - 0.5) * range
 }
 
 function pad2(value: number) {
@@ -172,6 +215,7 @@ function normalizeHeatmap(data?: NginxRTHeatmap) {
 function normalizeScatter(data?: NginxRTScatter) {
   return {
     points: Array.isArray(data?.points) ? data.points : [],
+    total_requests: data?.total_requests ?? 0,
   }
 }
 
@@ -339,7 +383,7 @@ function ScatterChart({
 
       ctx.font = '11px system-ui, sans-serif'
 
-      // Y-axis
+      // Y-axis grid lines + labels
       const yTicks = 5
       ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)'
       ctx.lineWidth = 1
@@ -366,7 +410,7 @@ function ScatterChart({
         }
       }
 
-      // Window separators
+      // 3-minute window separators
       if (metrics) {
         const windowMs = 3 * 60 * 1000
         const timeSpan = metrics.maxTime - metrics.minTime
@@ -411,37 +455,60 @@ function ScatterChart({
         ctx.fillText(formatPointTime(t), x, height - 10)
       }
 
-      // Aggregate dots
       const aggPoints = filteredPoints.filter((p) => p.is_aggregate)
       const indivPoints = filteredPoints.filter((p) => !p.is_aggregate)
 
+      // ── Aggregate dots ──────────────────────────────────────────────────────
+      // Each aggregate dot uses the per-exact-status color so that e.g. 401 and
+      // 404 are visually distinct when they land on the same window/RT.
+      // A thin white stroke separates overlapping dots of different codes.
       for (const point of aggPoints) {
-        const x = toX(point.time)
-        const y = toY(point.rt)
-        const statusClass = getStatusClass(point.status)
-        const color = STATUS_CLASS_COLORS[statusClass]
+        const seed = `${point.time}:${point.status}:${point.rt.toFixed(1)}`
+        const jx = deterministicJitter(seed + 'x', 6)
+        const jy = deterministicJitter(seed + 'y', 4)
+        const x = toX(point.time) + jx
+        const y = toY(point.rt) + jy
+        const color = getStatusCodeColor(point.status)
 
         ctx.beginPath()
-        ctx.arc(x, y, 7, 0, Math.PI * 2)
+        ctx.arc(x, y, 8, 0, Math.PI * 2)
         ctx.fillStyle = color
-        ctx.globalAlpha = 0.55
+        ctx.globalAlpha = 0.5
         ctx.fill()
         ctx.globalAlpha = 1
-        ctx.strokeStyle = color
+        ctx.strokeStyle = 'rgba(255,255,255,0.45)'
         ctx.lineWidth = 1.5
         ctx.stroke()
+
+        // Inner ring in the exact status color (full opacity) to distinguish from indiv dots
+        ctx.beginPath()
+        ctx.arc(x, y, 4, 0, Math.PI * 2)
+        ctx.fillStyle = color
+        ctx.globalAlpha = 0.9
+        ctx.fill()
+        ctx.globalAlpha = 1
       }
 
-      // Individual dots
+      // ── Individual dots ─────────────────────────────────────────────────────
+      // Jitter is applied so that dots at the exact same (time, RT) spread out
+      // slightly rather than stacking invisibly on top of each other.
       for (const point of indivPoints) {
-        const x = toX(point.time)
-        const y = toY(point.rt)
         const statusClass = getStatusClass(point.status)
         const radius = statusClass === '5xx' ? 4.5 : statusClass === '4xx' ? 4 : 3.5
 
+        // Build a seed from the fields most likely to be shared across stacked dots:
+        // same path+status+rt within a window land at the same canvas pixel.
+        const seed = `${point.time}:${point.status}:${point.rt.toFixed(1)}:${point.path}`
+        const jx = deterministicJitter(seed + 'x', 8)
+        const jy = deterministicJitter(seed + 'y', 6)
+
+        const x = toX(point.time) + jx
+        const y = toY(point.rt) + jy
+        const color = STATUS_CLASS_COLORS[statusClass]
+
         ctx.beginPath()
         ctx.arc(x, y, radius, 0, Math.PI * 2)
-        ctx.fillStyle = STATUS_CLASS_COLORS[statusClass]
+        ctx.fillStyle = color
         ctx.globalAlpha = 0.8
         ctx.fill()
         ctx.globalAlpha = 1
@@ -475,10 +542,15 @@ function ScatterChart({
     }
 
     let match: NginxScatterPoint | null = null
-    let bestDist = 16
+    let bestDist = 18 // slightly larger hit radius to account for jitter
     for (const point of filteredPoints) {
-      const dx = toX(point.time) - mx
-      const dy = toY(point.rt) - my
+      const seed = point.is_aggregate
+        ? `${point.time}:${point.status}:${point.rt.toFixed(1)}`
+        : `${point.time}:${point.status}:${point.rt.toFixed(1)}:${point.path}`
+      const jx = deterministicJitter(seed + 'x', point.is_aggregate ? 6 : 8)
+      const jy = deterministicJitter(seed + 'y', point.is_aggregate ? 4 : 6)
+      const dx = toX(point.time) + jx - mx
+      const dy = toY(point.rt) + jy - my
       const dist = Math.sqrt(dx * dx + dy * dy)
       if (dist < bestDist) {
         bestDist = dist
@@ -509,6 +581,11 @@ function ScatterChart({
   const indivCount = filteredPoints.filter((p) => !p.is_aggregate).length
   const aggCount = filteredPoints.filter((p) => p.is_aggregate).length
 
+  // Compute total represented requests: individual dots count 1, aggregate dots count their `count` field.
+  const totalRepresented = filteredPoints.reduce((sum, p) => sum + (p.is_aggregate ? (p.count ?? 0) : 1), 0)
+  // The server-authoritative total (before path filter) is data.total_requests.
+  const serverTotal = data.total_requests ?? 0
+
   return (
     <div className="relative">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -516,6 +593,15 @@ function ScatterChart({
           <span>
             <span className="font-medium text-foreground">{formatNumber(indivCount, 0)}</span> individual ·{' '}
             <span className="font-medium text-foreground">{formatNumber(aggCount, 0)}</span> aggregate dots
+          </span>
+          {/* Total request count — useful for spotting whether dots are being silently dropped */}
+          <span className="rounded border border-border/60 bg-muted/30 px-2 py-0.5 text-foreground">
+            {formatNumber(totalRepresented, 0)}
+            {serverTotal > 0 && totalRepresented !== serverTotal ? (
+              <span className="text-muted-foreground"> / {formatNumber(serverTotal, 0)} total req</span>
+            ) : (
+              <span className="text-muted-foreground"> total req</span>
+            )}
           </span>
           {selectedPath ? (
             <span className="rounded border border-border px-2 py-0.5 font-mono text-foreground">
@@ -544,9 +630,11 @@ function ScatterChart({
         {[
           { color: STATUS_CLASS_COLORS['2xx'], label: '2xx normal (avg dot)', agg: true },
           { color: STATUS_CLASS_COLORS['3xx'], label: '3xx normal (avg dot)', agg: true },
-          { color: STATUS_CLASS_COLORS['4xx'], label: '4xx error', agg: false },
-          { color: STATUS_CLASS_COLORS['5xx'], label: '5xx error', agg: false },
-          { color: STATUS_CLASS_COLORS['2xx'], label: 'outlier (slow 2xx/3xx)', agg: false },
+          { color: STATUS_CODE_COLORS[401], label: '4xx per-status avg dot', agg: true },
+          { color: STATUS_CODE_COLORS[503], label: '5xx per-status avg dot', agg: true },
+          { color: STATUS_CLASS_COLORS['4xx'], label: '4xx error (individual)', agg: false },
+          { color: STATUS_CLASS_COLORS['5xx'], label: '5xx error (individual)', agg: false },
+          { color: STATUS_CLASS_COLORS['2xx'], label: 'slow outlier (individual)', agg: false },
         ].map(({ color, label, agg }) => (
           <span key={label} className="flex items-center gap-1.5">
             <span
@@ -577,7 +665,7 @@ function ScatterChart({
             className="pointer-events-none absolute z-10 w-80 rounded-lg border border-border bg-card p-3 text-xs shadow-lg"
             style={{
               left: Math.min(tooltip.x + 14, Math.max(14, (wrapperRef.current?.clientWidth ?? 320) - 336)),
-              top: tooltip.y > 220 
+              top: tooltip.y > 220
                 ? tooltip.y - 180   // flip upward if near bottom
                 : Math.max(12, tooltip.y - 16),
             }}
@@ -585,11 +673,11 @@ function ScatterChart({
             <div className="mb-2 flex items-center gap-2">
               <span
                 className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: STATUS_CLASS_COLORS[getStatusClass(tooltip.point.status)] }}
+                style={{ backgroundColor: getStatusCodeColor(tooltip.point.status) }}
               />
               <span className="font-semibold text-foreground">
                 {tooltip.point.is_aggregate
-                  ? `Avg of ${formatNumber(tooltip.point.count ?? 0, 0)} ${getStatusClass(tooltip.point.status)} requests`
+                  ? `Avg of ${formatNumber(tooltip.point.count ?? 0, 0)} × HTTP ${tooltip.point.status} requests`
                   : 'Individual request'}
               </span>
             </div>
@@ -597,6 +685,7 @@ function ScatterChart({
               {tooltip.point.is_aggregate ? (
                 <>
                   <div>Window: <span className="font-mono text-foreground">{tooltip.point.window_label ?? '—'}</span></div>
+                  <div>Status: <span className="font-mono text-foreground">{tooltip.point.status}</span></div>
                   <div>Avg RT: <span className="font-mono text-foreground">{formatMs(tooltip.point.rt)}</span></div>
                   <div>Count: <span className="font-mono text-foreground">{formatNumber(tooltip.point.count ?? 0, 0)}</span></div>
                 </>
@@ -609,6 +698,9 @@ function ScatterChart({
                   <div>Path: <span className="font-mono text-foreground break-all">{tooltip.point.path || '—'}</span></div>
                   {tooltip.point.normalized_path && (
                     <div>Normalized: <span className="font-mono text-foreground break-all">{tooltip.point.normalized_path}</span></div>
+                  )}
+                  {tooltip.point.ip && (
+                    <div>IP: <span className="font-mono text-foreground">{tooltip.point.ip}</span></div>
                   )}
                 </>
               )}
@@ -952,7 +1044,7 @@ export function NginxPerformanceSection({ id, domain }: Props) {
 
       <SectionCard
         title="Raw RT Scatter"
-        subtitle="Canvas-rendered sampled dots across the selected window. Colors follow HTTP status class."
+        subtitle="Canvas-rendered sampled dots across the selected window. Colors follow HTTP status class. Aggregate dots show per-exact-status averages for 4xx/5xx."
       >
         <ScatterChart data={scatterQuery.data} selectedPath={selectedPath} selectedHour={selectedHour} />
       </SectionCard>

@@ -68,6 +68,10 @@ function resolveInitialMetricsMode(
   return "unknown"
 }
 
+function isPostgresService(name: string) {
+  return name.toLowerCase().includes("postgres")
+}
+
 function groupVirtualHostsFromAPI(raw: any[]): VirtualHostEntry[] {
   if (!raw?.length) return []
   const grouped: Record<string, VirtualHostEntry> = {}
@@ -742,6 +746,22 @@ export default function ServiceConfigPage() {
               >
                 Open Nginx Dashboard
               </Link>
+            ) : null}
+            {isPostgresService(data.service_name) && logOn && metricsOn ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Link
+                  to={`/integrations/postgres-dashboard/${id}`}
+                  className="inline-block w-full text-center rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500 transition-colors"
+                >
+                  Open PostgreSQL Dashboard
+                </Link>
+                <Link
+                  to={`/integrations/postgres-logs/${id}`}
+                  className="inline-block w-full text-center rounded-md border border-border px-3 py-2 text-sm font-semibold hover:bg-muted transition-colors"
+                >
+                  Open PostgreSQL Logs
+                </Link>
+              </div>
             ) : null}
           </div>
         </div>

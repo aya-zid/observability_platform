@@ -20,9 +20,11 @@ import (
 // ─── Response types ───────────────────────────────────────────────────────────
 
 type RTIntensityHeatmap struct {
-	Paths   []string    `json:"paths"`
-	Buckets []string    `json:"buckets"`
-	Matrix  [][]float64 `json:"matrix"` // matrix[pathIdx][bucketIdx] = P95 RT in ms
+	Paths     []string    `json:"paths"`
+	Buckets   []string    `json:"buckets"`
+	Matrix    [][]float64 `json:"matrix"`     // matrix[pathIdx][bucketIdx] = P95 RT in ms
+	Counts    [][]int     `json:"counts"`     // counts[pathIdx][bucketIdx] = total request count in bucket
+	P95Counts [][]int     `json:"p95_counts"` // p95_counts[pathIdx][bucketIdx] = requests at or below P95
 }
 
 type RTDistributionByStatus struct {
@@ -34,9 +36,13 @@ type RTDistributionByStatus struct {
 
 type RTStatusMetrics struct {
 	Avg             float64        `json:"avg"`
+	P50             float64        `json:"p50"`
 	P95             float64        `json:"p95"`
 	P99             float64        `json:"p99"`
 	Count           int            `json:"count"`
+	P50Count        int            `json:"p50_count"`
+	P95Count        int            `json:"p95_count"`
+	P99Count        int            `json:"p99_count"`
 	StatusBreakdown map[string]int `json:"status_breakdown,omitempty"`
 }
 
@@ -81,7 +87,7 @@ func NewNginxPerformanceService(cfg *config.Config, redisClient *redis.Client) *
 
 const (
 	performanceCacheTTL = 30 * time.Second
-	perfBucketSize      = 3 * time.Minute
+	perfBucketSize      = 5 * time.Minute
 	perfMaxHeatmapPaths = 20
 )
 
@@ -175,16 +181,21 @@ func (s *NginxPerformanceService) fetchRTIntensityHeatmap(
 		buckets[i] = time.Unix(bucketStartSec, 0).In(loc).Format("15:04")
 	}
 
-	// Step 3: P95 per path
+	// Step 3: P95 and request count per path
 	matrix := make([][]float64, len(paths))
+	counts := make([][]int, len(paths))
+	p95Counts := make([][]int, len(paths))
 	for i := range matrix {
 		matrix[i] = make([]float64, bucketCount)
+		counts[i] = make([]int, bucketCount)
+		p95Counts[i] = make([]int, bucketCount)
 	}
 
 	type pathResult struct {
-		index  int
-		values [][2]float64
-		err    error
+		index       int
+		p95Values   [][2]float64
+		countValues [][2]float64
+		err         error
 	}
 
 	resultsCh := make(chan pathResult, len(paths))
@@ -195,21 +206,35 @@ func (s *NginxPerformanceService) fetchRTIntensityHeatmap(
 		go func(idx int, normalizedPath string) {
 			defer wg.Done()
 			q := fmt.Sprintf(
-				`quantile_over_time(0.95, %s | normalized_path="%s" %s | unwrap rt [3m]) by ()`,
+				`quantile_over_time(0.95, %s | normalized_path="%s" %s | unwrap rt [5m]) by ()`,
 				base,
 				lokiLabelValue(normalizedPath),
 				rtParseExpr,
 			)
-			series, queryErr := s.dashboard.lokiQueryRange(ctx, tenantUUID, q, startNs, endNs, "3m", 5000)
+			countQ := fmt.Sprintf(
+				`sum(count_over_time(%s | normalized_path="%s" [5m]))`,
+				base,
+				lokiLabelValue(normalizedPath),
+			)
+			series, queryErr := s.dashboard.lokiQueryRange(ctx, tenantUUID, q, startNs, endNs, "5m", 5000)
 			if queryErr != nil {
 				resultsCh <- pathResult{index: idx, err: queryErr}
 				return
 			}
-			var vals [][2]float64
-			for _, s := range series {
-				vals = append(vals, s.Values...)
+			countSeries, countErr := s.dashboard.lokiQueryRange(ctx, tenantUUID, countQ, startNs, endNs, "5m", 5000)
+			if countErr != nil {
+				resultsCh <- pathResult{index: idx, err: countErr}
+				return
 			}
-			resultsCh <- pathResult{index: idx, values: vals}
+			var p95Vals [][2]float64
+			for _, s := range series {
+				p95Vals = append(p95Vals, s.Values...)
+			}
+			var countVals [][2]float64
+			for _, s := range countSeries {
+				countVals = append(countVals, s.Values...)
+			}
+			resultsCh <- pathResult{index: idx, p95Values: p95Vals, countValues: countVals}
 		}(i, path)
 	}
 
@@ -220,7 +245,7 @@ func (s *NginxPerformanceService) fetchRTIntensityHeatmap(
 		if res.err != nil {
 			return nil, fmt.Errorf("heatmap p95 path query failed: %w", res.err)
 		}
-		for _, pt := range res.values {
+		for _, pt := range res.p95Values {
 			sampleEndNs := int64(pt[0]) * int64(time.Second)
 			bucketStartNs := sampleEndNs - int64(perfBucketSize)
 			offsetNs := bucketStartNs - startNs
@@ -230,12 +255,25 @@ func (s *NginxPerformanceService) fetchRTIntensityHeatmap(
 			}
 			matrix[res.index][bucketIdx] = pt[1] * 1000
 		}
+		for _, pt := range res.countValues {
+			sampleEndNs := int64(pt[0]) * int64(time.Second)
+			bucketStartNs := sampleEndNs - int64(perfBucketSize)
+			offsetNs := bucketStartNs - startNs
+			bucketIdx := int(offsetNs / int64(perfBucketSize))
+			if bucketIdx < 0 || bucketIdx >= bucketCount {
+				continue
+			}
+			counts[res.index][bucketIdx] = int(pt[1])
+			p95Counts[res.index][bucketIdx] = (counts[res.index][bucketIdx]*95 + 99) / 100
+		}
 	}
 
 	return &RTIntensityHeatmap{
-		Paths:   paths,
-		Buckets: buckets,
-		Matrix:  matrix,
+		Paths:     paths,
+		Buckets:   buckets,
+		Matrix:    matrix,
+		Counts:    counts,
+		P95Counts: p95Counts,
 	}, nil
 }
 
@@ -366,6 +404,7 @@ func (s *NginxPerformanceService) fetchStatusMetrics(
 
 	sumQ := fmt.Sprintf(`sum(sum_over_time(%s [%ds]))`, rtBase, rangeSec)
 	countQ := fmt.Sprintf(`sum(count_over_time(%s [%ds]))`, countBase, rangeSec)
+	p50Q := fmt.Sprintf(`quantile_over_time(0.50, %s [%ds]) by ()`, rtBase, rangeSec)
 	p95Q := fmt.Sprintf(`quantile_over_time(0.95, %s [%ds]) by ()`, rtBase, rangeSec)
 	p99Q := fmt.Sprintf(`quantile_over_time(0.99, %s [%ds]) by ()`, rtBase, rangeSec)
 	breakdownQ := fmt.Sprintf(`sum by (status) (count_over_time(%s [%ds]))`, countBase, rangeSec)
@@ -383,12 +422,13 @@ func (s *NginxPerformanceService) fetchStatusMetrics(
 		wg           sync.WaitGroup
 		sumRes       scalarResult
 		countRes     scalarResult
+		p50Res       scalarResult
 		p95Res       scalarResult
 		p99Res       scalarResult
 		breakdownRes breakdownResult
 	)
 
-	wg.Add(5)
+	wg.Add(6)
 	go func() {
 		defer wg.Done()
 		data, err := s.dashboard.lokiQueryInstant(ctx, tenantUUID, sumQ, endNs, 100)
@@ -398,6 +438,11 @@ func (s *NginxPerformanceService) fetchStatusMetrics(
 		defer wg.Done()
 		data, err := s.dashboard.lokiQueryInstant(ctx, tenantUUID, countQ, endNs, 100)
 		countRes = scalarResult{val: firstInstantValue(data), err: err}
+	}()
+	go func() {
+		defer wg.Done()
+		data, err := s.dashboard.lokiQueryInstant(ctx, tenantUUID, p50Q, endNs, 100)
+		p50Res = scalarResult{val: firstInstantValue(data), err: err}
 	}()
 	go func() {
 		defer wg.Done()
@@ -428,7 +473,7 @@ func (s *NginxPerformanceService) fetchStatusMetrics(
 	}()
 	wg.Wait()
 
-	for _, res := range []scalarResult{sumRes, countRes, p95Res, p99Res} {
+	for _, res := range []scalarResult{sumRes, countRes, p50Res, p95Res, p99Res} {
 		if res.err != nil {
 			return RTStatusMetrics{}, res.err
 		}
@@ -439,11 +484,40 @@ func (s *NginxPerformanceService) fetchStatusMetrics(
 		avg = (sumRes.val / countRes.val) * 1000
 	}
 
+	percentileCount := func(thresholdSec float64) (int, error) {
+		if countRes.val <= 0 || thresholdSec <= 0 {
+			return 0, nil
+		}
+		q := fmt.Sprintf(`sum(count_over_time(%s %s | rt <= %.6f [%ds]))`, countBase, rtParseExpr, thresholdSec, rangeSec)
+		data, err := s.dashboard.lokiQueryInstant(ctx, tenantUUID, q, endNs, 100)
+		if err != nil {
+			return 0, err
+		}
+		return int(firstInstantValue(data)), nil
+	}
+
+	p50Count, err := percentileCount(p50Res.val)
+	if err != nil {
+		return RTStatusMetrics{}, err
+	}
+	p95Count, err := percentileCount(p95Res.val)
+	if err != nil {
+		return RTStatusMetrics{}, err
+	}
+	p99Count, err := percentileCount(p99Res.val)
+	if err != nil {
+		return RTStatusMetrics{}, err
+	}
+
 	return RTStatusMetrics{
 		Avg:             avg,
+		P50:             p50Res.val * 1000,
 		P95:             p95Res.val * 1000,
 		P99:             p99Res.val * 1000,
 		Count:           int(countRes.val),
+		P50Count:        p50Count,
+		P95Count:        p95Count,
+		P99Count:        p99Count,
 		StatusBreakdown: breakdownRes.val,
 	}, nil
 }

@@ -75,6 +75,7 @@ func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 	if minRTStr := c.QueryParam("min_rt"); minRTStr != "" {
 		minRT, _ = strconv.ParseFloat(minRTStr, 64)
 	}
+	rtPercentiles := parsePercentileParam(c.QueryParam("percentiles"))
 
 	summary, err := h.svc.GetDashboardSummary(
 		c.Request().Context(),
@@ -86,6 +87,7 @@ func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 		endNs,
 		step,
 		minRT,
+		rtPercentiles,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-dashboard] summary failed: %v", err)
@@ -93,6 +95,22 @@ func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, summary)
+}
+
+func parsePercentileParam(raw string) []float64 {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]float64, 0, len(parts))
+	for _, part := range parts {
+		value, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(part, "p")), 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
 }
 
 // SlowRequests returns a paginated list of slow requests for the "View More" page.
@@ -415,6 +433,17 @@ func (h *NginxDashboardHandler) IPInvestigation(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
+	seenStartNs, seenEndNs := int64(0), int64(0)
+	if c.QueryParam("seen_start") != "" || c.QueryParam("seen_end") != "" {
+		seenStartNs, err = parseNsParam(c.QueryParam("seen_start"))
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid seen_start param"})
+		}
+		seenEndNs, err = parseNsParam(c.QueryParam("seen_end"))
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid seen_end param"})
+		}
+	}
 
 	domain := c.QueryParam("domain")
 
@@ -427,6 +456,8 @@ func (h *NginxDashboardHandler) IPInvestigation(c echo.Context) error {
 		startNs,
 		endNs,
 		step,
+		seenStartNs,
+		seenEndNs,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-ip-investigation] failed for ip=%s: %v", ip, err)

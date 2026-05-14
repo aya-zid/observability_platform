@@ -18,6 +18,10 @@ const STATUS_COLOR: Record<string, string> = {
   not_installed: "text-muted-foreground",
 }
 
+function isPostgresService(name: string) {
+  return name.toLowerCase().includes("postgres")
+}
+
 function ServiceRow({ service }: { service: DiscoveryService }) {
   return (
     <div className="rounded-xl border border-border bg-card/50 p-3">
@@ -58,6 +62,22 @@ function ServiceRow({ service }: { service: DiscoveryService }) {
             className="inline-flex items-center rounded-md bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
           >
             Open Nginx Dashboard
+          </Link>
+        </div>
+      ) : null}
+      {isPostgresService(service.service_name) && service.log_collection_on && service.metric_collection_on ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            to={`/integrations/postgres-dashboard/${service.id}`}
+            className="inline-flex items-center rounded-md bg-sky-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+          >
+            Open PostgreSQL Dashboard
+          </Link>
+          <Link
+            to={`/integrations/postgres-logs/${service.id}`}
+            className="inline-flex items-center rounded-md border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted"
+          >
+            Logs
           </Link>
         </div>
       ) : null}

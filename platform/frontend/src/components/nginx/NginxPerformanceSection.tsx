@@ -1,86 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, Fragment } from 'react'
+import { useEffect, useMemo, useState, type ReactNode, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import {
-  getNginxRTDistribution,
-  getNginxRTHeatmap,
-  getNginxRTScatter,
-} from '@/api/nginx'
+import { getNginxRTHeatmap } from '@/api/nginx'
 import type {
   NginxRTDistribution,
   NginxRTHeatmap,
-  NginxRTScatter,
-  NginxScatterPoint,
 } from '@/api/nginx'
-import { formatNumber, secondsToNanos } from '@/lib/queryHelpers'
+import { formatDateInputValue, formatNumber, secondsToNanos } from '@/lib/queryHelpers'
 import { cn } from '@/lib/utils'
 
 type Props = {
   id: string
   domain: string
-}
-
-type ScatterTooltip = {
-  x: number
-  y: number
-  point: NginxScatterPoint
-}
-
-const STATUS_CLASS_COLORS = {
-  '2xx': '#22c55e',
-  '3xx': '#3b82f6',
-  '4xx': '#f59e0b',
-  '5xx': '#ef4444',
-} as const
-
-// Per-exact-status colors for 4xx and 5xx aggregate dots.
-// Gives each code a distinct shade within its class hue so overlapping agg dots
-// for different codes (e.g. 401 vs 404) are visually distinguishable.
-const STATUS_CODE_COLORS: Record<number, string> = {
-  // 4xx — amber/orange shades
-  400: '#fbbf24',
-  401: '#f59e0b',
-  403: '#d97706',
-  404: '#b45309',
-  408: '#92400e',
-  409: '#e8a020',
-  429: '#c2770f',
-  // 5xx — red shades
-  500: '#ef4444',
-  502: '#dc2626',
-  503: '#b91c1c',
-  504: '#991b1b',
-  // 3xx normals — blue
-  301: '#3b82f6',
-  302: '#2563eb',
-  // 2xx normals — green
-  200: '#22c55e',
-}
-
-function getStatusCodeColor(status: number): string {
-  if (STATUS_CODE_COLORS[status]) return STATUS_CODE_COLORS[status]
-  if (status >= 500) return STATUS_CLASS_COLORS['5xx']
-  if (status >= 400) return STATUS_CLASS_COLORS['4xx']
-  if (status >= 300) return STATUS_CLASS_COLORS['3xx']
-  return STATUS_CLASS_COLORS['2xx']
-}
-
-function getStatusClass(status: number): keyof typeof STATUS_CLASS_COLORS {
-  if (status >= 500) return '5xx'
-  if (status >= 400) return '4xx'
-  if (status >= 300) return '3xx'
-  return '2xx'
-}
-
-// Deterministic jitter based on the point's fields — same input → same offset,
-// so the canvas re-renders are stable (no flickering).
-function deterministicJitter(seed: string, range: number): number {
-  let h = 0
-  for (let i = 0; i < seed.length; i++) {
-    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0
-  }
-  // Map to [-range/2, +range/2]
-  return ((h & 0xffff) / 0xffff - 0.5) * range
 }
 
 function pad2(value: number) {
@@ -95,11 +26,6 @@ function formatBucketLabel(label: string) {
   return label // already in local Tunis time from backend
 }
 
-function formatPointTime(unixMs: number) {
-  const date = new Date(unixMs)
-  return `${formatHourMinute(date)}:${pad2(date.getSeconds())}`
-}
-
 function formatHourOptionLabel(startMs: number, endMs: number, isCurrentHour: boolean) {
   const start = new Date(startMs)
   const end = new Date(endMs)
@@ -109,27 +35,56 @@ function formatHourOptionLabel(startMs: number, endMs: number, isCurrentHour: bo
   return `${formatHourMinute(start)} - ${formatHourMinute(end)}`
 }
 
-function getTodayHourOptions(nowMs: number) {
+type HourOption = {
+  value: number
+  label: string
+  startMs: number
+  endMs: number
+  isCurrentHour: boolean
+}
+
+function parseDateInputValue(value: string): Date | null {
+  const match = value.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/)
+  if (!match) return null
+
+  const day = Number(match[1])
+  const month = Number(match[2])
+  const year = Number(match[3])
+  const parsed = new Date(year, month - 1, day, 0, 0, 0, 0)
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null
+  }
+
+  return parsed
+}
+
+function getHourOptionsForDate(dateValue: string, nowMs: number): HourOption[] {
+  const selectedDate = parseDateInputValue(dateValue)
+  if (!selectedDate) return []
+
   const now = new Date(nowMs)
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+  const startOfDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 0, 0, 0, 0)
   const currentHourStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0)
+  const isToday =
+    selectedDate.getFullYear() === now.getFullYear() &&
+    selectedDate.getMonth() === now.getMonth() &&
+    selectedDate.getDate() === now.getDate()
 
-  const options: Array<{
-    value: number
-    label: string
-    startMs: number
-    endMs: number
-    isCurrentHour: boolean
-  }> = []
+  const options: HourOption[] = []
+  const lastHour = isToday ? now.getHours() : 23
 
-  for (let hour = 0; hour <= now.getHours(); hour += 1) {
+  for (let hour = 0; hour <= lastHour; hour += 1) {
     const hourStart = new Date(startOfDay)
     hourStart.setHours(hour, 0, 0, 0)
 
     const nextHour = new Date(hourStart)
     nextHour.setHours(hour + 1, 0, 0, 0)
 
-    const isCurrentHour = hourStart.getTime() === currentHourStart.getTime()
+    const isCurrentHour = isToday && hourStart.getTime() === currentHourStart.getTime()
     const endMs = isCurrentHour ? nowMs : nextHour.getTime()
 
     options.push({
@@ -209,13 +164,8 @@ function normalizeHeatmap(data?: NginxRTHeatmap) {
     paths: Array.isArray(data?.paths) ? data.paths : [],
     buckets: Array.isArray(data?.buckets) ? data.buckets : [],
     matrix: Array.isArray(data?.matrix) ? data.matrix : [],
-  }
-}
-
-function normalizeScatter(data?: NginxRTScatter) {
-  return {
-    points: Array.isArray(data?.points) ? data.points : [],
-    total_requests: data?.total_requests ?? 0,
+    counts: Array.isArray(data?.counts) ? data.counts : [],
+    p95Counts: Array.isArray(data?.p95_counts) ? data.p95_counts : [],
   }
 }
 
@@ -246,7 +196,7 @@ function HeatmapChart({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        <span>Click a path row to filter the scatter chart.</span>
+        <span>Click a path row to highlight it.</span>
         {selectedPath ? (
           <button
             type="button"
@@ -285,16 +235,25 @@ function HeatmapChart({
                 >
                   {path}
                 </button>
-                {(Array.isArray(heatmap.matrix[rowIndex]) ? heatmap.matrix[rowIndex] : []).map((value, bucketIndex) => (
-                  <div
-                    key={`${path}-${bucketIndex}`}
-                    className="flex h-9 items-center justify-center rounded-md text-[10px] font-semibold text-slate-950"
-                    style={{ backgroundColor: heatColor(value, maxValue) }}
-                    title={`${path}\n${heatmap.buckets[bucketIndex]}\nP95 ${value > 0 ? formatMs(value) : 'No data'}`}
-                  >
-                    {value > 0 ? Math.round(value) : ''}
-                  </div>
-                ))}
+                {(Array.isArray(heatmap.matrix[rowIndex]) ? heatmap.matrix[rowIndex] : []).map((value, bucketIndex) => {
+                  const count = heatmap.counts[rowIndex]?.[bucketIndex] ?? 0
+                  const p95Count = heatmap.p95Counts[rowIndex]?.[bucketIndex] ?? 0
+                  return (
+                    <div
+                      key={`${path}-${bucketIndex}`}
+                      className="flex h-11 flex-col items-center justify-center rounded-md text-[10px] font-semibold leading-tight text-slate-950"
+                      style={{ backgroundColor: heatColor(value, maxValue) }}
+                      title={`${path}\n${heatmap.buckets[bucketIndex]}\nP95 ${value > 0 ? formatMs(value) : 'No data'}\nTotal requests in this bucket: ${formatNumber(count, 0)}\nRequests inside P95: ${formatNumber(p95Count, 0)}`}
+                    >
+                      {value > 0 ? (
+                        <>
+                          <span>{Math.round(value)}ms</span>
+                          <span className="text-[9px] font-medium opacity-80">{formatNumber(p95Count, 0)} / {formatNumber(count, 0)} req</span>
+                        </>
+                      ) : ''}
+                    </div>
+                  )
+                })}
               </Fragment>
             )
           })}
@@ -306,413 +265,13 @@ function HeatmapChart({
         <div className="h-2 w-36 rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#f59e0b_50%,#ef4444_100%)]" />
         <span>0ms</span>
         <span>{maxValue > 0 ? formatMs(maxValue) : 'No data'}</span>
+        <span>Cell count format: requests inside P95 / total bucket requests.</span>
       </div>
     </div>
   )
 }
 
-function ScatterChart({
-  data,
-  selectedPath,
-  selectedHour,
-}: {
-  data?: NginxRTScatter
-  selectedPath: string | null
-  selectedHour: { startMs: number; endMs: number; label: string } | null
-}) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const [tooltip, setTooltip] = useState<ScatterTooltip | null>(null)
-  const [useLogScale, setUseLogScale] = useState(false)
-  const scatter = useMemo(() => normalizeScatter(data), [data])
-
-  const filteredPoints = useMemo(() => {
-    const points = scatter.points
-    if (!selectedPath) return points
-    return points.filter((point) => point.normalized_path === selectedPath || point.is_aggregate)
-  }, [scatter.points, selectedPath])
-
-  const metrics = useMemo(() => {
-    if (!filteredPoints.length) return null
-
-    const startMs = selectedHour?.startMs ?? filteredPoints.reduce((m, p) => Math.min(m, p.time), filteredPoints[0].time)
-    const endMs = selectedHour?.endMs ?? filteredPoints.reduce((m, p) => Math.max(m, p.time), filteredPoints[0].time)
-    let maxRt = 1
-    for (const point of filteredPoints) {
-      if (point.rt > maxRt) maxRt = point.rt
-    }
-
-    return {
-      minTime: startMs,
-      maxTime: Math.max(endMs, startMs + 1),
-      maxRt: Math.max(maxRt, 1),
-    }
-  }, [filteredPoints, selectedHour])
-
-  const toLogFrac = (rt: number, maxRt: number) => {
-    const lo = Math.log(Math.max(rt, 0.1))
-    const hi = Math.log(Math.max(maxRt, 1))
-    return hi <= 0 ? 0 : Math.max(0, Math.min(1, lo / hi))
-  }
-
-  useEffect(() => {
-    const wrapper = wrapperRef.current
-    const canvas = canvasRef.current
-    if (!wrapper || !canvas) return
-
-    const draw = () => {
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-
-      const dpr = window.devicePixelRatio || 1
-      const width = wrapper.clientWidth
-      const height = 400
-      canvas.width = width * dpr
-      canvas.height = height * dpr
-      canvas.style.width = `${width}px`
-      canvas.style.height = `${height}px`
-      ctx.scale(dpr, dpr)
-      ctx.clearRect(0, 0, width, height)
-
-      ctx.fillStyle = 'rgba(148, 163, 184, 0.06)'
-      ctx.fillRect(0, 0, width, height)
-
-      const padding = { top: 20, right: 20, bottom: 40, left: 56 }
-      const plotWidth = width - padding.left - padding.right
-      const plotHeight = height - padding.top - padding.bottom
-
-      ctx.font = '11px system-ui, sans-serif'
-
-      // Y-axis grid lines + labels
-      const yTicks = 5
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.18)'
-      ctx.lineWidth = 1
-
-      for (let i = 0; i <= yTicks; i += 1) {
-        const frac = i / yTicks
-        const y = padding.top + plotHeight - frac * plotHeight
-
-        ctx.beginPath()
-        ctx.moveTo(padding.left, y)
-        ctx.lineTo(width - padding.right, y)
-        ctx.stroke()
-
-        if (metrics) {
-          let rt: number
-          if (useLogScale) {
-            rt = Math.exp(frac * Math.log(Math.max(metrics.maxRt, 1)))
-          } else {
-            rt = frac * metrics.maxRt
-          }
-          ctx.fillStyle = '#94a3b8'
-          ctx.textAlign = 'right'
-          ctx.fillText(formatMs(rt), padding.left - 6, y + 4)
-        }
-      }
-
-      // 3-minute window separators
-      if (metrics) {
-        const windowMs = 3 * 60 * 1000
-        const timeSpan = metrics.maxTime - metrics.minTime
-        const toX = (t: number) => padding.left + ((t - metrics.minTime) / timeSpan) * plotWidth
-
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.12)'
-        ctx.lineWidth = 1
-        ctx.setLineDash([3, 4])
-        for (let t = metrics.minTime; t <= metrics.maxTime; t += windowMs) {
-          const x = toX(t)
-          ctx.beginPath()
-          ctx.moveTo(x, padding.top)
-          ctx.lineTo(x, padding.top + plotHeight)
-          ctx.stroke()
-        }
-        ctx.setLineDash([])
-      }
-
-      if (!metrics || !filteredPoints.length) {
-        ctx.fillStyle = 'rgba(148, 163, 184, 0.6)'
-        ctx.textAlign = 'center'
-        ctx.font = '13px system-ui, sans-serif'
-        ctx.fillText('No data', width / 2, height / 2)
-        return
-      }
-
-      const timeSpan = metrics.maxTime - metrics.minTime
-      const toX = (t: number) => padding.left + ((t - metrics.minTime) / timeSpan) * plotWidth
-      const toY = (rt: number) => {
-        const frac = useLogScale ? toLogFrac(rt, metrics.maxRt) : rt / metrics.maxRt
-        return padding.top + plotHeight - frac * plotHeight
-      }
-
-      // X-axis labels
-      ctx.fillStyle = '#94a3b8'
-      ctx.textAlign = 'center'
-      ctx.font = '11px system-ui, sans-serif'
-      const xTicks = Math.min(6, Math.floor(plotWidth / 80))
-      for (let i = 0; i <= xTicks; i += 1) {
-        const t = metrics.minTime + (timeSpan * i) / xTicks
-        const x = toX(t)
-        ctx.fillText(formatPointTime(t), x, height - 10)
-      }
-
-      const aggPoints = filteredPoints.filter((p) => p.is_aggregate)
-      const indivPoints = filteredPoints.filter((p) => !p.is_aggregate)
-
-      // ── Aggregate dots ──────────────────────────────────────────────────────
-      // Each aggregate dot uses the per-exact-status color so that e.g. 401 and
-      // 404 are visually distinct when they land on the same window/RT.
-      // A thin white stroke separates overlapping dots of different codes.
-      for (const point of aggPoints) {
-        const seed = `${point.time}:${point.status}:${point.rt.toFixed(1)}`
-        const jx = deterministicJitter(seed + 'x', 6)
-        const jy = deterministicJitter(seed + 'y', 4)
-        const x = toX(point.time) + jx
-        const y = toY(point.rt) + jy
-        const color = getStatusCodeColor(point.status)
-
-        ctx.beginPath()
-        ctx.arc(x, y, 8, 0, Math.PI * 2)
-        ctx.fillStyle = color
-        ctx.globalAlpha = 0.5
-        ctx.fill()
-        ctx.globalAlpha = 1
-        ctx.strokeStyle = 'rgba(255,255,255,0.45)'
-        ctx.lineWidth = 1.5
-        ctx.stroke()
-
-        // Inner ring in the exact status color (full opacity) to distinguish from indiv dots
-        ctx.beginPath()
-        ctx.arc(x, y, 4, 0, Math.PI * 2)
-        ctx.fillStyle = color
-        ctx.globalAlpha = 0.9
-        ctx.fill()
-        ctx.globalAlpha = 1
-      }
-
-      // ── Individual dots ─────────────────────────────────────────────────────
-      // Jitter is applied so that dots at the exact same (time, RT) spread out
-      // slightly rather than stacking invisibly on top of each other.
-      for (const point of indivPoints) {
-        const statusClass = getStatusClass(point.status)
-        const radius = statusClass === '5xx' ? 4.5 : statusClass === '4xx' ? 4 : 3.5
-
-        // Build a seed from the fields most likely to be shared across stacked dots:
-        // same path+status+rt within a window land at the same canvas pixel.
-        const seed = `${point.time}:${point.status}:${point.rt.toFixed(1)}:${point.path}`
-        const jx = deterministicJitter(seed + 'x', 8)
-        const jy = deterministicJitter(seed + 'y', 6)
-
-        const x = toX(point.time) + jx
-        const y = toY(point.rt) + jy
-        const color = STATUS_CLASS_COLORS[statusClass]
-
-        ctx.beginPath()
-        ctx.arc(x, y, radius, 0, Math.PI * 2)
-        ctx.fillStyle = color
-        ctx.globalAlpha = 0.8
-        ctx.fill()
-        ctx.globalAlpha = 1
-      }
-    }
-
-    draw()
-    const observer = new ResizeObserver(draw)
-    observer.observe(wrapper)
-    return () => observer.disconnect()
-  }, [filteredPoints, metrics, useLogScale])
-
-  const handleMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current
-    if (!canvas || !metrics || !filteredPoints.length) {
-      setTooltip(null)
-      return
-    }
-
-    const rect = canvas.getBoundingClientRect()
-    const mx = event.clientX - rect.left
-    const my = event.clientY - rect.top
-    const padding = { top: 20, right: 20, bottom: 40, left: 56 }
-    const plotWidth = rect.width - padding.left - padding.right
-    const plotHeight = rect.height - padding.top - padding.bottom
-    const timeSpan = metrics.maxTime - metrics.minTime
-    const toX = (t: number) => padding.left + ((t - metrics.minTime) / timeSpan) * plotWidth
-    const toY = (rt: number) => {
-      const frac = useLogScale ? toLogFrac(rt, metrics.maxRt) : rt / metrics.maxRt
-      return padding.top + plotHeight - frac * plotHeight
-    }
-
-    let match: NginxScatterPoint | null = null
-    let bestDist = 18 // slightly larger hit radius to account for jitter
-    for (const point of filteredPoints) {
-      const seed = point.is_aggregate
-        ? `${point.time}:${point.status}:${point.rt.toFixed(1)}`
-        : `${point.time}:${point.status}:${point.rt.toFixed(1)}:${point.path}`
-      const jx = deterministicJitter(seed + 'x', point.is_aggregate ? 6 : 8)
-      const jy = deterministicJitter(seed + 'y', point.is_aggregate ? 4 : 6)
-      const dx = toX(point.time) + jx - mx
-      const dy = toY(point.rt) + jy - my
-      const dist = Math.sqrt(dx * dx + dy * dy)
-      if (dist < bestDist) {
-        bestDist = dist
-        match = point
-      }
-    }
-
-    if (!match) {
-      setTooltip(null)
-      return
-    }
-    setTooltip({ x: mx, y: my, point: match })
-  }
-
-  if (!data) {
-    return <LoadingState height="h-[25rem]" />
-  }
-
-  if (!scatter.points.length) {
-    return (
-      <EmptyState
-        height="h-[25rem]"
-        message="No scatter data returned from the backend for this window."
-      />
-    )
-  }
-
-  const indivCount = filteredPoints.filter((p) => !p.is_aggregate).length
-  const aggCount = filteredPoints.filter((p) => p.is_aggregate).length
-
-  // Compute total represented requests: individual dots count 1, aggregate dots count their `count` field.
-  const totalRepresented = filteredPoints.reduce((sum, p) => sum + (p.is_aggregate ? (p.count ?? 0) : 1), 0)
-  // The server-authoritative total (before path filter) is data.total_requests.
-  const serverTotal = data.total_requests ?? 0
-
-  return (
-    <div className="relative">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span>
-            <span className="font-medium text-foreground">{formatNumber(indivCount, 0)}</span> individual ·{' '}
-            <span className="font-medium text-foreground">{formatNumber(aggCount, 0)}</span> aggregate dots
-          </span>
-          {/* Total request count — useful for spotting whether dots are being silently dropped */}
-          <span className="rounded border border-border/60 bg-muted/30 px-2 py-0.5 text-foreground">
-            {formatNumber(totalRepresented, 0)}
-            {serverTotal > 0 && totalRepresented !== serverTotal ? (
-              <span className="text-muted-foreground"> / {formatNumber(serverTotal, 0)} total req</span>
-            ) : (
-              <span className="text-muted-foreground"> total req</span>
-            )}
-          </span>
-          {selectedPath ? (
-            <span className="rounded border border-border px-2 py-0.5 font-mono text-foreground">
-              {selectedPath}
-            </span>
-          ) : (
-            <span>All paths</span>
-          )}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setUseLogScale((prev) => !prev)}
-          className={cn(
-            'rounded border px-3 py-1 text-xs transition-colors',
-            useLogScale
-              ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-              : 'border-border text-muted-foreground hover:bg-muted',
-          )}
-        >
-          {useLogScale ? 'Log scale ✓' : 'Log scale'}
-        </button>
-      </div>
-
-      <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-        {[
-          { color: STATUS_CLASS_COLORS['2xx'], label: '2xx normal (avg dot)', agg: true },
-          { color: STATUS_CLASS_COLORS['3xx'], label: '3xx normal (avg dot)', agg: true },
-          { color: STATUS_CODE_COLORS[401], label: '4xx per-status avg dot', agg: true },
-          { color: STATUS_CODE_COLORS[503], label: '5xx per-status avg dot', agg: true },
-          { color: STATUS_CLASS_COLORS['4xx'], label: '4xx error (individual)', agg: false },
-          { color: STATUS_CLASS_COLORS['5xx'], label: '5xx error (individual)', agg: false },
-          { color: STATUS_CLASS_COLORS['2xx'], label: 'slow outlier (individual)', agg: false },
-        ].map(({ color, label, agg }) => (
-          <span key={label} className="flex items-center gap-1.5">
-            <span
-              className="inline-block rounded-full"
-              style={{
-                width: agg ? 12 : 8,
-                height: agg ? 12 : 8,
-                backgroundColor: color,
-                opacity: agg ? 0.55 : 0.8,
-                outline: agg ? `1.5px solid ${color}` : 'none',
-              }}
-            />
-            {label}
-          </span>
-        ))}
-      </div>
-
-      <div ref={wrapperRef} className="relative overflow-hidden rounded-lg border border-border/70 bg-slate-950/5">
-        <canvas
-          ref={canvasRef}
-          onMouseLeave={() => setTooltip(null)}
-          onMouseMove={handleMouseMove}
-          className="block w-full"
-        />
-
-        {tooltip && (
-          <div
-            className="pointer-events-none absolute z-10 w-80 rounded-lg border border-border bg-card p-3 text-xs shadow-lg"
-            style={{
-              left: Math.min(tooltip.x + 14, Math.max(14, (wrapperRef.current?.clientWidth ?? 320) - 336)),
-              top: tooltip.y > 220
-                ? tooltip.y - 180   // flip upward if near bottom
-                : Math.max(12, tooltip.y - 16),
-            }}
-          >
-            <div className="mb-2 flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: getStatusCodeColor(tooltip.point.status) }}
-              />
-              <span className="font-semibold text-foreground">
-                {tooltip.point.is_aggregate
-                  ? `Avg of ${formatNumber(tooltip.point.count ?? 0, 0)} × HTTP ${tooltip.point.status} requests`
-                  : 'Individual request'}
-              </span>
-            </div>
-            <div className="space-y-1 text-muted-foreground">
-              {tooltip.point.is_aggregate ? (
-                <>
-                  <div>Window: <span className="font-mono text-foreground">{tooltip.point.window_label ?? '—'}</span></div>
-                  <div>Status: <span className="font-mono text-foreground">{tooltip.point.status}</span></div>
-                  <div>Avg RT: <span className="font-mono text-foreground">{formatMs(tooltip.point.rt)}</span></div>
-                  <div>Count: <span className="font-mono text-foreground">{formatNumber(tooltip.point.count ?? 0, 0)}</span></div>
-                </>
-              ) : (
-                <>
-                  <div>Time: <span className="font-mono text-foreground">{formatPointTime(tooltip.point.time)}</span></div>
-                  <div>RT: <span className="font-mono text-foreground">{formatMs(tooltip.point.rt)}</span></div>
-                  <div>Status: <span className="font-mono text-foreground">{tooltip.point.status}</span></div>
-                  <div>Method: <span className="font-mono text-foreground">{tooltip.point.method || '—'}</span></div>
-                  <div>Path: <span className="font-mono text-foreground break-all">{tooltip.point.path || '—'}</span></div>
-                  {tooltip.point.normalized_path && (
-                    <div>Normalized: <span className="font-mono text-foreground break-all">{tooltip.point.normalized_path}</span></div>
-                  )}
-                  {tooltip.point.ip && (
-                    <div>IP: <span className="font-mono text-foreground">{tooltip.point.ip}</span></div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function DistributionChart({
+export function NginxRTDistributionChart({
   data,
   error,
 }: {
@@ -734,7 +293,7 @@ function DistributionChart({
   }, [data])
 
   const maxValue = useMemo(() => {
-    const values = metrics.flatMap((group) => [group.values.avg, group.values.p95, group.values.p99]).filter((value) => value > 0)
+    const values = metrics.flatMap((group) => [group.values.avg, group.values.p50, group.values.p95, group.values.p99]).filter((value) => value > 0)
     return values.length ? Math.max(...values) : 0
   }, [metrics])
 
@@ -754,16 +313,16 @@ function DistributionChart({
     return <EmptyState message="No response-time distribution data for the selected window." />
   }
 
-  const chartHeight = 380
+  const chartHeight = 390
   const chartWidth = 920
-  const padding = { top: 28, right: 28, bottom: 86, left: 64 }
+  const padding = { top: 28, right: 28, bottom: 96, left: 64 }
   const plotHeight = chartHeight - padding.top - padding.bottom
   const plotWidth = chartWidth - padding.left - padding.right
   const y = (value: number) => padding.top + plotHeight - (value / maxValue) * plotHeight
 
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-[360px] min-w-[920px] w-full">
+      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-[370px] min-w-[920px] w-full">
         {[0, 0.25, 0.5, 0.75, 1].map((step) => {
           const value = maxValue * step
           const lineY = y(value)
@@ -782,12 +341,13 @@ function DistributionChart({
           const groupGap = 34
           const innerWidth = groupWidth - groupGap
           const groupX = padding.left + groupWidth * index + groupGap / 2
-          const barGap = 18
-          const barWidth = Math.min(34, (innerWidth - barGap * 2) / 3)
+          const barGap = 12
+          const barWidth = Math.min(28, (innerWidth - barGap * 3) / 4)
           const bars = [
-            { label: 'Avg', value: group.values.avg, fill: group.color },
-            { label: 'P95', value: group.values.p95, fill: group.color },
-            { label: 'P99', value: group.values.p99, fill: group.color },
+            { label: 'Avg', value: group.values.avg, fill: '#64748b', count: null },
+            { label: 'P50', value: group.values.p50, fill: group.color, count: group.values.p50_count },
+            { label: 'P95', value: group.values.p95, fill: group.color, count: group.values.p95_count },
+            { label: 'P99', value: group.values.p99, fill: group.color, count: group.values.p99_count },
           ]
 
           return (
@@ -797,7 +357,7 @@ function DistributionChart({
                 y={padding.top}
                 width={innerWidth}
                 height={plotHeight}
-                rx="16"
+                rx="12"
                 fill={group.tint}
                 stroke="rgba(148, 163, 184, 0.12)"
               />
@@ -805,7 +365,8 @@ function DistributionChart({
               {bars.map((bar, barIndex) => {
                 const rawHeight = plotHeight * (bar.value / maxValue)
                 const barHeight = bar.value > 0 ? Math.max(14, rawHeight) : 0
-                const barX = groupX + barIndex * (barWidth + barGap) + 18
+                const totalBarsWidth = bars.length * barWidth + (bars.length - 1) * barGap
+                const barX = groupX + (innerWidth - totalBarsWidth) / 2 + barIndex * (barWidth + barGap)
                 const barY = padding.top + plotHeight - barHeight
                 const textY = Math.max(padding.top + 16, barY - 14)
 
@@ -816,8 +377,9 @@ function DistributionChart({
                       y={barY}
                       width={barWidth}
                       height={barHeight}
-                      rx="8"
+                      rx="7"
                       fill={bar.fill}
+                      opacity={bar.label === 'Avg' ? 0.75 : 1}
                     />
                     <text
                       x={barX + barWidth / 2}
@@ -831,20 +393,31 @@ function DistributionChart({
                     </text>
                     <text
                       x={barX + barWidth / 2}
-                      y={chartHeight - 50}
+                      y={chartHeight - 66}
                       textAnchor="middle"
                       fontSize="11"
                       fill="#94a3b8"
                     >
                       {bar.label}
                     </text>
+                    {bar.count !== null ? (
+                      <text
+                        x={barX + barWidth / 2}
+                        y={chartHeight - 51}
+                        textAnchor="middle"
+                        fontSize="10"
+                        fill="#94a3b8"
+                      >
+                        {formatNumber(bar.count, 0)}
+                      </text>
+                    ) : null}
                   </g>
                 )
               })}
 
               <text
                 x={groupX + innerWidth / 2}
-                y={chartHeight - 36}
+                y={chartHeight - 32}
                 textAnchor="middle"
                 fontSize="13"
                 fontWeight="700"
@@ -852,22 +425,14 @@ function DistributionChart({
               >
                 {group.key}
               </text>
-              <text
-                x={groupX + innerWidth / 2}
-                y={chartHeight - 18}
-                textAnchor="middle"
-                fontSize="11"
-                fill="#94a3b8"
-              >
-                {formatNumber(group.values.count ?? 0, 0)} req
-              </text>
             </g>
           )
         })}
       </svg>
 
       <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
-        <span>Each status group contains 3 bars: Avg, P95, and P99.</span>
+        <span>Each status group contains Avg, P50, P95, and P99 bars.</span>
+        <span>Only percentile bars show request counts; Avg does not repeat the total.</span>
         <span>Shared Y-axis = response time in ms.</span>
       </div>
 
@@ -907,10 +472,12 @@ function DistributionChart({
 
 export function NginxPerformanceSection({ id, domain }: Props) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [selectedDate, setSelectedDate] = useState(() => formatDateInputValue(new Date()))
   const [selectedHourStartMs, setSelectedHourStartMs] = useState<number | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
 
-  const hourOptions = useMemo(() => getTodayHourOptions(nowMs), [nowMs])
+  const isDateValid = parseDateInputValue(selectedDate) !== null
+  const hourOptions = useMemo(() => getHourOptionsForDate(selectedDate, nowMs), [selectedDate, nowMs])
   const selectedHour =
     hourOptions.find((option) => option.value === selectedHourStartMs) ??
     hourOptions[0] ??
@@ -924,10 +491,10 @@ export function NginxPerformanceSection({ id, domain }: Props) {
   }, [])
 
   useEffect(() => {
-    if (!selectedHour && hourOptions.length > 0) {
+    if (!hourOptions.some((option) => option.value === selectedHourStartMs) && hourOptions.length > 0) {
       setSelectedHourStartMs(hourOptions[0].value)
     }
-  }, [hourOptions, selectedHour])
+  }, [hourOptions, selectedHourStartMs])
 
   const heatmapQuery = useQuery({
     queryKey: [
@@ -944,51 +511,9 @@ export function NginxPerformanceSection({ id, domain }: Props) {
         domain,
       })
     },
-    enabled: Boolean(id && domain && selectedHour),
+    enabled: Boolean(id && domain && selectedHour && isDateValid),
     staleTime: 20_000,
-    refetchInterval: 25_000,
-    refetchOnWindowFocus: false,
-  })
-
-  const scatterQuery = useQuery({
-    queryKey: [
-      'nginx-performance-scatter',
-      id,
-      domain,
-      selectedHour?.startMs,
-      selectedHour?.isCurrentHour ? 'current-hour' : selectedHour?.endMs,
-    ],
-    queryFn: () => {
-      return getNginxRTScatter(id, {
-        start: secondsToNanos(Math.floor((selectedHour?.startMs ?? nowMs) / 1000)),
-        end: secondsToNanos(Math.floor((selectedHour?.endMs ?? nowMs) / 1000)),
-        domain,
-      })
-    },
-    enabled: Boolean(id && domain && selectedHour),
-    staleTime: 20_000,
-    refetchInterval: 25_000,
-    refetchOnWindowFocus: false,
-  })
-
-  const distributionQuery = useQuery({
-    queryKey: [
-      'nginx-performance-distribution',
-      id,
-      domain,
-      selectedHour?.startMs,
-      selectedHour?.isCurrentHour ? 'current-hour' : selectedHour?.endMs,
-    ],
-    queryFn: () => {
-      return getNginxRTDistribution(id, {
-        start: secondsToNanos(Math.floor((selectedHour?.startMs ?? nowMs) / 1000)),
-        end: secondsToNanos(Math.floor((selectedHour?.endMs ?? nowMs) / 1000)),
-        domain,
-      })
-    },
-    enabled: Boolean(id && domain && selectedHour),
-    staleTime: 20_000,
-    refetchInterval: 25_000,
+    refetchInterval: selectedHour?.isCurrentHour ? 25_000 : false,
     refetchOnWindowFocus: false,
   })
 
@@ -1006,15 +531,28 @@ export function NginxPerformanceSection({ id, domain }: Props) {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Response-Time Deep Dive</h2>
             <p className="text-sm text-muted-foreground">
-              Heatmap for hot paths, scatter for sampled raw requests, and a status-class RT distribution snapshot for one selected hour today.
+              Independent heatmap window for hot paths. This date/hour control does not change the dashboard range above.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              <span>Performance date</span>
+              <input
+                value={selectedDate}
+                onChange={(event) => setSelectedDate(event.target.value)}
+                placeholder="DD-MM-YYYY"
+                className={cn(
+                  'rounded-md border bg-card px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-blue-500',
+                  isDateValid ? 'border-border' : 'border-red-500',
+                )}
+              />
+            </label>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               <span>Performance hour</span>
               <select
                 value={selectedHour?.value ?? ''}
                 onChange={(event) => setSelectedHourStartMs(Number(event.target.value))}
+                disabled={!isDateValid || hourOptions.length === 0}
                 className="rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-blue-500"
               >
                 {hourOptions.map((option) => (
@@ -1033,29 +571,12 @@ export function NginxPerformanceSection({ id, domain }: Props) {
 
       <SectionCard
         title="RT Intensity Heatmap"
-        subtitle="Top normalized paths in the selected window. Each cell shows the path P95 response time for that bucket."
+        subtitle="Top normalized paths in the selected window. Each 5-minute cell shows P95 response time and request count."
       >
         <HeatmapChart
           data={heatmapQuery.data}
           selectedPath={selectedPath}
           onSelectPath={setSelectedPath}
-        />
-      </SectionCard>
-
-      <SectionCard
-        title="Raw RT Scatter"
-        subtitle="Canvas-rendered sampled dots across the selected window. Colors follow HTTP status class. Aggregate dots show per-exact-status averages for 4xx/5xx."
-      >
-        <ScatterChart data={scatterQuery.data} selectedPath={selectedPath} selectedHour={selectedHour} />
-      </SectionCard>
-
-      <SectionCard
-        title="RT Distribution by Status"
-        subtitle="Each status class shows Avg, P95, and P99 on one shared response-time axis."
-      >
-        <DistributionChart
-          data={distributionQuery.data}
-          error={distributionQuery.isError ? distributionQuery.error?.message ?? 'Failed to load RT distribution.' : null}
         />
       </SectionCard>
     </div>

@@ -23,8 +23,8 @@ import {
 } from 'recharts'
 
 import { getDiscoveryService } from '@/api/discovery'
-import { getNginxDashboardSummary, getNginxDomains } from '@/api/nginx'
-import type { NginxDashboardSummary, NginxDomainItem, NginxTimePoint } from '@/api/nginx'
+import { getNginxDashboardSummary, getNginxDomains, getNginxRTDistribution } from '@/api/nginx'
+import type { NginxDashboardSummary, NginxDomainItem, NginxRTDistribution, NginxTimePoint } from '@/api/nginx'
 import {
   formatBytes,
   formatNumber,
@@ -39,7 +39,7 @@ import {
 } from '@/lib/queryHelpers'
 import { cn } from '@/lib/utils'
 import { IPInvestigationBlock } from '@/components/nginx/IPInvestigationBlock'
-import { NginxPerformanceSection } from '@/components/nginx/NginxPerformanceSection'
+import { NginxPerformanceSection, NginxRTDistributionChart } from '@/components/nginx/NginxPerformanceSection'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -77,6 +77,25 @@ const STATUS_COLORS = {
   '5xx': { hex: '#ef4444' },
 } as const
 
+const DEFAULT_RT_PERCENTILES = [50, 95, 99]
+const CUSTOM_RT_COLORS = [
+  '#06b6d4',
+  '#8b5cf6',
+  '#ec4899',
+  '#14b8a6',
+  '#f97316',
+  '#6366f1',
+  '#84cc16',
+  '#d946ef',
+  '#0ea5e9',
+  '#a855f7',
+]
+const DEFAULT_RT_COLORS: Record<string, string> = {
+  p50: '#22c55e',
+  p95: '#f59e0b',
+  p99: '#ef4444',
+}
+
 type TimeRange = (typeof TIME_RANGES)[number]
 type DashboardTimeSelection =
   | { mode: 'preset'; preset: TimeRange }
@@ -88,6 +107,30 @@ function buildDomainHref(basePath: string, domain: string | null) {
     return basePath
   }
   return `${basePath}?domain=${encodeURIComponent(domain)}`
+}
+
+function buildSlowRequestsHref({
+  id,
+  domain,
+  start,
+  end,
+  minRT,
+}: {
+  id: string
+  domain: string
+  start: number
+  end: number
+  minRT: string
+}) {
+  const params = new URLSearchParams({
+    start: secondsToNanos(start),
+    end: secondsToNanos(end),
+    min_rt: minRT,
+  })
+  if (domain) {
+    params.set('domain', domain)
+  }
+  return `/integrations/nginx-dashboard/${id}/slow-requests?${params.toString()}`
 }
 
 // ─── Chart styling (polished, precise tooltips) ──────────────────────────────
@@ -184,16 +227,18 @@ function mapTimeseries(points: NginxTimePoint[]): Record<string, number | string
 
 function mapRTTimeseries(points: NginxTimePoint[]): Array<{
   time: string
-  p50: number | null
-  p95: number | null
-  p99: number | null
+  [key: string]: number | string | null
 }> {
-  return (points ?? []).map((pt) => ({
-    time: formatChartTime(typeof pt.time === 'number' ? pt.time : 0),
-    p50: readNullableNumber(pt.p50),
-    p95: readNullableNumber(pt.p95),
-    p99: readNullableNumber(pt.p99),
-  }))
+  return (points ?? []).map((pt) => {
+    const row: { time: string; [key: string]: number | string | null } = {
+      time: formatChartTime(typeof pt.time === 'number' ? pt.time : 0),
+    }
+    for (const [key, value] of Object.entries(pt)) {
+      if (key === 'time') continue
+      row[key] = readNullableNumber(value)
+    }
+    return row
+  })
 }
 
 // Get the latest value of a named key from a timeseries array.
@@ -201,6 +246,14 @@ function latestFromSeries(points: NginxTimePoint[], key: string): number | null 
   if (!points || points.length === 0) return null
   const last = points[points.length - 1]
   return readNullableNumber(last[key])
+}
+
+function normalizePercentileInput(value: string) {
+  const parsed = Number.parseInt(value.trim().replace(/^p/i, ''), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) {
+    return null
+  }
+  return parsed
 }
 
 // ─── Reusable components (identical to original) ──────────────────────────────
@@ -328,16 +381,21 @@ function ChartBox({
   loading,
   empty,
   hint,
+  actions,
 }: {
   title: string
   children: React.ReactNode
   loading?: boolean
   empty?: boolean
   hint?: string
+  actions?: React.ReactNode
 }) {
   return (
     <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <h3 className="mb-4 text-sm font-semibold text-foreground">{title}</h3>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        {actions}
+      </div>
       {loading ? (
         <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">Loading...</div>
       ) : empty ? (
@@ -411,24 +469,63 @@ function methodBadgeColor(method: string) {
 
 function SlowRequestTable({
   rows,
+  total,
+  minRT,
+  thresholdValue,
+  onThresholdChange,
+  onThresholdBlur,
+  viewMoreHref,
   loading,
 }: {
   rows: NginxDashboardSummary['slow_requests']
+  total: number
+  minRT: number
+  thresholdValue: string
+  onThresholdChange: (value: string) => void
+  onThresholdBlur: () => void
+  viewMoreHref: string
   loading?: boolean
 }) {
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
 
   return (
     <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <h3 className="mb-1 text-sm font-semibold text-foreground">Slow Requests (&gt;1s) — Last 100</h3>
-      <p className="mb-4 text-xs text-muted-foreground">
-        Requires nginx log_format to include <span className="font-mono">rt=$request_time</span>. Click a request to view more details.
-      </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="mb-1 text-sm font-semibold text-foreground">Slow Requests (&gt;{minRT}s) — Recent 100</h3>
+          <p className="text-xs text-muted-foreground">
+            Showing {formatNumber(rows.length, 0)} of {formatNumber(total, 0)} found. Click a request to view more details.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground">
+            RT
+            <input
+              type="number"
+              min="0.1"
+              step="0.1"
+              value={thresholdValue}
+              onChange={(event) => onThresholdChange(event.target.value)}
+              onBlur={onThresholdBlur}
+              className="h-7 w-16 rounded border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
+            />
+            <span>s</span>
+          </label>
+          {total > rows.length ? (
+            <Link
+              to={viewMoreHref}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+            >
+              View More
+            </Link>
+          ) : null}
+        </div>
+      </div>
       {loading ? (
         <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
       ) : rows.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          No requests over 1s found in the current sample.
+          No requests over {minRT}s found in the selected range.
         </p>
       ) : (
         <div className="max-h-[320px] overflow-auto">
@@ -444,6 +541,9 @@ function SlowRequestTable({
                   >
                     <span className="min-w-0 flex-1 truncate font-mono text-xs" title={req.path}>
                       {req.path}
+                    </span>
+                    <span className="hidden w-28 flex-shrink-0 truncate font-mono text-xs text-muted-foreground md:inline" title={req.ip}>
+                      {req.ip || '—'}
                     </span>
                     <span
                       className="rounded px-1.5 py-0.5 text-xs font-semibold text-white flex-shrink-0"
@@ -524,6 +624,9 @@ export function NginxDashboardPage() {
     mode: 'preset',
     preset: TIME_RANGES[1],
   })
+  const [slowThreshold, setSlowThreshold] = useState(searchParams.get('min_rt') || '1')
+  const [rtPercentileInput, setRtPercentileInput] = useState('')
+  const [customRTPercentiles, setCustomRTPercentiles] = useState<number[]>([])
 
   const serviceQuery = useQuery({
     queryKey: ['discovery-service', id],
@@ -579,6 +682,9 @@ export function NginxDashboardPage() {
   }, [domains.length, requestedDomain, searchParams, selectedDomain, setSearchParams])
 
   const timeWindow = useMemo(() => getTimeWindow(timeSelection), [timeSelection])
+  const slowThresholdNumber = Number.parseFloat(slowThreshold)
+  const slowMinRT = Number.isFinite(slowThresholdNumber) && slowThresholdNumber > 0 ? slowThresholdNumber : 1
+  const rtPercentilesParam = customRTPercentiles.join(',')
 
   // ── Single backend call replacing all 22 frontend queries ─────────────────
   const dashQuery = useQuery<NginxDashboardSummary>({
@@ -593,6 +699,8 @@ export function NginxDashboardPage() {
       timeSelection,
       timeWindow.start,
       timeWindow.end,
+      slowMinRT,
+      rtPercentilesParam,
     ],
     enabled: serviceReady && (domains.length > 0 || domainsQuery.isSuccess) && !timeWindow.error,
     queryFn: () => {
@@ -601,10 +709,36 @@ export function NginxDashboardPage() {
         end: secondsToNanos(timeWindow.end),
         step: timeWindow.step,
         domain: selectedDomain || undefined,
+        min_rt: String(slowMinRT),
+        percentiles: rtPercentilesParam || undefined,
       })
     },
+    placeholderData: (previousData) => previousData,
     staleTime: 20_000,
     refetchInterval: timeWindow.isManual ? false : 25_000, // slightly above the 20 s Redis cache TTL on backend
+    refetchOnWindowFocus: false,
+  })
+
+  const rtDistributionQuery = useQuery<NginxRTDistribution>({
+    queryKey: [
+      'nginx-dashboard-rt-distribution',
+      id,
+      selectedDomain,
+      timeSelection,
+      timeWindow.start,
+      timeWindow.end,
+    ],
+    enabled: serviceReady && (domains.length > 0 || domainsQuery.isSuccess) && !timeWindow.error,
+    queryFn: () => {
+      return getNginxRTDistribution(id, {
+        start: secondsToNanos(timeWindow.start),
+        end: secondsToNanos(timeWindow.end),
+        domain: selectedDomain || undefined,
+      })
+    },
+    placeholderData: (previousData) => previousData,
+    staleTime: 20_000,
+    refetchInterval: timeWindow.isManual ? false : 25_000,
     refetchOnWindowFocus: false,
   })
 
@@ -671,8 +805,37 @@ export function NginxDashboardPage() {
   const botPct   = rawTotal > 0 ? Math.min(100, (rawBot / rawTotal) * 100) : 0
   const humanPct = 100 - botPct
 
+  const rtPercentiles = [...DEFAULT_RT_PERCENTILES, ...customRTPercentiles]
+  const rtPercentileKeys = rtPercentiles.map((p) => `p${p}`)
+  const rtChartTitle = `Response Time ${rtPercentileKeys.map((key) => key.toUpperCase()).join(' / ')} (ms)`
+
+  function addRTPercentile() {
+    const percentile = normalizePercentileInput(rtPercentileInput)
+    if (percentile === null) {
+      return
+    }
+    if (DEFAULT_RT_PERCENTILES.includes(percentile) || customRTPercentiles.includes(percentile)) {
+      setRtPercentileInput('')
+      return
+    }
+    if (customRTPercentiles.length >= 10) {
+      return
+    }
+    setCustomRTPercentiles((current) => [...current, percentile].sort((a, b) => a - b))
+    setRtPercentileInput('')
+  }
+
   // Slow requests (backend sends top 100 directly)
   const slowRequests = d?.slow_requests ?? []
+  const slowRequestsTotal = d?.slow_requests_total ?? 0
+  const slowRequestsNormalizedTotal = d?.slow_requests_normalized_total ?? 0
+  const slowRequestsHref = buildSlowRequestsHref({
+    id,
+    domain: selectedDomain,
+    start: timeWindow.start,
+    end: timeWindow.end,
+    minRT: String(slowMinRT),
+  })
 
   // Aggregation tables
   const aggTopPaths            = d?.top_paths            ?? []
@@ -1025,10 +1188,21 @@ export function NginxDashboardPage() {
 
           {/* Slow Requests — both tables side by side */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <SlowRequestTable rows={slowRequests} loading={isLoading} />
+            <SlowRequestTable
+              rows={slowRequests}
+              total={slowRequestsTotal}
+              minRT={slowMinRT}
+              thresholdValue={slowThreshold}
+              onThresholdChange={setSlowThreshold}
+              onThresholdBlur={() => setSlowThreshold(String(slowMinRT))}
+              viewMoreHref={slowRequestsHref}
+              loading={isLoading}
+            />
             <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
               <h3 className="mb-1 text-sm font-semibold text-foreground">Slow Requests (Normalized Paths)</h3>
-              <p className="mb-3 text-xs text-muted-foreground">Worst RT per normalized path pattern (rt &gt; 1s), e.g. <span className="font-mono">/products/:id</span></p>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Showing {formatNumber(slowRequestsNormalized.length, 0)} of {formatNumber(slowRequestsNormalizedTotal, 0)} normalized paths above {slowMinRT}s.
+              </p>
               <div className="max-h-64 space-y-1 overflow-y-auto">
                 {isLoading ? (
                   <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
@@ -1211,10 +1385,51 @@ export function NginxDashboardPage() {
 
             {/* Response Time — full width */}
             <ChartBox
-              title="Response Time P50 / P95 / P99 (ms)"
+              title={rtChartTitle}
               loading={isLoading}
-              empty={rtData.length === 0 || !rtData.some((pt) => pt.p50 !== null || pt.p95 !== null || pt.p99 !== null)}
+              empty={rtData.length === 0 || !rtData.some((pt) => rtPercentileKeys.some((key) => pt[key] !== null))}
               hint="Requires nginx log_format to include rt=$request_time"
+              actions={
+                <div className="flex flex-wrap items-center gap-2">
+                  {customRTPercentiles.map((percentile, index) => (
+                    <button
+                      key={percentile}
+                      type="button"
+                      onClick={() => setCustomRTPercentiles((current) => current.filter((item) => item !== percentile))}
+                      className="rounded-md border border-border px-2 py-1 text-xs font-semibold"
+                      style={{ color: CUSTOM_RT_COLORS[index % CUSTOM_RT_COLORS.length] }}
+                    >
+                      P{percentile} x
+                    </button>
+                  ))}
+                  <form
+                    className="flex items-center gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      addRTPercentile()
+                    }}
+                  >
+                    <input
+                      type="number"
+                      min="1"
+                      max="99"
+                      step="1"
+                      value={rtPercentileInput}
+                      onChange={(event) => setRtPercentileInput(event.target.value)}
+                      placeholder="80"
+                      disabled={customRTPercentiles.length >= 10}
+                      className="h-8 w-20 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary disabled:opacity-50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={customRTPercentiles.length >= 10}
+                      className="h-8 rounded-md border border-border bg-background px-3 text-xs font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Add
+                    </button>
+                  </form>
+                </div>
+              }
             >
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -1236,33 +1451,18 @@ export function NginxDashboardPage() {
                       }
                     />
                     <Legend wrapperStyle={{ fontSize: '11px' }} />
-                    <Line
-                      dataKey="p50"
-                      dot={false}
-                      isAnimationActive={false}
-                      name="P50"
-                      stroke="#22c55e"
-                      strokeWidth={2}
-                      type="monotone"
-                    />
-                    <Line
-                      dataKey="p95"
-                      dot={false}
-                      isAnimationActive={false}
-                      name="P95"
-                      stroke="#f59e0b"
-                      strokeWidth={2}
-                      type="monotone"
-                    />
-                    <Line
-                      dataKey="p99"
-                      dot={false}
-                      isAnimationActive={false}
-                      name="P99"
-                      stroke="#ef4444"
-                      strokeWidth={2}
-                      type="monotone"
-                    />
+                    {rtPercentileKeys.map((key, index) => (
+                      <Line
+                        key={key}
+                        dataKey={key}
+                        dot={false}
+                        isAnimationActive={false}
+                        name={key.toUpperCase()}
+                        stroke={DEFAULT_RT_COLORS[key] ?? CUSTOM_RT_COLORS[Math.max(0, index - DEFAULT_RT_PERCENTILES.length) % CUSTOM_RT_COLORS.length]}
+                        strokeWidth={2}
+                        type="monotone"
+                      />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1400,6 +1600,18 @@ export function NginxDashboardPage() {
               Slow Requests are now expandable so you can inspect each request inline.
             </p>
           </div>
+
+          <ChartBox
+            title="RT Distribution by Status"
+            loading={rtDistributionQuery.isLoading}
+            empty={!rtDistributionQuery.data}
+            hint="Uses the dashboard selected time range, including manual ranges"
+          >
+            <NginxRTDistributionChart
+              data={rtDistributionQuery.data}
+              error={rtDistributionQuery.isError ? rtDistributionQuery.error?.message ?? 'Failed to load RT distribution.' : null}
+            />
+          </ChartBox>
 
           <NginxPerformanceSection id={id} domain={selectedDomain} />
 

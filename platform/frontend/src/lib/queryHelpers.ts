@@ -166,7 +166,8 @@ export function formatTimestampNano(unixNano: string | number): string {
 export function formatNumber(value: number, decimals = 2): string {
   return value.toLocaleString('en-US', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: decimals
+    maximumFractionDigits: decimals,
+    useGrouping: false
   })
 }
 
@@ -578,4 +579,16 @@ export function getStartSeconds(durationSeconds: number): number {
 export function secondsToNanos(seconds: number): string {
   // BigInt multiplication is exact — no floating-point rounding.
   return (BigInt(Math.floor(seconds)) * 1_000_000_000n).toString()
+}
+
+/**
+ * Convert a Unix nanosecond timestamp string from a URL/API field to whole seconds.
+ */
+export function nanosToSeconds(nanos: string | null): number | null {
+  if (!nanos) return null
+  try {
+    return Number(BigInt(nanos) / 1_000_000_000n)
+  } catch {
+    return null
+  }
 }

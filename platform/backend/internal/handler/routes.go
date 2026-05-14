@@ -52,6 +52,12 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		discoveryRepo,
 		tenantRepo,
 	)
+	postgresDashboardService := service.NewPostgresDashboardService(cfg, infrastructure.Redis)
+	postgresDashboardHandler := NewPostgresDashboardHandler(
+		postgresDashboardService,
+		discoveryRepo,
+		tenantRepo,
+	)
 
 	e.GET("/install.sh", installHandler.AgentInstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
@@ -88,11 +94,16 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/nginx/:id/explorer", nginxDashboardHandler.Explorer)
 		api.GET("/nginx/:id/error-logs", nginxDashboardHandler.ErrorLogs)
 		api.GET("/nginx/:id/ip-investigation", nginxDashboardHandler.IPInvestigation)
-		api.GET("/nginx/:id/slow-requests",  nginxDashboardHandler.SlowRequests)
+		api.GET("/nginx/:id/slow-requests", nginxDashboardHandler.SlowRequests)
 		// Nginx performance chart routes (Chart 1, 2, 3)
 		api.GET("/nginx/:id/performance/heatmap", nginxPerformanceHandler.Heatmap)
 		api.GET("/nginx/:id/performance/scatter", nginxPerformanceHandler.Scatter)
 		api.GET("/nginx/:id/performance/dist", nginxPerformanceHandler.Distribution)
+
+		// PostgreSQL dashboard routes
+		api.GET("/postgres/:id/dashboard", postgresDashboardHandler.Dashboard)
+		api.GET("/postgres/:id/config", postgresDashboardHandler.Config)
+		api.GET("/postgres/:id/logs", postgresDashboardHandler.Logs)
 	}
 
 	// ── Health check ─────────────────────────────────────────────────────────

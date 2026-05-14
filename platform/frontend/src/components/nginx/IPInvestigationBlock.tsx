@@ -36,6 +36,9 @@ const IP_TIME_RANGES = [
 ] as const
 
 type IPTimeRange = (typeof IP_TIME_RANGES)[number]
+type IPTimeSelection =
+  | { mode: 'preset'; preset: IPTimeRange }
+  | { mode: 'manual'; date: string; startTime: string; endTime: string }
 
 // step only affects X-axis tick density; bucket size is always 1m server-side
 function getStep(rangeSeconds: number): string {
@@ -85,6 +88,104 @@ function fmtTime(unixSeconds: number) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0')
+}
+
+function formatIPDate(date: Date) {
+  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}-${date.getFullYear()}`
+}
+
+function formatIPTime(date: Date) {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+function createDefaultManualIPSelection(): IPTimeSelection {
+  const end = new Date()
+  const start = new Date(end.getTime() - 60 * 60 * 1000)
+  return {
+    mode: 'manual',
+    date: formatIPDate(end),
+    startTime: formatIPTime(start),
+    endTime: formatIPTime(end),
+  }
+}
+
+function ipDateTimeToSeconds(dateValue: string, timeValue: string): number | null {
+  const dateMatch = dateValue.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/)
+  const timeMatch = timeValue.trim().match(/^(\d{2}):(\d{2})$/)
+  if (!dateMatch || !timeMatch) return null
+
+  const month = Number(dateMatch[1])
+  const day = Number(dateMatch[2])
+  const year = Number(dateMatch[3])
+  const hour = Number(timeMatch[1])
+  const minute = Number(timeMatch[2])
+  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0)
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day ||
+    parsed.getHours() !== hour ||
+    parsed.getMinutes() !== minute
+  ) {
+    return null
+  }
+  return Math.floor(parsed.getTime() / 1000)
+}
+
+function getIPTimeWindow(selection: IPTimeSelection) {
+  if (selection.mode === 'preset') {
+    const end = getNowSeconds()
+    const start = getStartSeconds(selection.preset.seconds)
+    return {
+      start,
+      end,
+      seconds: selection.preset.seconds,
+      label: `${selection.preset.label} window`,
+      error: '',
+      isManual: false,
+    }
+  }
+
+  const start = ipDateTimeToSeconds(selection.date, selection.startTime)
+  const end = ipDateTimeToSeconds(selection.date, selection.endTime)
+  if (start === null || end === null) {
+    return { start: 0, end: 0, seconds: 0, label: 'Manual window', error: 'Use MM-DD-YYYY and HH:mm.', isManual: true }
+  }
+  if (end <= start) {
+    return { start, end, seconds: 0, label: 'Manual window', error: 'End time must be after start time.', isManual: true }
+  }
+  return {
+    start,
+    end,
+    seconds: end - start,
+    label: `${selection.date} ${selection.startTime}-${selection.endTime}`,
+    error: '',
+    isManual: true,
+  }
+}
+
+function getIPSeenDayWindow(selection: IPTimeSelection) {
+  const base =
+    selection.mode === 'manual'
+      ? ipDateTimeToSeconds(selection.date, '00:00')
+      : (() => {
+          const today = new Date()
+          today.setHours(0, 0, 0, 0)
+          return Math.floor(today.getTime() / 1000)
+        })()
+
+  if (base === null) {
+    return { start: 0, end: 0 }
+  }
+
+  return {
+    start: base,
+    end: base + 24 * 60 * 60,
+  }
 }
 
 function mapTs(points: NginxTimePoint[]): Record<string, number | string>[] {
@@ -275,8 +376,11 @@ export function IPInvestigationBlock({
 }) {
   const [inputValue, setInputValue] = useState('')
   const [committedIP, setCommittedIP] = useState('')
-  const [timeRange, setTimeRange] = useState<IPTimeRange>(IP_TIME_RANGES[2]) // 1h default
+  const [timeSelection, setTimeSelection] = useState<IPTimeSelection>({ mode: 'preset', preset: IP_TIME_RANGES[2] }) // 1h default
   const [methodFilter, setMethodFilter] = useState<string>('all')
+  const [pathSearch, setPathSearch] = useState('')
+  const timeWindow = useMemo(() => getIPTimeWindow(timeSelection), [timeSelection])
+  const seenDayWindow = useMemo(() => getIPSeenDayWindow(timeSelection), [timeSelection])
 
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
@@ -284,20 +388,21 @@ export function IPInvestigationBlock({
   }
 
   const investigationQuery = useQuery<NginxIPInvestigationResult>({
-    queryKey: ['nginx-ip-investigation', id, committedIP, timeRange.seconds, domain ?? ''],
-    enabled: !!committedIP,
+    queryKey: ['nginx-ip-investigation', id, committedIP, timeSelection, timeWindow.start, timeWindow.end, domain ?? ''],
+    enabled: !!committedIP && !timeWindow.error,
     queryFn: () => {
-      const end = getNowSeconds()
-      const start = getStartSeconds(timeRange.seconds)
       return getNginxIPInvestigation(id, {
         ip: committedIP,
-        start: secondsToNanos(start),
-        end: secondsToNanos(end),
-        step: getStep(timeRange.seconds),
+        start: secondsToNanos(timeWindow.start),
+        end: secondsToNanos(timeWindow.end),
+        step: getStep(timeWindow.seconds),
         domain: domain || undefined,
+        seen_start: secondsToNanos(seenDayWindow.start),
+        seen_end: secondsToNanos(seenDayWindow.end),
       })
     },
     staleTime: 25_000,
+    refetchInterval: timeWindow.isManual ? false : 25_000,
     refetchOnWindowFocus: false,
   })
 
@@ -319,11 +424,13 @@ export function IPInvestigationBlock({
 
   const filteredPaths = useMemo(() => {
     if (!d?.paths) return []
+    const query = pathSearch.trim().toLowerCase()
     return d.paths
       .filter((p) => methodFilter === 'all' || p.method === methodFilter)
+      .filter((p) => !query || p.path.toLowerCase().includes(query))
       .slice()
       .sort((a, b) => b.count - a.count)
-  }, [d, methodFilter])
+  }, [d, methodFilter, pathSearch])
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -336,16 +443,16 @@ export function IPInvestigationBlock({
           <h2 className="text-base font-semibold text-foreground">IP Investigation</h2>
         </div>
 
-        {/* Time-range pills */}
-        <div className="flex gap-1 rounded-lg border border-border bg-background p-1 shadow-sm">
+        {/* Independent time-range controls */}
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background p-1 shadow-sm">
           {IP_TIME_RANGES.map((r) => (
             <button
               key={r.label}
               type="button"
-              onClick={() => setTimeRange(r)}
+              onClick={() => setTimeSelection({ mode: 'preset', preset: r })}
               className={cn(
                 'rounded px-2.5 py-1 text-xs font-medium transition-all duration-150',
-                timeRange.seconds === r.seconds
+                timeSelection.mode === 'preset' && timeSelection.preset.seconds === r.seconds
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
               )}
@@ -353,10 +460,60 @@ export function IPInvestigationBlock({
               {r.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setTimeSelection(timeSelection.mode === 'manual' ? timeSelection : createDefaultManualIPSelection())}
+            className={cn(
+              'rounded px-2.5 py-1 text-xs font-medium transition-all duration-150',
+              timeSelection.mode === 'manual'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
+            )}
+          >
+            Manual
+          </button>
         </div>
       </div>
 
       <div className="p-5 space-y-6">
+        {timeSelection.mode === 'manual' ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/25 px-3 py-2">
+            <span className="text-xs font-semibold text-foreground">IP investigation time</span>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Date
+              <input
+                value={timeSelection.date}
+                onChange={(event) => setTimeSelection({ ...timeSelection, date: event.target.value })}
+                placeholder="MM-DD-YYYY"
+                className="h-8 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              Start
+              <input
+                type="time"
+                value={timeSelection.startTime}
+                onChange={(event) => setTimeSelection({ ...timeSelection, startTime: event.target.value })}
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              End
+              <input
+                type="time"
+                value={timeSelection.endTime}
+                onChange={(event) => setTimeSelection({ ...timeSelection, endTime: event.target.value })}
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+              />
+            </label>
+            {timeWindow.error ? <span className="text-xs text-red-500">{timeWindow.error}</span> : null}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+            IP investigation uses its own <span className="font-semibold text-foreground">{timeWindow.label}</span>, independent from the dashboard time range.
+          </div>
+        )}
+
         {/* ── IP Input ──────────────────────────────────────────────────── */}
         <div className="flex gap-2">
           <input
@@ -397,7 +554,7 @@ export function IPInvestigationBlock({
                 {committedIP}
               </span>
               <span className="text-xs text-muted-foreground">
-                — {timeRange.label} window{domain ? ` • ${domain}` : ''}
+                — {timeWindow.label}{domain ? ` • ${domain}` : ''}
               </span>
               {isLoading && (
                 <span className="ml-auto text-xs text-muted-foreground animate-pulse">Loading…</span>
@@ -428,13 +585,13 @@ export function IPInvestigationBlock({
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-background p-4">
-                <p className="text-xs text-muted-foreground">First Seen Today</p>
+                <p className="text-xs text-muted-foreground">First Seen That Day</p>
                 <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-foreground">
                   {isLoading ? '—' : d?.first_seen_today || '—'}
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-background p-4">
-                <p className="text-xs text-muted-foreground">Last Seen Today</p>
+                <p className="text-xs text-muted-foreground">Last Seen That Day</p>
                 <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-foreground">
                   {isLoading ? '—' : d?.last_seen_today || '—'}
                 </p>
@@ -633,13 +790,20 @@ export function IPInvestigationBlock({
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">Paths This IP Hit</h3>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Top paths sorted by frequency • {timeRange.label} window
+                    Top paths sorted by frequency • {timeWindow.label}
                   </p>
                 </div>
 
-                {/* Method filter pills */}
-                {availableMethods.length > 0 && (
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    value={pathSearch}
+                    onChange={(event) => setPathSearch(event.target.value)}
+                    placeholder="Search path"
+                    className="h-8 w-44 rounded-md border border-border bg-background px-2 text-xs font-mono text-foreground outline-none focus:border-primary"
+                  />
+                  {availableMethods.length > 0 && (
+                  <>
                     <span className="text-xs text-muted-foreground">Method:</span>
                     <button
                       onClick={() => setMethodFilter('all')}
@@ -669,12 +833,13 @@ export function IPInvestigationBlock({
                         {m}
                       </button>
                     ))}
+                  </>
+                  )}
                     <div className="flex items-center gap-1 text-[11px] text-muted-foreground ml-1">
                       <Clock className="w-3 h-3" />
-                      {timeRange.label}
+                      {timeWindow.label}
                     </div>
-                  </div>
-                )}
+                </div>
               </div>
 
               {/* Path rows */}
@@ -699,7 +864,7 @@ export function IPInvestigationBlock({
                         // Fall back gracefully if older backend version sends nothing.
                         (p as any).status_breakdown ?? {}
                       }
-                      timeWindow={timeRange.label}
+                      timeWindow={timeWindow.label}
                     />
                   ))}
                 </div>

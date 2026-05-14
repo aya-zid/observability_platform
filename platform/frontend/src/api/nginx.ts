@@ -133,7 +133,7 @@ export type NginxSlowRequestsParams = {
 
 export async function getNginxDashboardSummary(
   id: string,
-  params: { start: string; end: string; step: string; domain?: string; min_rt?: string }
+  params: { start: string; end: string; step: string; domain?: string; min_rt?: string; percentiles?: string }
 ): Promise<NginxDashboardSummary> {
   const { data } = await client.get<NginxDashboardSummary>(`/api/nginx/${id}/dashboard`, {
     params,
@@ -212,6 +212,8 @@ export type NginxIPInvestigationParams = {
   end: string
   step: string
   domain?: string
+  seen_start?: string
+  seen_end?: string
 }
 
 export async function getNginxIPInvestigation(
@@ -227,12 +229,14 @@ export async function getNginxIPInvestigation(
 // ─── Performance chart types (Charts 1, 2, 3) ────────────────────────────────
 
 /** Chart 1: RT Intensity Heatmap
- *  Top-20 normalized paths × 20 three-minute buckets, cell = P95 RT in ms.
+ *  Top-20 normalized paths × five-minute buckets, cell = P95 RT in ms.
  */
 export type NginxRTHeatmap = {
   paths: string[]    // length ≤ 20, y-axis labels
-  buckets: string[]  // length = 20, x-axis labels e.g. "09:00"
+  buckets: string[]  // x-axis labels e.g. "09:00"
   matrix: number[][] // matrix[pathIdx][bucketIdx] = P95 RT ms (0 = no data)
+  counts: number[][] // counts[pathIdx][bucketIdx] = request count in bucket
+  p95_counts: number[][] // p95_counts[pathIdx][bucketIdx] = requests at or below P95
 }
 
 /** Chart 2: Raw RT Scatter — individual/aggregated request dots.
@@ -269,9 +273,13 @@ export type NginxRTScatter = {
 /** Chart 3: RT Distribution by Status — Avg / P95 / P99 per status class. */
 export type NginxRTStatusMetrics = {
   avg: number
+  p50: number
   p95: number
   p99: number
   count: number
+  p50_count: number
+  p95_count: number
+  p99_count: number
   status_breakdown?: Record<string, number>
 }
 

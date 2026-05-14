@@ -52,6 +52,7 @@ func (s *NginxDashboardService) GetIPInvestigation(
 	domain string,
 	startNs, endNs int64,
 	step string,
+	seenStartNs, seenEndNs int64,
 ) (*NginxIPInvestigationResult, error) {
 
 	base := lokiSelector(serviceName, domain, "access")
@@ -74,8 +75,8 @@ func (s *NginxDashboardService) GetIPInvestigation(
 	var wg sync.WaitGroup
 	var (
 		reqRate, st2xx, st3xx, st4xx, st5xx, avgRT lR
-		pathCounts, pathErrors, pathAvgRT           lR
-		pathMethodCounts, pathStatusCounts          lR
+		pathCounts, pathErrors, pathAvgRT          lR
+		pathMethodCounts, pathStatusCounts         lR
 	)
 
 	wg.Add(11)
@@ -168,20 +169,22 @@ func (s *NginxDashboardService) GetIPInvestigation(
 		pathStatusCounts.data,
 	)
 
-	// ── First / Last seen today ──────────────────────────────────────────────
-	todayStartNs := ipInvTodayMidnightNs()
-	nowNs := time.Now().UnixNano()
+	// ── First / Last seen for the selected day ───────────────────────────────
+	if seenStartNs <= 0 || seenEndNs <= seenStartNs {
+		seenStartNs = ipInvTodayMidnightNs()
+		seenEndNs = time.Now().UnixNano()
+	}
 
 	var firstTs, lastTs int64
 	var wg2 sync.WaitGroup
 	wg2.Add(2)
 	go func() {
 		defer wg2.Done()
-		firstTs, _ = s.lokiQueryFirstEntryTs(ctx, tenantUUID, ipFilter, todayStartNs, nowNs, "forward")
+		firstTs, _ = s.lokiQueryFirstEntryTs(ctx, tenantUUID, ipFilter, seenStartNs, seenEndNs, "forward")
 	}()
 	go func() {
 		defer wg2.Done()
-		lastTs, _ = s.lokiQueryFirstEntryTs(ctx, tenantUUID, ipFilter, todayStartNs, nowNs, "backward")
+		lastTs, _ = s.lokiQueryFirstEntryTs(ctx, tenantUUID, ipFilter, seenStartNs, seenEndNs, "backward")
 	}()
 	wg2.Wait()
 

@@ -184,13 +184,21 @@ func (s *DiscoveryService) GetServiceDetail(ctx context.Context, tenantID uint, 
 	// The DB stores one row per (domain, log_kind, log_path).
 	// We group them by domain so the frontend gets one object per domain with
 	// both access_log and error_log fields populated.
-	var nginxVirtualHosts []dto.NginxVirtualHostResponse
+	var nginxVirtualHosts []dto.WebServerVirtualHostResponse
 	if service.ServiceName == "nginx" {
 		vhosts, err := s.discoveryRepo.ListVirtualHostsByServiceCtx(ctx, tenantID, service.ID)
 		if err != nil {
 			return nil, err
 		}
-		nginxVirtualHosts = groupVirtualHosts(vhosts)
+		nginxVirtualHosts = groupNginxVirtualHosts(vhosts)
+	}
+	var apacheVirtualHosts []dto.WebServerVirtualHostResponse
+	if service.ServiceName == "apache" {
+		vhosts, err := s.discoveryRepo.ListApacheVirtualHostsByServiceCtx(ctx, tenantID, service.ID)
+		if err != nil {
+			return nil, err
+		}
+		apacheVirtualHosts = groupApacheVirtualHosts(vhosts)
 	}
 
 	resp := &dto.DiscoveryServiceDetailResponse{
@@ -229,18 +237,32 @@ func (s *DiscoveryService) GetServiceDetail(ctx context.Context, tenantID uint, 
 			service.LastVulnerabilityScanAt,
 			len(vulnerabilities),
 		),
-		Vulnerabilities:   vulnerabilities,
-		Catalog:           def,
-		NginxVirtualHosts: nginxVirtualHosts,
+		Vulnerabilities:    vulnerabilities,
+		Catalog:            def,
+		NginxVirtualHosts:  nginxVirtualHosts,
+		ApacheVirtualHosts: apacheVirtualHosts,
 	}
 
 	return resp, nil
 }
 
-// groupVirtualHosts merges DB rows (one per log_kind) into one response
+type webServerVirtualHostRow struct {
+	ID          uint
+	Domain      string
+	LogKind     string
+	LogPath     string
+	Source      string
+	Enabled     bool
+	IsSharedLog bool
+	IsDefault   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// groupWebServerVirtualHosts merges DB rows (one per log_kind) into one response
 // object per domain. The key is (domain, is_default, is_shared_log).
 // We use the earliest row's ID and timestamps for the merged entry.
-func groupVirtualHosts(rows []domain.NginxVirtualHost) []dto.NginxVirtualHostResponse {
+func groupWebServerVirtualHosts(rows []webServerVirtualHostRow) []dto.WebServerVirtualHostResponse {
 	type groupKey struct {
 		domain      string
 		isDefault   bool
@@ -249,7 +271,7 @@ func groupVirtualHosts(rows []domain.NginxVirtualHost) []dto.NginxVirtualHostRes
 
 	// Preserve insertion order using a slice of keys
 	order := []groupKey{}
-	groups := map[groupKey]*dto.NginxVirtualHostResponse{}
+	groups := map[groupKey]*dto.WebServerVirtualHostResponse{}
 
 	for _, vh := range rows {
 		key := groupKey{
@@ -260,7 +282,7 @@ func groupVirtualHosts(rows []domain.NginxVirtualHost) []dto.NginxVirtualHostRes
 
 		entry, exists := groups[key]
 		if !exists {
-			entry = &dto.NginxVirtualHostResponse{
+			entry = &dto.WebServerVirtualHostResponse{
 				ID:          vh.ID,
 				Domain:      vh.Domain,
 				Enabled:     vh.Enabled,
@@ -289,11 +311,49 @@ func groupVirtualHosts(rows []domain.NginxVirtualHost) []dto.NginxVirtualHostRes
 		}
 	}
 
-	result := make([]dto.NginxVirtualHostResponse, 0, len(order))
+	result := make([]dto.WebServerVirtualHostResponse, 0, len(order))
 	for _, key := range order {
 		result = append(result, *groups[key])
 	}
 	return result
+}
+
+func groupNginxVirtualHosts(rows []domain.NginxVirtualHost) []dto.WebServerVirtualHostResponse {
+	webServerRows := make([]webServerVirtualHostRow, 0, len(rows))
+	for _, row := range rows {
+		webServerRows = append(webServerRows, webServerVirtualHostRow{
+			ID:          row.ID,
+			Domain:      row.Domain,
+			LogKind:     row.LogKind,
+			LogPath:     row.LogPath,
+			Source:      row.Source,
+			Enabled:     row.Enabled,
+			IsSharedLog: row.IsSharedLog,
+			IsDefault:   row.IsDefault,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		})
+	}
+	return groupWebServerVirtualHosts(webServerRows)
+}
+
+func groupApacheVirtualHosts(rows []domain.ApacheVirtualHost) []dto.WebServerVirtualHostResponse {
+	webServerRows := make([]webServerVirtualHostRow, 0, len(rows))
+	for _, row := range rows {
+		webServerRows = append(webServerRows, webServerVirtualHostRow{
+			ID:          row.ID,
+			Domain:      row.Domain,
+			LogKind:     row.LogKind,
+			LogPath:     row.LogPath,
+			Source:      row.Source,
+			Enabled:     row.Enabled,
+			IsSharedLog: row.IsSharedLog,
+			IsDefault:   row.IsDefault,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+		})
+	}
+	return groupWebServerVirtualHosts(webServerRows)
 }
 
 func (s *DiscoveryService) UpdateCollection(ctx context.Context, tenantID uint, serviceID uint, req dto.UpdateCollectionRequest) error {
@@ -334,8 +394,8 @@ func (s *DiscoveryService) UpdateServiceConfig(ctx context.Context, tenantID uin
 		return ErrJMXExporterPortRequired
 	}
 
-	// Handle Nginx virtual hosts update
-	if len(req.NginxVirtualHosts) > 0 {
+	// Handle web-server virtual hosts update
+	if len(req.NginxVirtualHosts) > 0 || len(req.ApacheVirtualHosts) > 0 {
 		svc, err := s.discoveryRepo.FindServiceByIDTenantCtx(ctx, tenantID, serviceID)
 		if err != nil {
 			return err
@@ -380,6 +440,43 @@ func (s *DiscoveryService) UpdateServiceConfig(ctx context.Context, tenantID uin
 			}
 
 			if err := s.discoveryRepo.ReplaceVirtualHostsCtx(ctx, tenantID, serviceID, vhosts); err != nil {
+				return err
+			}
+		}
+		if svc.ServiceName == "apache" {
+			vhosts := make([]domain.ApacheVirtualHost, 0, len(req.ApacheVirtualHosts)*2)
+			for _, vhReq := range req.ApacheVirtualHosts {
+				domainName := strings.TrimSpace(vhReq.Domain)
+				if domainName == "" {
+					domainName = "(default)"
+				}
+
+				if vhReq.AccessLog != "" {
+					vhosts = append(vhosts, domain.ApacheVirtualHost{
+						Domain:      domainName,
+						LogKind:     "access",
+						LogPath:     strings.TrimSpace(vhReq.AccessLog),
+						Source:      "user",
+						Enabled:     vhReq.Enabled,
+						IsSharedLog: vhReq.IsSharedLog,
+						IsDefault:   vhReq.IsDefault,
+					})
+				}
+
+				if vhReq.ErrorLog != "" {
+					vhosts = append(vhosts, domain.ApacheVirtualHost{
+						Domain:      domainName,
+						LogKind:     "error",
+						LogPath:     strings.TrimSpace(vhReq.ErrorLog),
+						Source:      "user",
+						Enabled:     vhReq.Enabled,
+						IsSharedLog: vhReq.IsSharedLog,
+						IsDefault:   vhReq.IsDefault,
+					})
+				}
+			}
+
+			if err := s.discoveryRepo.ReplaceApacheVirtualHostsCtx(ctx, tenantID, serviceID, vhosts); err != nil {
 				return err
 			}
 		}

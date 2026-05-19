@@ -83,6 +83,10 @@ func (s *IntegrationService) CreateInstallCommand(
 	if err != nil {
 		return nil, err
 	}
+	apacheVHosts, err := s.listEnabledApacheVirtualHosts(ctx, tenantID, svc.ID)
+	if err != nil {
+		return nil, err
+	}
 
 	logPaths := effectiveLogPathsForIntegration(svc, detectedLogPaths)
 	logPathsJoined := strings.Join(logPaths, ",")
@@ -94,7 +98,7 @@ func (s *IntegrationService) CreateInstallCommand(
 	}
 
 	metricsEndpoint := metricsEndpointForIntegration(svc, def)
-	if logPathsJoined == "" && metricsEndpoint == "" && len(nginxVHosts) == 0 {
+	if logPathsJoined == "" && metricsEndpoint == "" && len(nginxVHosts) == 0 && len(apacheVHosts) == 0 {
 		return nil, ErrIntegrationConfigRequired
 	}
 
@@ -148,6 +152,16 @@ func (s *IntegrationService) RenderGenericScript(params IntegrationScriptParams)
 		}
 		if len(vhosts) > 0 {
 			return s.renderNginxScript(params, vhosts)
+		}
+	}
+
+	if params.ServiceName == "apache" {
+		vhosts, err := s.loadApacheVirtualHostsForScript(params)
+		if err != nil {
+			return "", err
+		}
+		if len(vhosts) > 0 {
+			return s.renderApacheScript(params, vhosts)
 		}
 	}
 
@@ -253,7 +267,7 @@ if metrics_endpoint and f"  {metrics_key}:\n" not in text:
     parsed = urlparse(metrics_endpoint)
     host_port = parsed.netloc
     path = parsed.path or "/metrics"
-    if metrics_key.startswith("nginx/"):
+    if metrics_key.startswith("nginx/") or metrics_key.startswith("apache/"):
         prom_block = (
             f"  {metrics_key}:\n"
             f"    endpoint: {metrics_endpoint}\n"
@@ -396,6 +410,47 @@ func (s *IntegrationService) loadNginxVirtualHostsForScript(params IntegrationSc
 	}
 
 	return s.listEnabledNginxVirtualHosts(context.Background(), tenant.ID, svc.ID)
+}
+
+func (s *IntegrationService) listEnabledApacheVirtualHosts(ctx context.Context, tenantID uint, serviceID uint) ([]domain.ApacheVirtualHost, error) {
+	rows, err := s.discoveryRepo.ListApacheVirtualHostsByServiceCtx(ctx, tenantID, serviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]domain.ApacheVirtualHost, 0, len(rows))
+	for _, row := range rows {
+		if !row.Enabled || row.IsSharedLog || strings.TrimSpace(row.LogPath) == "" {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered, nil
+}
+
+func (s *IntegrationService) loadApacheVirtualHostsForScript(params IntegrationScriptParams) ([]domain.ApacheVirtualHost, error) {
+	serviceID, err := strconv.ParseUint(strings.TrimSpace(params.ServiceID), 10, 64)
+	if err != nil {
+		return nil, ErrMissingScriptParams
+	}
+
+	tenant, err := s.tenantRepo.FindByAPIKey(context.Background(), params.APIKey)
+	if err != nil {
+		return nil, err
+	}
+	if tenant == nil {
+		return nil, ErrTenantNotFound
+	}
+
+	svc, err := s.discoveryRepo.FindServiceByIDTenantCtx(context.Background(), tenant.ID, uint(serviceID))
+	if err != nil {
+		return nil, err
+	}
+	if svc == nil || svc.ServiceName != "apache" {
+		return nil, nil
+	}
+
+	return s.listEnabledApacheVirtualHosts(context.Background(), tenant.ID, svc.ID)
 }
 
 func (s *IntegrationService) renderNginxScript(
@@ -665,7 +720,7 @@ if metrics_endpoint and f"  {metrics_key}:\n" not in text:
     parsed = urlparse(metrics_endpoint)
     host_port = parsed.netloc
     path = parsed.path or "/metrics"
-    if metrics_key.startswith("nginx/"):
+    if metrics_key.startswith("nginx/") or metrics_key.startswith("apache/"):
         prom_block = (
             f"  {metrics_key}:\n"
             f"    endpoint: {metrics_endpoint}\n"
@@ -730,6 +785,374 @@ if all_nginx_receivers and f"    {nginx_pipeline_key}:\n" not in text:
         text = text.replace("    traces:\n", nginx_pipeline + "    traces:\n", 1)
     else:
         text = text.rstrip("\n") + "\n" + nginx_pipeline + "\n"
+
+with open(cfg_path, "w", encoding="utf-8") as f:
+    f.write(text)
+PY
+then
+  echo "[x] Failed to patch collector config"
+  cp "$BACKUP_FILE" "$CONFIG_FILE" || true
+  notify_status "error" false false
+  exit 1
+fi
+
+if ! /usr/local/bin/otelcol validate --config "file:${CONFIG_FILE}" >/dev/null 2>&1; then
+  echo "[x] Collector config validation failed, rolling back"
+  cp "$BACKUP_FILE" "$CONFIG_FILE" || true
+  notify_status "error" false false
+  exit 1
+fi
+
+if systemctl reload otelcol >/dev/null 2>&1; then
+  :
+else
+  systemctl restart otelcol >/dev/null 2>&1 || {
+    echo "[x] Failed to reload/restart otelcol"
+    cp "$BACKUP_FILE" "$CONFIG_FILE" || true
+    systemctl restart otelcol >/dev/null 2>&1 || true
+    notify_status "error" false false
+    exit 1
+  }
+fi
+
+LOG_ON=true
+METRICS_ON=false
+[ -n "$METRICS_ENDPOINT" ] && METRICS_ON=true
+
+if systemctl is-active --quiet otelcol; then
+  notify_status "active" ${LOG_ON} ${METRICS_ON}
+  echo "[✓] Integration applied for ${SERVICE_NAME}"
+else
+  cp "$BACKUP_FILE" "$CONFIG_FILE" || true
+  systemctl restart otelcol >/dev/null 2>&1 || true
+  notify_status "error" false false
+  echo "[x] otelcol is not active after update"
+  exit 1
+fi
+`,
+		shellEscapeSingle(params.MachineID),
+		shellEscapeSingle(params.APIKey),
+		shellEscapeSingle(params.ServiceName),
+		shellEscapeSingle(serviceSlug),
+		shellEscapeSingle(params.MetricsEndpoint),
+		shellEscapeSingle(params.PlatformHost),
+		shellEscapeSingle(params.PlatformPort),
+		shellEscapeSingle(string(vhostsJSON)),
+		shellEscapeSingle(metricsReceiverKeyForIntegration(serviceSlug)),
+	)
+
+	return script, nil
+}
+
+func (s *IntegrationService) renderApacheScript(
+	params IntegrationScriptParams,
+	vhosts []domain.ApacheVirtualHost,
+) (string, error) {
+	type vhostConfig struct {
+		Receiver string   `json:"receiver"`
+		Domain   string   `json:"domain"`
+		LogKind  string   `json:"log_kind"`
+		Paths    []string `json:"paths"`
+	}
+
+	type groupedVHost struct {
+		domain      string
+		accessPaths []string
+		errorPaths  []string
+	}
+
+	grouped := make(map[string]*groupedVHost)
+	order := make([]string, 0)
+	for _, vh := range vhosts {
+		domainName := strings.TrimSpace(vh.Domain)
+		if domainName == "" {
+			domainName = "(default)"
+		}
+		entry, ok := grouped[domainName]
+		if !ok {
+			entry = &groupedVHost{domain: domainName}
+			grouped[domainName] = entry
+			order = append(order, domainName)
+		}
+		logPath := strings.TrimSpace(vh.LogPath)
+		logKind := strings.TrimSpace(vh.LogKind)
+		if logKind == "" {
+			if strings.Contains(logPath, "error") {
+				logKind = "error"
+			} else {
+				logKind = "access"
+			}
+		}
+		if logKind == "error" {
+			entry.errorPaths = append(entry.errorPaths, logPath)
+		} else {
+			entry.accessPaths = append(entry.accessPaths, logPath)
+		}
+	}
+
+	usedReceivers := make(map[string]int)
+	payload := make([]vhostConfig, 0, len(order)*2)
+	for _, domainName := range order {
+		entry := grouped[domainName]
+		slug := sanitizeServiceSlug(domainName)
+
+		accessPaths := dedupeStrings(entry.accessPaths)
+		if len(accessPaths) > 0 {
+			baseKey := "filelog/apache_" + slug + "_access_integration"
+			receiverKey := baseKey
+			if n := usedReceivers[baseKey]; n > 0 {
+				receiverKey = fmt.Sprintf("%s_%d", baseKey, n+1)
+			}
+			usedReceivers[baseKey]++
+			payload = append(payload, vhostConfig{
+				Receiver: receiverKey,
+				Domain:   domainName,
+				LogKind:  "access",
+				Paths:    accessPaths,
+			})
+		}
+
+		errorPaths := dedupeStrings(entry.errorPaths)
+		if len(errorPaths) > 0 {
+			baseKey := "filelog/apache_" + slug + "_error_integration"
+			receiverKey := baseKey
+			if n := usedReceivers[baseKey]; n > 0 {
+				receiverKey = fmt.Sprintf("%s_%d", baseKey, n+1)
+			}
+			usedReceivers[baseKey]++
+			payload = append(payload, vhostConfig{
+				Receiver: receiverKey,
+				Domain:   domainName,
+				LogKind:  "error",
+				Paths:    errorPaths,
+			})
+		}
+	}
+
+	if len(payload) == 0 {
+		return "", ErrIntegrationConfigRequired
+	}
+
+	vhostsJSON, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	serviceSlug := sanitizeServiceSlug(params.ServiceName)
+	script := fmt.Sprintf(`#!/bin/bash
+set -uo pipefail
+
+MACHINE_ID=%s
+API_KEY=%s
+SERVICE_NAME=%s
+SERVICE_SLUG=%s
+METRICS_ENDPOINT=%s
+PLATFORM_HOST=%s
+PLATFORM_PORT=%s
+APACHE_VHOSTS_JSON=%s
+
+CURRENT_MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo "")
+if [ "$CURRENT_MACHINE_ID" != "$MACHINE_ID" ]; then
+  echo "[x] Wrong host for this integration script"
+  exit 1
+fi
+
+[ "$EUID" -ne 0 ] && { echo "[x] Run as root (sudo)"; exit 1; }
+[ ! -f /etc/otelcol/config.yaml ] && { echo "[x] Agent config not found: /etc/otelcol/config.yaml"; exit 1; }
+[ ! -x /usr/local/bin/otelcol ] && { echo "[x] otelcol binary not found at /usr/local/bin/otelcol"; exit 1; }
+
+AUTH_B64=$(echo -n "${API_KEY}:${API_KEY}" | base64 -w 0)
+STATUS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/integrations/status"
+
+notify_status() {
+  local STATUS="$1"
+  local LOG_ON="$2"
+  local METRICS_ON="$3"
+  PAYLOAD=$(cat <<JSON
+{
+  "machine_id": "${MACHINE_ID}",
+  "service_name": "${SERVICE_NAME}",
+  "log_collection_on": ${LOG_ON},
+  "metric_collection_on": ${METRICS_ON},
+  "integration_status": "${STATUS}"
+}
+JSON
+)
+  curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Basic ${AUTH_B64}" \
+    -d "${PAYLOAD}" \
+    "${STATUS_ENDPOINT}" >/dev/null 2>&1 || true
+}
+
+CONFIG_FILE="/etc/otelcol/config.yaml"
+BACKUP_FILE="/etc/otelcol/config.yaml.integration.bak.$(date +%%s)"
+cp "$CONFIG_FILE" "$BACKUP_FILE"
+echo "[i] Backup created: $BACKUP_FILE"
+
+export CONFIG_FILE SERVICE_NAME SERVICE_SLUG METRICS_ENDPOINT APACHE_VHOSTS_JSON METRICS_RECEIVER_KEY
+METRICS_RECEIVER_KEY=%s
+if ! python3 - <<'PY'
+import json
+import os
+from urllib.parse import urlparse
+
+cfg_path = os.environ["CONFIG_FILE"]
+service_name = os.environ["SERVICE_NAME"]
+service_slug = os.environ["SERVICE_SLUG"]
+metrics_endpoint = os.environ.get("METRICS_ENDPOINT", "").strip()
+metrics_key = os.environ.get("METRICS_RECEIVER_KEY", "").strip()
+vhosts = json.loads(os.environ.get("APACHE_VHOSTS_JSON", "[]"))
+if not metrics_key:
+    metrics_key = f"prometheus/{service_slug}_integration"
+
+with open(cfg_path, "r", encoding="utf-8") as f:
+    text = f.read()
+
+receiver_keys = []
+error_receiver_keys = []
+receiver_blocks = []
+
+for item in vhosts:
+    receiver = str(item.get("receiver", "")).strip()
+    domain = str(item.get("domain", "")).strip() or "(default)"
+    paths = [str(p).strip() for p in item.get("paths", []) if str(p).strip()]
+    if not receiver or not paths:
+        continue
+    log_kind = str(item.get("log_kind", "access")).strip() or "access"
+
+    if log_kind == "access":
+        receiver_keys.append(receiver)
+    else:
+        error_receiver_keys.append(receiver)
+
+    if f"  {receiver}:\n" in text:
+        continue
+
+    include_lines = "\n".join([f"      - {p}" for p in paths])
+
+    if log_kind == "access":
+        receiver_blocks.append(
+            f"  {receiver}:\n"
+            "    include:\n"
+            f"{include_lines}\n"
+            "    include_file_path: true\n"
+            "    start_at: end\n"
+            "    operators:\n"
+            "      - type: regex_parser\n"
+            "        regex: '^(?P<client_ip>[^ ]+) [^ ]+ [^ ]+ \\[[^\\]]+\\] \"(?P<http_method>[A-Z]+) (?P<request_path>[^ ]+) [^\"]*\" (?P<http_status>\\d{3}) (?P<response_bytes>[\\d-]+)(?:\\s+\"(?P<http_referer>[^\"]*)\"\\s+\"(?P<user_agent>[^\"]*)\")?(?:.*?rt=(?P<request_time_s>[\\d.]+))?'\n"
+            "        on_error: send_quiet\n"
+            "    resource:\n"
+            f"      service.name: {service_name}\n"
+            f"      job: {service_name}\n"
+            f"      vhost: {json.dumps(domain)}\n"
+            f"      log_kind: {json.dumps(log_kind)}\n"
+        )
+    else:
+        receiver_blocks.append(
+            f"  {receiver}:\n"
+            "    include:\n"
+            f"{include_lines}\n"
+            "    include_file_path: true\n"
+            "    start_at: end\n"
+            "    resource:\n"
+            f"      service.name: {service_name}\n"
+            f"      job: {service_name}\n"
+            f"      vhost: {json.dumps(domain)}\n"
+            f"      log_kind: {json.dumps(log_kind)}\n"
+        )
+
+all_apache_receivers = receiver_keys + error_receiver_keys
+
+if receiver_blocks:
+    block = "\n".join(receiver_blocks)
+    marker = "\nprocessors:\n"
+    if marker in text:
+        text = text.replace(marker, "\n" + block + "\nprocessors:\n", 1)
+    else:
+        text += "\n" + block + "\n"
+
+normalize_proc_key = "transform/normalize_apache_paths"
+if all_apache_receivers and f"  {normalize_proc_key}:\n" not in text:
+    normalize_proc = (
+        f"  {normalize_proc_key}:\n"
+        "    error_mode: ignore\n"
+        "    log_statements:\n"
+        "      - context: log\n"
+        "        statements:\n"
+        "          - set(attributes[\"normalized_path\"], attributes[\"request_path\"])\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"\\\\?.*$\", \"\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\", \"/:id\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{6,35}\", \"/:id\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/\\\\d{3,}\", \"/:id\")\n"
+    )
+    if "\nprocessors:\n" in text:
+        text = text.replace("\nprocessors:\n", "\nprocessors:\n" + normalize_proc, 1)
+    else:
+        text += "\nprocessors:\n" + normalize_proc
+
+if metrics_endpoint and f"  {metrics_key}:\n" not in text:
+    parsed = urlparse(metrics_endpoint)
+    host_port = parsed.netloc
+    path = parsed.path or "/metrics"
+    if metrics_key.startswith("apache/"):
+        prom_block = (
+            f"  {metrics_key}:\n"
+            f"    endpoint: {metrics_endpoint}\n"
+            "    collection_interval: 30s\n"
+        )
+    else:
+        prom_block = (
+            f"  {metrics_key}:\n"
+            "    config:\n"
+            "      scrape_configs:\n"
+            f"        - job_name: {service_slug}\n"
+            "          static_configs:\n"
+            f"            - targets: ['{host_port}']\n"
+            f"          metrics_path: {path}\n"
+            "          scrape_interval: 30s\n"
+        )
+    marker = "\nprocessors:\n"
+    if marker in text:
+        text = text.replace(marker, "\n" + prom_block + "\nprocessors:\n", 1)
+    else:
+        text += "\n" + prom_block + "\n"
+
+lines = text.splitlines()
+current = ""
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped == "metrics:" and line.startswith("    "):
+        current = "metrics"
+    elif stripped == "logs:" and line.startswith("    "):
+        current = "logs"
+    elif stripped.endswith(":") and line.startswith("    ") and stripped not in ("metrics:", "logs:"):
+        current = ""
+
+    if current == "metrics" and stripped.startswith("receivers: [") and metrics_endpoint:
+        start = stripped.find("[")
+        end = stripped.rfind("]")
+        payload = stripped[start + 1 : end].strip()
+        arr = [x.strip() for x in payload.split(",") if x.strip()]
+        if metrics_key not in arr:
+            arr.append(metrics_key)
+        lines[i] = line[: line.index("receivers:")] + "receivers: [" + ", ".join(arr) + "]"
+
+text = "\n".join(lines) + "\n"
+
+apache_pipeline_key = "logs/apache"
+if all_apache_receivers and f"    {apache_pipeline_key}:\n" not in text:
+    recv_list = ", ".join(all_apache_receivers)
+    apache_pipeline = (
+        f"    {apache_pipeline_key}:\n"
+        f"      receivers: [{recv_list}]\n"
+        "      processors: [resourcedetection, resource, transform/normalize_apache_paths, batch]\n"
+        "      exporters: [otlphttp/logs]\n"
+    )
+    if "    traces:\n" in text:
+        text = text.replace("    traces:\n", apache_pipeline + "    traces:\n", 1)
+    else:
+        text = text.rstrip("\n") + "\n" + apache_pipeline + "\n"
 
 with open(cfg_path, "w", encoding="utf-8") as f:
     f.write(text)
@@ -900,6 +1323,8 @@ func metricsReceiverKeyForIntegration(serviceSlug string) string {
 	switch serviceSlug {
 	case "nginx":
 		return fmt.Sprintf("nginx/%s_integration", serviceSlug)
+	case "apache":
+		return fmt.Sprintf("apache/%s_integration", serviceSlug)
 	default:
 		return fmt.Sprintf("prometheus/%s_integration", serviceSlug)
 	}

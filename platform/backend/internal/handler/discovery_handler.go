@@ -181,11 +181,11 @@ func persistHostServices(ctx context.Context, tenantID uint, machineID string, s
 			return err
 		}
 
-		if svcName != "nginx" {
+		if svcName != "nginx" && svcName != "apache" {
 			continue
 		}
 
-		// ── Nginx virtual host persistence ────────────────────────────────────
+		// ── Web-server virtual host persistence ───────────────────────────────
 		//
 		// The agent sends virtual_hosts when it successfully parsed sites-enabled/.
 		// We build per-domain rows from that structured data.
@@ -198,37 +198,8 @@ func persistHostServices(ctx context.Context, tenantID uint, machineID string, s
 
 		if len(svc.VirtualHosts) > 0 {
 			// ── Happy path: agent sent structured vhost data ──────────────────
-			detectedVhosts := make([]domain.NginxVirtualHost, 0, len(svc.VirtualHosts)*2)
-			for _, vh := range svc.VirtualHosts {
-				domainName := strings.TrimSpace(vh.Domain)
-				if domainName == "" {
-					domainName = "(default)"
-				}
-				if vh.AccessLog != "" {
-					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
-						Domain:    domainName,
-						LogKind:   "access",
-						LogPath:   strings.TrimSpace(vh.AccessLog),
-						Source:    "detected",
-						Enabled:   true,
-						IsDefault: vh.IsDefault,
-					})
-				}
-				if vh.ErrorLog != "" {
-					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
-						Domain:    domainName,
-						LogKind:   "error",
-						LogPath:   strings.TrimSpace(vh.ErrorLog),
-						Source:    "detected",
-						Enabled:   true,
-						IsDefault: vh.IsDefault,
-					})
-				}
-			}
-			if len(detectedVhosts) > 0 {
-				if err := discoveryRepo.UpsertDetectedVirtualHostsCtx(ctx, tenantID, upserted.ID, detectedVhosts); err != nil {
-					return err
-				}
+			if err := persistDetectedVirtualHosts(ctx, discoveryRepo, tenantID, upserted.ID, svcName, svc.VirtualHosts); err != nil {
+				return err
 			}
 		} else if len(paths) > 0 {
 			// ── Fallback: infer domains from the flat log path list ───────────
@@ -289,7 +260,7 @@ func persistHostServices(ctx context.Context, tenantID uint, machineID string, s
 				}
 			}
 
-			detectedVhosts := make([]domain.NginxVirtualHost, 0, len(pairs)*2)
+			detectedVhosts := make([]dto.WebServerVirtualHostDiscovered, 0, len(pairs))
 			for _, stem := range order {
 				pair := pairs[stem]
 				// Build a human-readable domain name from the stem
@@ -300,34 +271,97 @@ func persistHostServices(ctx context.Context, tenantID uint, machineID string, s
 					isDefault = true
 				}
 
-				if pair.access != "" {
-					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
-						Domain:    domainName,
-						LogKind:   "access",
-						LogPath:   pair.access,
-						Source:    "detected",
-						Enabled:   true,
-						IsDefault: isDefault,
-					})
-				}
-				if pair.errorPath != "" {
-					detectedVhosts = append(detectedVhosts, domain.NginxVirtualHost{
-						Domain:    domainName,
-						LogKind:   "error",
-						LogPath:   pair.errorPath,
-						Source:    "detected",
-						Enabled:   true,
-						IsDefault: isDefault,
-					})
-				}
+				detectedVhosts = append(detectedVhosts, dto.WebServerVirtualHostDiscovered{
+					Domain:    domainName,
+					AccessLog: pair.access,
+					ErrorLog:  pair.errorPath,
+					IsDefault: isDefault,
+				})
 			}
 
 			if len(detectedVhosts) > 0 {
-				if err := discoveryRepo.UpsertDetectedVirtualHostsCtx(ctx, tenantID, upserted.ID, detectedVhosts); err != nil {
+				if err := persistDetectedVirtualHosts(ctx, discoveryRepo, tenantID, upserted.ID, svcName, detectedVhosts); err != nil {
 					return err
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func persistDetectedVirtualHosts(
+	ctx context.Context,
+	discoveryRepo *repository.DiscoveryRepository,
+	tenantID uint,
+	serviceID uint,
+	serviceName string,
+	virtualHosts []dto.WebServerVirtualHostDiscovered,
+) error {
+	switch serviceName {
+	case "nginx":
+		detected := make([]domain.NginxVirtualHost, 0, len(virtualHosts)*2)
+		for _, vh := range virtualHosts {
+			domainName := strings.TrimSpace(vh.Domain)
+			if domainName == "" {
+				domainName = "(default)"
+			}
+			if vh.AccessLog != "" {
+				detected = append(detected, domain.NginxVirtualHost{
+					Domain:    domainName,
+					LogKind:   "access",
+					LogPath:   strings.TrimSpace(vh.AccessLog),
+					Source:    "detected",
+					Enabled:   true,
+					IsDefault: vh.IsDefault,
+				})
+			}
+			if vh.ErrorLog != "" {
+				detected = append(detected, domain.NginxVirtualHost{
+					Domain:    domainName,
+					LogKind:   "error",
+					LogPath:   strings.TrimSpace(vh.ErrorLog),
+					Source:    "detected",
+					Enabled:   true,
+					IsDefault: vh.IsDefault,
+				})
+			}
+		}
+		if len(detected) == 0 {
+			return nil
+		}
+		return discoveryRepo.UpsertDetectedVirtualHostsCtx(ctx, tenantID, serviceID, detected)
+	case "apache":
+		detected := make([]domain.ApacheVirtualHost, 0, len(virtualHosts)*2)
+		for _, vh := range virtualHosts {
+			domainName := strings.TrimSpace(vh.Domain)
+			if domainName == "" {
+				domainName = "(default)"
+			}
+			if vh.AccessLog != "" {
+				detected = append(detected, domain.ApacheVirtualHost{
+					Domain:    domainName,
+					LogKind:   "access",
+					LogPath:   strings.TrimSpace(vh.AccessLog),
+					Source:    "detected",
+					Enabled:   true,
+					IsDefault: vh.IsDefault,
+				})
+			}
+			if vh.ErrorLog != "" {
+				detected = append(detected, domain.ApacheVirtualHost{
+					Domain:    domainName,
+					LogKind:   "error",
+					LogPath:   strings.TrimSpace(vh.ErrorLog),
+					Source:    "detected",
+					Enabled:   true,
+					IsDefault: vh.IsDefault,
+				})
+			}
+		}
+		if len(detected) == 0 {
+			return nil
+		}
+		return discoveryRepo.UpsertDetectedApacheVirtualHostsCtx(ctx, tenantID, serviceID, detected)
 	}
 	return nil
 }

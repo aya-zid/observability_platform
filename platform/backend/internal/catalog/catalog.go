@@ -65,17 +65,18 @@ var Catalog = map[string]ServiceDef{
 		DefaultLoggingMode:     LoggingModeFile,
 		MetricsPattern:         MetricsPatternBuiltIn,
 		DefaultMetricsEndpoint: "http://127.0.0.1:80/nginx_status",
-		MetricsGuide: `## Enable Nginx Metrics (stub_status)
+		MetricsGuide: `## Nginx Metrics (stub_status)
 
 Nginx exposes basic connection metrics via the built-in stub_status module.
 
 **Step 1 — Add the status location block**
 
-Edit your nginx server config and add inside a server block:
+Edit your nginx config and add inside a server block:
 
 ` + "```nginx" + `
 location /nginx_status {
     stub_status on;
+    access_log off;
     allow 127.0.0.1;
     deny all;
 }
@@ -92,18 +93,96 @@ sudo nginx -s reload
 
 ` + "```bash" + `
 curl http://127.0.0.1:80/nginx_status
-` + "```" + ``,
+` + "```" + `
+
+The **access_log off** directive keeps metric scrapes out of your access logs.`,
 		LogsGuide: `## Nginx Log Collection
 
-Nginx writes to files by default. No changes are usually needed.
+Nginx writes access logs by default. Typically no changes are needed.
 
 **Verify log files exist:**
 
 ` + "```bash" + `
 ls -la /var/log/nginx/
-` + "```" + ``,
+` + "```" + `
+
+If you configured the stub_status location block, it already includes **access_log off** to prevent metric scrapes from polluting your access logs.`,
 		DetectionHints: []string{"nginx", "openresty"},
 		NVD:            &NVDProduct{Vendor: "f5", Product: "nginx_open_source"},
+	},
+
+	"apache": {
+		Name:                   "apache",
+		DisplayName:            "Apache",
+		Category:               "web",
+		DefaultLogPaths:        []string{"/var/log/apache2/*.access.log", "/var/log/apache2/*.error.log"},
+		DefaultLoggingMode:     LoggingModeFile,
+		MetricsPattern:         MetricsPatternBuiltIn,
+		DefaultMetricsEndpoint: "http://127.0.0.1:8081/server-status?auto",
+		MetricsGuide: `## Apache Metrics (mod_status)
+
+Apache exposes server metrics via the built-in mod_status module.
+
+**Step 1 — Enable the module**
+
+` + "```bash" + `
+sudo a2enmod status
+sudo systemctl restart apache2
+` + "```" + `
+
+**Step 2 — Verify**
+
+` + "```bash" + `
+curl http://127.0.0.1:8081/server-status?auto
+` + "```" + `
+
+Use the port your Apache instance is listening on. The ?auto parameter returns a machine-readable metrics format.`,
+		LogsGuide: `## Apache Log Collection
+
+**Step 1 — Add custom log format**
+
+Edit **/etc/apache2/apache2.conf** and add after the existing LogFormat definitions:
+
+` + "```apache" + `
+LogFormat "%a - %u %t \"%r\" %>s %B \"%{Referer}i\" \"%{User-Agent}i\" rt=%{ms}T" platform
+` + "```" + `
+
+**Step 2 — Apply to each VirtualHost**
+
+For each domain, add the platform format and exclude **/server-status** from logs:
+
+` + "```apache" + `
+<VirtualHost *:80>
+    ServerName your-domain.com
+
+    SetEnvIf Request_URI "^/server-status" dontlog
+
+    ErrorLog  ${APACHE_LOG_DIR}/your-domain.error.log
+    CustomLog ${APACHE_LOG_DIR}/your-domain.access.log platform env=!dontlog
+</VirtualHost>
+` + "```" + `
+
+**Step 3 — Test and restart**
+
+` + "```bash" + `
+sudo apache2ctl configtest
+sudo systemctl restart apache2
+` + "```" + `
+
+**Step 4 — Verify**
+
+` + "```bash" + `
+sudo tail -n 1 /var/log/apache2/your-domain.access.log
+` + "```" + `
+
+Expected output:
+
+` + "```" + `
+192.168.1.10 - - [15/May/2026:16:33:00 +0000] "GET / HTTP/1.1" 200 612 "-" "curl/7.88" rt=12
+` + "```" + ``,
+
+		DetectionHints: []string{"apache", "apache2", "httpd"},
+		NVD:            &NVDProduct{Vendor: "apache", Product: "http_server"},
 	},
 
 	"postgresql": {

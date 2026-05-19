@@ -72,8 +72,8 @@ declare -a MANUAL_STEPS=()
 declare -a ALL_SERVICES=()
 declare -A LOG_FORMAT
 
-# Phase 3: Nginx virtual hosts support
-declare -A NGINX_VHOSTS_JSON
+# Phase 3: web-server virtual hosts support
+declare -A WEBSERVER_VHOSTS_JSON
 
 FILELOG_RECEIVERS_YAML=""
 declare -a FILELOG_PIPELINE=()
@@ -409,6 +409,108 @@ detect_nginx_vhosts() {
   echo "$json_array"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Apache virtual host detection — mirrors the nginx detector for CustomLog and
+# ErrorLog paths in <VirtualHost> blocks.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_apache_expand_log_path() {
+  local path="$1"
+  path="${path//\$\{APACHE_LOG_DIR\}/\/var\/log\/apache2}"
+  path="${path//\$\{SERVER_LOG_ROOT\}/\/var\/log\/httpd}"
+  path="${path//\"/}"
+  echo "$path"
+}
+
+_parse_apache_vhost_block() {
+  local block="$1"
+  VHOST_RESULT=""
+
+  local domain="(default)"
+  local is_default="true"
+  local sn_line
+  sn_line=$(echo "$block" | grep -m1 -E '^\s*ServerName\s+' \
+    | sed 's/^\s*ServerName\s*//' | xargs 2>/dev/null)
+  if [ -n "$sn_line" ]; then
+    domain=$(echo "$sn_line" | cut -d' ' -f1)
+    is_default="false"
+  fi
+
+  local access_log=""
+  local al_line
+  al_line=$(echo "$block" | grep -m1 -E '^\s*CustomLog\s+' \
+    | sed 's/^\s*CustomLog\s*//' | xargs 2>/dev/null)
+  if [ -n "$al_line" ]; then
+    access_log=$(_apache_expand_log_path "$(echo "$al_line" | cut -d' ' -f1)")
+  fi
+
+  local error_log=""
+  local el_line
+  el_line=$(echo "$block" | grep -m1 -E '^\s*ErrorLog\s+' \
+    | sed 's/^\s*ErrorLog\s*//' | xargs 2>/dev/null)
+  if [ -n "$el_line" ]; then
+    error_log=$(_apache_expand_log_path "$(echo "$el_line" | cut -d' ' -f1)")
+  fi
+
+  if [ -z "$access_log" ] && [ -z "$error_log" ] && [ "$is_default" = "true" ]; then
+    return 0
+  fi
+
+  access_log="${access_log//\\/\\\\}"; access_log="${access_log//\"/\\\"}"
+  error_log="${error_log//\\/\\\\}";   error_log="${error_log//\"/\\\"}"
+  domain="${domain//\"/\\\"}"
+
+  VHOST_RESULT="{\"domain\":\"${domain}\",\"access_log\":\"${access_log}\",\"error_log\":\"${error_log}\",\"is_default\":${is_default}}"
+}
+
+detect_apache_vhosts() {
+  local json_array="["
+  local first=true
+  local config_files=()
+
+  for dir in /etc/apache2/sites-enabled /etc/apache2/conf-enabled /etc/httpd/conf.d; do
+    [ -d "$dir" ] || continue
+    while IFS= read -r -d '' f; do
+      config_files+=("$f")
+    done < <(find "$dir" -maxdepth 1 \( -type f -o -type l \) -print0 2>/dev/null)
+  done
+  [ -f /etc/apache2/apache2.conf ] && config_files+=("/etc/apache2/apache2.conf")
+  [ -f /etc/httpd/conf/httpd.conf ] && config_files+=("/etc/httpd/conf/httpd.conf")
+
+  for cfg_file in "${config_files[@]}"; do
+    [ -r "$cfg_file" ] || continue
+    local in_vhost=false
+    local block=""
+
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%%#*}"
+      if [ "$in_vhost" = false ] && echo "$line" | grep -qiE '^\s*<VirtualHost\b'; then
+        in_vhost=true
+        block=""
+        continue
+      fi
+
+      if [ "$in_vhost" = true ]; then
+        if echo "$line" | grep -qiE '^\s*</VirtualHost>'; then
+          _parse_apache_vhost_block "$block"
+          if [ -n "$VHOST_RESULT" ]; then
+            $first || json_array+=","
+            json_array+="$VHOST_RESULT"
+            first=false
+          fi
+          in_vhost=false
+          block=""
+        else
+          block="${block}"$'\n'"${line}"
+        fi
+      fi
+    done < "$cfg_file"
+  done
+
+  json_array+="]"
+  echo "$json_array"
+}
+
 # ---------- NGINX ----------
 discover_nginx() {
   local UNIT=$1
@@ -441,7 +543,7 @@ discover_nginx() {
   # Phase 3: Parse Nginx virtual hosts for domain-aware config
   local VHOSTS_JSON
   VHOSTS_JSON=$(detect_nginx_vhosts)
-  NGINX_VHOSTS_JSON["nginx"]="$VHOSTS_JSON"
+  WEBSERVER_VHOSTS_JSON["nginx"]="$VHOSTS_JSON"
   
   register_service "nginx" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
 }
@@ -481,6 +583,9 @@ discover_apache() {
   [ -z "$VERSION" ] && VERSION=$(get_unit_version "${UNIT}.service" || echo "")
   local NOTES="port=${PORT}"
   unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
+  local VHOSTS_JSON
+  VHOSTS_JSON=$(detect_apache_vhosts)
+  WEBSERVER_VHOSTS_JSON["apache"]="$VHOSTS_JSON"
   register_service "apache" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
 }
 
@@ -2246,7 +2351,7 @@ systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/n
   | awk '{print $1}' | sort > /etc/otelcol/known-services.txt
 
 cat > /etc/cron.d/observability-agent <<'CRONEOF'
-0 6 * * * root /usr/local/bin/agent-rediscover >> /var/log/agent-rediscover.log 2>&1
+0 12 * * * root /usr/local/bin/agent-rediscover >> /var/log/agent-rediscover.log 2>&1
 CRONEOF
 
 log "  Rediscovery cron installed — runs daily at 06:00"
@@ -2426,10 +2531,10 @@ for SVC in "${ALL_SERVICES[@]}"; do
   ESC_PORT=$(json_escape "${SVC_PORT[$SVC]:-}")
   ESC_VERSION=$(json_escape "${SVC_VERSION[$SVC]:-}")
   
-  # Phase 3: Add virtual_hosts for nginx if available
+  # Phase 3: Add virtual_hosts for web servers if available
   VHOSTS_FIELD=""
-  if [[ "$SVC" == "nginx" ]] && [ -n "${NGINX_VHOSTS_JSON[$SVC]:-}" ]; then
-    VHOSTS_FIELD=",\"virtual_hosts\":${NGINX_VHOSTS_JSON[$SVC]}"
+  if [[ "$SVC" == "nginx" || "$SVC" == "apache" ]] && [ -n "${WEBSERVER_VHOSTS_JSON[$SVC]:-}" ]; then
+    VHOSTS_FIELD=",\"virtual_hosts\":${WEBSERVER_VHOSTS_JSON[$SVC]}"
   fi
   
   ITEM="{\"name\":\"${ESC_NAME}\",\"status\":\"${ESC_STATUS}\",\"log_paths\":\"${ESC_LOG_PATHS}\",\"notes\":\"${ESC_NOTES}\",\"port\":$( [ -n "${SVC_PORT[$SVC]:-}" ] && printf '%s' "${SVC_PORT[$SVC]}" || printf 'null' ),\"version\":\"${ESC_VERSION}\"${VHOSTS_FIELD}}"

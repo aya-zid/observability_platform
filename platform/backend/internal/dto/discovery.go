@@ -1,8 +1,8 @@
 package dto
 
-// NginxVirtualHostDiscovered represents a detected Nginx virtual host during discovery
+// WebServerVirtualHostDiscovered represents a detected web-server virtual host during discovery
 // Used to map domains to their access/error log files
-type NginxVirtualHostDiscovered struct {
+type WebServerVirtualHostDiscovered struct {
 	Domain    string `json:"domain"`               // e.g., "shop.example.com" or "(default)"
 	AccessLog string `json:"access_log,omitempty"` // e.g., "/var/log/nginx/shop.access.log"
 	ErrorLog  string `json:"error_log,omitempty"`  // e.g., "/var/log/nginx/shop.error.log"
@@ -14,8 +14,8 @@ type InstallDiscoveryService struct {
 	Status   string `json:"status"`
 	LogPaths string `json:"log_paths"` // Legacy: flat comma-separated paths
 
-	// Phase 2: Nginx-specific virtual hosts (optional, for backward compatibility)
-	VirtualHosts []NginxVirtualHostDiscovered `json:"virtual_hosts,omitempty"`
+	// Web-server virtual hosts (optional, for backward compatibility)
+	VirtualHosts []WebServerVirtualHostDiscovered `json:"virtual_hosts,omitempty"`
 
 	Notes   string `json:"notes"`
 	Port    *int   `json:"port,omitempty"`
@@ -23,10 +23,10 @@ type InstallDiscoveryService struct {
 }
 
 type InstallDiscoveryReportRequest struct {
-	Host         string                   `json:"host" validate:"required,min=1,max=255"`
-	MachineID    string                   `json:"machine_id" validate:"required,min=4,max=255"`
-	OS           string                   `json:"os,omitempty" validate:"omitempty,max=128"`
-	Arch         string                   `json:"arch,omitempty" validate:"omitempty,max=64"`
-	AgentVersion string                   `json:"agent_version,omitempty" validate:"omitempty,max=64"`
+	Host         string                    `json:"host" validate:"required,min=1,max=255"`
+	MachineID    string                    `json:"machine_id" validate:"required,min=4,max=255"`
+	OS           string                    `json:"os,omitempty" validate:"omitempty,max=128"`
+	Arch         string                    `json:"arch,omitempty" validate:"omitempty,max=64"`
+	AgentVersion string                    `json:"agent_version,omitempty" validate:"omitempty,max=64"`
 	Services     []InstallDiscoveryService `json:"services"`
 }

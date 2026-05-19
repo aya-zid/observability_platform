@@ -1462,6 +1462,51 @@ func mergeRTSeries(seriesByLabel map[string][]LokiMatrixSeries) []TimePoint {
 	return points
 }
 
+func mergeApacheRTSeries(seriesByLabel map[string][]LokiMatrixSeries) []TimePoint {
+	buildSeriesMap := func(series []LokiMatrixSeries) map[float64]float64 {
+		values := map[float64]float64{}
+		for _, item := range series {
+			for _, sample := range item.Values {
+				values[sample[0]] = sample[1]
+			}
+		}
+		return values
+	}
+
+	valuesByLabel := map[string]map[float64]float64{}
+
+	allTimes := map[float64]struct{}{}
+	for label, series := range seriesByLabel {
+		values := buildSeriesMap(series)
+		valuesByLabel[label] = values
+		for ts := range values {
+			allTimes[ts] = struct{}{}
+		}
+	}
+
+	points := make([]TimePoint, 0, len(allTimes))
+	labels := make([]string, 0, len(valuesByLabel))
+	for label := range valuesByLabel {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+
+	for ts := range allTimes {
+		point := TimePoint{"time": ts}
+		for _, label := range labels {
+			if value, ok := valuesByLabel[label][ts]; ok {
+				point[label] = value
+			} else {
+				point[label] = nil
+			}
+		}
+		points = append(points, point)
+	}
+
+	sortTimePoints(points)
+	return points
+}
+
 func mergeBotSeries(bot, total []LokiMatrixSeries) []TimePoint {
 	timeMap := map[float64]TimePoint{}
 	if len(bot) > 0 {

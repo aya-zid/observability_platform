@@ -84,6 +84,18 @@ export type DiscoveryServiceDetail = {
     fixed_in_version: string
   }>
   catalog?: CatalogService
+  nginx_virtual_hosts?: VirtualHostEntry[]
+  apache_virtual_hosts?: VirtualHostEntry[]
+}
+
+export type VirtualHostEntry = {
+  id?: number
+  domain: string
+  access_log?: string
+  error_log?: string
+  enabled: boolean
+  is_shared_log: boolean
+  is_default: boolean
 }
 
 export async function getCatalog(): Promise<CatalogService[]> {
@@ -127,6 +139,8 @@ export async function updateDiscoveryServiceConfig(
     metrics_mode: string
     is_java_app: boolean
     jmx_exporter_port?: number
+    nginx_virtual_hosts?: VirtualHostEntry[]
+    apache_virtual_hosts?: VirtualHostEntry[]
   }
 ): Promise<{ ok: boolean }> {
   const { data } = await client.patch<{ ok: boolean }>(

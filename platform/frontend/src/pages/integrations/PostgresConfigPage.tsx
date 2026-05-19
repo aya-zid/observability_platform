@@ -7,16 +7,18 @@ import { getPostgresConfigSnapshot, type PostgresConfigSetting } from "@/api/pos
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { formatBytes, formatDuration, formatNumber } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
+import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
 
-function formatSettingValue(setting: PostgresConfigSetting) {
-  if (setting.value == null) return "Unavailable"
+function formatSettingValue(setting: PostgresConfigSetting, t: (key: string, ...args: any[]) => string) {
+  if (setting.value == null) return t("pgConfig.unavailableValue")
   if (setting.unit === "bytes") return formatBytes(setting.value)
   if (setting.unit === "seconds") return setting.value === 0 ? "0s" : formatDuration(setting.value)
-  if (setting.unit === "boolean") return setting.value === 1 ? "On" : "Off"
+  if (setting.unit === "boolean") return setting.value === 1 ? t("pgConfig.settingOn") : t("pgConfig.settingOff")
   return formatNumber(setting.value, Number.isInteger(setting.value) ? 0 : 3)
 }
 
 function SettingCard({ setting }: { setting: PostgresConfigSetting }) {
+  const { t } = useTranslation()
   return (
     <div
       className={cn(
@@ -31,11 +33,11 @@ function SettingCard({ setting }: { setting: PostgresConfigSetting }) {
           <div className="truncate font-mono text-xs text-muted-foreground" title={setting.name}>
             {setting.name}
           </div>
-          <div className="mt-1 text-lg font-semibold">{formatSettingValue(setting)}</div>
+          <div className="mt-1 text-lg font-semibold">{formatSettingValue(setting, t)}</div>
         </div>
         {setting.warn ? (
           <span className="rounded border border-amber-300/60 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
-            Review
+            {t("shared.review")}
           </span>
         ) : null}
       </div>
@@ -45,6 +47,7 @@ function SettingCard({ setting }: { setting: PostgresConfigSetting }) {
 }
 
 export function PostgresConfigPage() {
+  const { t } = useTranslation()
   const { id = "" } = useParams<{ id?: string }>()
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
@@ -65,33 +68,34 @@ export function PostgresConfigPage() {
   const service = serviceQuery.data
   const snapshot = configQuery.data
 
-  if (!id) return <div className="p-6 text-sm text-red-600">Missing service id.</div>
-  if (serviceQuery.isLoading) return <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-  if (!service) return <div className="p-6 text-sm text-red-600">Service not found for id {id}.</div>
+  if (!id) return <div className="p-6 text-sm text-red-600">{t("shared.missingServiceId")}</div>
+  if (serviceQuery.isLoading) return <div className="p-6 text-sm text-muted-foreground">{t("shared.loading")}</div>
+  if (!service) return <div className="p-6 text-sm text-red-600">{t("shared.serviceNotFound", id)}</div>
 
   return (
     <Page className="max-w-none">
       <PageHeader
-        title="PostgreSQL Configuration"
-        description={`Point-in-time PostgreSQL settings for ${service.service_name} on ${service.hostname || service.machine_id}.`}
+        title={t("pgConfig.title")}
+        description={t("pgConfig.description", service.service_name, service.hostname || service.machine_id)}
         actions={
           <div className="flex flex-wrap items-center gap-3">
+            <LangToggle />
             <Link to={`/integrations/postgres-dashboard/${id}`} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">
-              Dashboard
+              {t("shared.dashboard")}
             </Link>
             <Link to={`/integrations/postgres-logs/${id}`} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">
-              Logs
+              {t("shared.logs")}
             </Link>
             <Link to={`/services/${id}`} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">
-              Configure
+              {t("shared.configure")}
             </Link>
           </div>
         }
       />
 
       {configQuery.isError ? (
-        <SectionCard title="Configuration unavailable">
-          <div className="text-sm text-red-600">Failed to fetch PostgreSQL configuration metrics.</div>
+        <SectionCard title={t("pgConfig.unavailable")}>
+          <div className="text-sm text-red-600">{t("pgConfig.fetchFailed")}</div>
         </SectionCard>
       ) : null}
 
@@ -100,13 +104,13 @@ export function PostgresConfigPage() {
           const isOpen = openGroups[group.key] ?? index < 3
           const available = group.settings.filter((setting) => setting.value != null).length
           return (
-            <SectionCard key={group.key} title={group.title} description={`${available}/${group.settings.length} metrics available`}>
+            <SectionCard key={group.key} title={group.title} description={t("pgConfig.metricsAvailable", String(available), String(group.settings.length))}>
               <button
                 type="button"
                 className="mb-3 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
                 onClick={() => setOpenGroups((prev) => ({ ...prev, [group.key]: !isOpen }))}
               >
-                {isOpen ? "Collapse" : "Expand"}
+                {isOpen ? t("shared.collapse") : t("shared.expand")}
               </button>
               {isOpen ? (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">

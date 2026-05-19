@@ -8,7 +8,10 @@ import {
   updateDiscoveryServiceCollection,
 } from "@/api/discovery"
 import { Button } from "@/components/ui/button"
-import NginxVirtualHostsSection, { type VirtualHostEntry } from "@/components/nginx/NginxVirtualHostsSection"
+import NginxVirtualHostsSection from "@/components/nginx/NginxVirtualHostsSection"
+import ApacheVirtualHostsSection from "@/components/apache/ApacheVirtualHostsSection"
+import type { VirtualHostEntry } from "@/components/webserver/WebServerVirtualHostsSection"
+import MarkdownRenderer from "@/components/MarkdownRenderer"
 import { cn } from "@/lib/utils"
 import {
   ArrowLeft,
@@ -72,7 +75,7 @@ function isPostgresService(name: string) {
   return name.toLowerCase().includes("postgres")
 }
 
-function groupVirtualHostsFromAPI(raw: any[]): VirtualHostEntry[] {
+function groupWebServerVirtualHostsFromAPI(raw: any[]): VirtualHostEntry[] {
   if (!raw?.length) return []
   const grouped: Record<string, VirtualHostEntry> = {}
   const order: string[] = []
@@ -109,11 +112,11 @@ interface GuideStep {
 
 interface GuideData {
   intro: string
-  steps: GuideStep[]
+  steps?: GuideStep[]
   result?: string
 }
 
-const CollapsibleGuide = ({ title, icon: Icon, guide }: { title: string; icon: React.ComponentType<any>; guide: GuideData }) => {
+const CollapsibleGuide = ({ title, icon: Icon, guide, content }: { title: string; icon: React.ComponentType<any>; guide: GuideData; content?: string }) => {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden transition-all">
@@ -134,55 +137,61 @@ const CollapsibleGuide = ({ title, icon: Icon, guide }: { title: string; icon: R
       </button>
 
       {open && (
-        <div className="px-5 pb-5 pt-1 border-t border-border space-y-4">
-          {guide.steps.map((step, i) => (
-            <div key={i}>
-              <div className="flex items-center gap-3 mb-2">
-                <span className="flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-br from-primary/80 to-primary text-primary-foreground text-xs font-bold shrink-0">
-                  {i + 1}
-                </span>
-                <h4 className="text-sm font-semibold text-foreground">{step.title}</h4>
-              </div>
-              {step.description && (
-                <p className="text-xs text-muted-foreground ml-9 mb-2">{step.description}</p>
-              )}
-              {step.text && (
-                <pre className="ml-9 text-xs text-foreground whitespace-pre-wrap leading-relaxed font-sans overflow-x-auto rounded-lg border border-border bg-background/50 p-3">
-                  {step.text}
-                </pre>
-              )}
-              {step.code && (
-                <div className="ml-9 rounded-lg overflow-hidden border border-primary/20">
-                  <div className="px-3 py-1.5 border-b border-primary/10 bg-primary/5 flex items-center gap-1.5">
-                    <Terminal className="w-3 h-3 text-primary" />
-                    <span className="text-[10px] text-primary uppercase tracking-wider font-semibold">Terminal</span>
+        <div className="px-5 pb-5 pt-3 border-t border-border">
+          {content ? (
+            <MarkdownRenderer content={content} />
+          ) : (
+            <div className="space-y-4">
+              {guide.steps?.map((step, i) => (
+                <div key={i}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-br from-primary/80 to-primary text-primary-foreground text-xs font-bold shrink-0">
+                      {i + 1}
+                    </span>
+                    <h4 className="text-sm font-semibold text-foreground">{step.title}</h4>
                   </div>
-                  <pre className="p-3 text-xs font-mono text-primary whitespace-pre-wrap overflow-x-auto leading-relaxed bg-[hsl(240,15%,5%)]">
-                    {step.code}
-                  </pre>
+                  {step.description && (
+                    <p className="text-xs text-muted-foreground ml-9 mb-2">{step.description}</p>
+                  )}
+                  {step.text && (
+                    <pre className="ml-9 text-xs text-foreground whitespace-pre-wrap leading-relaxed font-sans overflow-x-auto rounded-lg border border-border bg-background/50 p-3">
+                      {step.text}
+                    </pre>
+                  )}
+                  {step.code && (
+                    <div className="ml-9 rounded-lg overflow-hidden border border-primary/20">
+                      <div className="px-3 py-1.5 border-b border-primary/10 bg-primary/5 flex items-center gap-1.5">
+                        <Terminal className="w-3 h-3 text-primary" />
+                        <span className="text-[10px] text-primary uppercase tracking-wider font-semibold">Terminal</span>
+                      </div>
+                      <pre className="p-3 text-xs font-mono text-primary whitespace-pre-wrap overflow-x-auto leading-relaxed bg-[hsl(240,15%,5%)]">
+                        {step.code}
+                      </pre>
+                    </div>
+                  )}
+                  {step.note && (
+                    <p className="text-xs ml-9 mt-2 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle className="w-3 h-3" />
+                      {step.note}
+                    </p>
+                  )}
+                </div>
+              ))}
+              {guide.result && (
+                <div className="ml-9">
+                  <p className="text-xs text-muted-foreground mb-2 font-medium">Expected output:</p>
+                  <div className="rounded-lg overflow-hidden border border-emerald-600/20">
+                    <div className="px-3 py-1.5 border-b border-emerald-600/10 bg-emerald-600/5">
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider font-semibold">
+                        Output
+                      </span>
+                    </div>
+                    <pre className="p-3 text-xs font-mono text-emerald-600 dark:text-emerald-400 whitespace-pre-wrap overflow-x-auto bg-[hsl(240,15%,5%)]">
+                      {guide.result}
+                    </pre>
+                  </div>
                 </div>
               )}
-              {step.note && (
-                <p className="text-xs ml-9 mt-2 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle className="w-3 h-3" />
-                  {step.note}
-                </p>
-              )}
-            </div>
-          ))}
-          {guide.result && (
-            <div className="ml-9">
-              <p className="text-xs text-muted-foreground mb-2 font-medium">Expected output:</p>
-              <div className="rounded-lg overflow-hidden border border-emerald-600/20">
-                <div className="px-3 py-1.5 border-b border-emerald-600/10 bg-emerald-600/5">
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider font-semibold">
-                    Output
-                  </span>
-                </div>
-                <pre className="p-3 text-xs font-mono text-emerald-600 dark:text-emerald-400 whitespace-pre-wrap overflow-x-auto bg-[hsl(240,15%,5%)]">
-                  {guide.result}
-                </pre>
-              </div>
             </div>
           )}
         </div>
@@ -211,6 +220,7 @@ export default function ServiceConfigPage() {
   const [jmxExporterPort, setJMXExporterPort] = useState("")
   const [installCommand, setInstallCommand] = useState("")
   const [nginxVirtualHosts, setNginxVirtualHosts] = useState<VirtualHostEntry[]>([])
+  const [apacheVirtualHosts, setApacheVirtualHosts] = useState<VirtualHostEntry[]>([])
   const [copied, setCopied] = useState(false)
   const [configSaved, setConfigSaved] = useState(false)
 
@@ -234,7 +244,12 @@ export default function ServiceConfigPage() {
 
       if (serviceQuery.data.service_name === "nginx") {
         setNginxVirtualHosts(
-          groupVirtualHostsFromAPI((serviceQuery.data as any).nginx_virtual_hosts ?? [])
+          groupWebServerVirtualHostsFromAPI((serviceQuery.data as any).nginx_virtual_hosts ?? [])
+        )
+      }
+      if (serviceQuery.data.service_name === "apache") {
+        setApacheVirtualHosts(
+          groupWebServerVirtualHostsFromAPI((serviceQuery.data as any).apache_virtual_hosts ?? [])
         )
       }
     }
@@ -264,6 +279,17 @@ export default function ServiceConfigPage() {
 
       if (data?.service_name === "nginx") {
         payload.nginx_virtual_hosts = nginxVirtualHosts.map((vh) => ({
+          id: vh.id,
+          domain: vh.domain || "(default)",
+          access_log: vh.access_log,
+          error_log: vh.error_log,
+          enabled: vh.enabled,
+          is_shared_log: vh.is_shared_log,
+          is_default: vh.is_default,
+        }))
+      }
+      if (data?.service_name === "apache") {
+        payload.apache_virtual_hosts = apacheVirtualHosts.map((vh) => ({
           id: vh.id,
           domain: vh.domain || "(default)",
           access_log: vh.access_log,
@@ -426,8 +452,8 @@ export default function ServiceConfigPage() {
             Configuration
           </h2>
 
-          {/* Log path - only for non-nginx services */}
-          {data.service_name !== "nginx" ? (
+          {/* Log path - only for services without virtual-host log mapping */}
+          {data.service_name !== "nginx" && data.service_name !== "apache" ? (
             <div>
               <label className="text-xs font-medium text-foreground mb-1.5 block">Confirmed Log Path</label>
               <input
@@ -439,7 +465,7 @@ export default function ServiceConfigPage() {
             </div>
           ) : null}
 
-          {data.detected_log_paths.length && data.service_name !== "nginx" ? (
+          {data.detected_log_paths.length && data.service_name !== "nginx" && data.service_name !== "apache" ? (
             <div>
               <label className="text-xs font-medium text-foreground mb-1.5 block">Detected Log Paths</label>
               <p className="text-xs text-muted-foreground mb-2">Click to select</p>
@@ -569,43 +595,39 @@ export default function ServiceConfigPage() {
           </div>
         ) : null}
 
-        {/* Guides — collapsible */}
+        {/* Apache Virtual Hosts — only shown for apache services */}
+        {data.service_name === "apache" ? (
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+              <Globe className="w-4 h-4 text-primary" />
+              Virtual Hosts (Domains)
+            </h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              Map each Apache virtual host to its access and error log files.
+            </p>
+            <ApacheVirtualHostsSection hosts={apacheVirtualHosts} onChange={setApacheVirtualHosts} />
+          </div>
+        ) : null}
+
+        {/* Guide — collapsible */}
         {(logsGuide || metricsGuide) && (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <BookOpen className="w-4 h-4 text-primary" />
-              Setup Guides
+              Setup Guide
             </h2>
-            {logsGuide && (
-              <CollapsibleGuide
-                title="How to Configure Logs"
-                icon={FileText}
-                guide={{
-                  intro: "Step-by-step guide to configure log collection for this service",
-                  steps: [
-                    {
-                      title: "Full setup instructions",
-                      text: logsGuide,
-                    },
-                  ],
-                }}
-              />
-            )}
-            {metricsGuide && (
-              <CollapsibleGuide
-                title="How to Enable Metrics Endpoint"
-                icon={Activity}
-                guide={{
-                  intro: "Step-by-step guide to expose metrics for this service",
-                  steps: [
-                    {
-                      title: "Full setup instructions",
-                      text: metricsGuide,
-                    },
-                  ],
-                }}
-              />
-            )}
+            <CollapsibleGuide
+              title={logsGuide && metricsGuide ? "Configure Logs & Metrics" : logsGuide ? "Configure Logs" : "Configure Metrics"}
+              icon={BookOpen}
+              guide={{
+                intro: logsGuide && metricsGuide
+                  ? "Enable log collection and metrics exposure for this service"
+                  : logsGuide
+                    ? "Configure log collection for this service"
+                    : "Configure metrics exposure for this service",
+              }}
+              content={[logsGuide, metricsGuide].filter(Boolean).join("\n\n---\n\n")}
+            />
           </div>
         )}
 
@@ -745,6 +767,14 @@ export default function ServiceConfigPage() {
                 className="inline-block w-full text-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition-colors"
               >
                 Open Nginx Dashboard
+              </Link>
+            ) : null}
+            {data.service_name === "apache" && logOn && metricsOn ? (
+              <Link
+                to={`/integrations/apache-dashboard/${id}`}
+                className="inline-block w-full text-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition-colors"
+              >
+                Open Apache Dashboard
               </Link>
             ) : null}
             {isPostgresService(data.service_name) && logOn && metricsOn ? (

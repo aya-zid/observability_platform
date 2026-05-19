@@ -286,7 +286,8 @@ func (r *DiscoveryRepository) ReplaceVirtualHostsCtx(
 //
 // The OnConflict columns MUST exactly match the unique index
 // idx_nginx_vhost_service_domain_kind_path defined in NginxVirtualHost:
-//   tenant_id, discovered_service_id, domain, log_kind, log_path
+//
+//	tenant_id, discovered_service_id, domain, log_kind, log_path
 func (r *DiscoveryRepository) UpsertDetectedVirtualHostsCtx(
 	ctx context.Context,
 	tenantID uint,
@@ -312,6 +313,78 @@ func (r *DiscoveryRepository) UpsertDetectedVirtualHostsCtx(
 				// On conflict: only bump updated_at.
 				// Do NOT overwrite enabled/is_shared_log/source — the user may have
 				// changed those in the UI.
+				DoUpdates: clause.Assignments(map[string]interface{}{
+					"updated_at": now,
+				}),
+			}).
+			Create(&detectedVhosts[i]).Error
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ── Apache Virtual Host methods ───────────────────────────────────────────────
+
+func (r *DiscoveryRepository) ListApacheVirtualHostsByServiceCtx(
+	ctx context.Context,
+	tenantID uint,
+	serviceID uint,
+) ([]domain.ApacheVirtualHost, error) {
+	var rows []domain.ApacheVirtualHost
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND discovered_service_id = ?", tenantID, serviceID).
+		Order("domain ASC, log_kind ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *DiscoveryRepository) ReplaceApacheVirtualHostsCtx(
+	ctx context.Context,
+	tenantID uint,
+	serviceID uint,
+	vhosts []domain.ApacheVirtualHost,
+) error {
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND discovered_service_id = ?", tenantID, serviceID).
+		Delete(&domain.ApacheVirtualHost{}).Error; err != nil {
+		return err
+	}
+	if len(vhosts) == 0 {
+		return nil
+	}
+	for i := range vhosts {
+		vhosts[i].TenantID = tenantID
+		vhosts[i].DiscoveredServiceID = serviceID
+		if err := r.db.WithContext(ctx).Create(&vhosts[i]).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *DiscoveryRepository) UpsertDetectedApacheVirtualHostsCtx(
+	ctx context.Context,
+	tenantID uint,
+	serviceID uint,
+	detectedVhosts []domain.ApacheVirtualHost,
+) error {
+	now := time.Now()
+	for i := range detectedVhosts {
+		detectedVhosts[i].TenantID = tenantID
+		detectedVhosts[i].DiscoveredServiceID = serviceID
+		detectedVhosts[i].Source = "detected"
+
+		err := r.db.WithContext(ctx).
+			Clauses(clause.OnConflict{
+				Columns: []clause.Column{
+					{Name: "tenant_id"},
+					{Name: "discovered_service_id"},
+					{Name: "domain"},
+					{Name: "log_kind"},
+					{Name: "log_path"},
+				},
 				DoUpdates: clause.Assignments(map[string]interface{}{
 					"updated_at": now,
 				}),

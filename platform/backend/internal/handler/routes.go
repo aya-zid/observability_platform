@@ -59,6 +59,20 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		tenantRepo,
 	)
 
+	apacheDashboardService := service.NewApacheDashboardService(cfg, infrastructure.Redis)
+	apacheDashboardHandler := NewApacheDashboardHandler(
+		apacheDashboardService,
+		discoveryRepo,
+		tenantRepo,
+	)
+
+	apachePerformanceService := service.NewApachePerformanceService(cfg, infrastructure.Redis)
+	apachePerformanceHandler := NewApachePerformanceHandler(
+		apachePerformanceService,
+		discoveryRepo,
+		tenantRepo,
+	)
+
 	e.GET("/install.sh", installHandler.AgentInstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
@@ -104,6 +118,18 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/postgres/:id/dashboard", postgresDashboardHandler.Dashboard)
 		api.GET("/postgres/:id/config", postgresDashboardHandler.Config)
 		api.GET("/postgres/:id/logs", postgresDashboardHandler.Logs)
+
+		// Apache dashboard routes
+		api.GET("/apache/:id/dashboard", apacheDashboardHandler.Dashboard)
+		api.GET("/apache/:id/slow-requests", apacheDashboardHandler.SlowRequests)
+		api.GET("/apache/:id/explorer", apacheDashboardHandler.Explorer)
+		api.GET("/apache/:id/domains", apacheDashboardHandler.Domains)
+		api.GET("/apache/:id/error-logs", apacheDashboardHandler.ErrorLogs)
+		api.GET("/apache/:id/ip-investigation", apacheDashboardHandler.IPInvestigation)
+		// Apache performance chart routes
+		api.GET("/apache/:id/performance/heatmap", apachePerformanceHandler.Heatmap)
+		api.GET("/apache/:id/performance/scatter", apachePerformanceHandler.Scatter)
+		api.GET("/apache/:id/performance/dist", apachePerformanceHandler.Distribution)
 	}
 
 	// ── Health check ─────────────────────────────────────────────────────────

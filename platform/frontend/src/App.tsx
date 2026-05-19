@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RouterProvider } from "react-router-dom"
 
 import AuthBootstrap from "@/components/auth/AuthBootstrap"
+import { LanguageProvider } from "@/i18n/LanguageContext"
 import { router } from "@/router"
 
 const queryClient = new QueryClient({
@@ -21,9 +22,11 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthBootstrap>
-        <RouterProvider router={router} />
-      </AuthBootstrap>
+      <LanguageProvider>
+        <AuthBootstrap>
+          <RouterProvider router={router} />
+        </AuthBootstrap>
+      </LanguageProvider>
     </QueryClientProvider>
   )
 }

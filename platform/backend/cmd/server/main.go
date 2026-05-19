@@ -34,6 +34,7 @@ func main() {
 		&domain.DiscoveredContainerService{},
 		&domain.ServiceVulnerability{},
 		&domain.NginxVirtualHost{},
+		&domain.ApacheVirtualHost{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}

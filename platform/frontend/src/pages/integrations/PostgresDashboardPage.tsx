@@ -19,6 +19,7 @@ import { getPostgresDashboardSummary, type PostgresDashboardSummary, type Postgr
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { dateTimeInputToSeconds, formatBytes, formatDateInputValue, formatDuration, formatNumber, formatPercent, formatTimeInputValue, getNowSeconds, getStartSeconds, secondsToNanos } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
+import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
 
 const TIME_RANGES = [
   { label: "15m", seconds: 900 },
@@ -33,6 +34,7 @@ function getStep(rangeSeconds: number) {
   if (rangeSeconds <= 21600) return "2m"
   return "5m"
 }
+
 type TimeSelection =
   | { mode: "preset"; preset: (typeof TIME_RANGES)[number] }
   | { mode: "manual"; date: string; startTime: string; endTime: string }
@@ -126,6 +128,7 @@ function TimeRangeSelector({
   selected: TimeSelection
   onChange: (value: TimeSelection) => void
 }) {
+  const { t } = useTranslation()
   const manual = selected.mode === "manual" ? selected : createDefaultManualSelection()
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -151,7 +154,7 @@ function TimeRangeSelector({
             selected.mode === "manual" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
           )}
         >
-          Manual
+          {t("shared.manual")}
         </button>
       </div>
       {selected.mode === "manual" ? (
@@ -188,6 +191,7 @@ function LinePanel({
   lines: Array<{ key: string; name: string; color: string }>
   formatter?: (value: number, key: string) => string
 }) {
+  const { t } = useTranslation()
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <h3 className="mb-4 text-sm font-semibold">{title}</h3>
@@ -208,7 +212,7 @@ function LinePanel({
           </LineChart>
         </ResponsiveContainer>
       ) : (
-        <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">No data in this window.</div>
+        <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">{t("shared.noData")}</div>
       )}
     </div>
   )
@@ -223,6 +227,7 @@ function BarPanel({
   data: Array<{ label: string; count: number }>
   valueFormatter?: (value: number) => string
 }) {
+  const { t } = useTranslation()
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <h3 className="mb-4 text-sm font-semibold">{title}</h3>
@@ -237,26 +242,27 @@ function BarPanel({
           </BarChart>
         </ResponsiveContainer>
       ) : (
-        <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">No breakdown yet.</div>
+        <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">{t("shared.noBreakdown")}</div>
       )}
     </div>
   )
 }
 
 function DatabaseHealthTable({ rows }: { rows: PostgresDashboardSummary["database_health"] }) {
+  const { t } = useTranslation()
   return (
-    <SectionCard title="Database Health" description="Useful per-database signals from pg_stat_database. Temp spill and rollback spikes usually deserve investigation.">
+    <SectionCard title={t("pgDashboard.healthTitle")} description={t("pgDashboard.healthDesc")}>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-xs uppercase text-muted-foreground">
             <tr className="border-b border-border">
-              <th className="py-2 pr-4 text-left">Database</th>
-              <th className="py-2 pr-4 text-left">Size</th>
-              <th className="py-2 pr-4 text-left">Connections</th>
-              <th className="py-2 pr-4 text-left">Cache Hit</th>
-              <th className="py-2 pr-4 text-left">Temp Files/s</th>
-              <th className="py-2 pr-4 text-left">Temp Bytes/s</th>
-              <th className="py-2 text-left">Rollback Rate</th>
+              <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColDb")}</th>
+              <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColSize")}</th>
+              <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColConns")}</th>
+              <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColCache")}</th>
+              <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColTempFiles")}</th>
+              <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColTempBytes")}</th>
+              <th className="py-2 text-left">{t("pgDashboard.healthColRollback")}</th>
             </tr>
           </thead>
           <tbody>
@@ -272,7 +278,7 @@ function DatabaseHealthTable({ rows }: { rows: PostgresDashboardSummary["databas
               </tr>
             )) : (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-sm text-muted-foreground">No database health metrics in this window.</td>
+                <td colSpan={7} className="py-6 text-center text-sm text-muted-foreground">{t("pgDashboard.healthEmpty")}</td>
               </tr>
             )}
           </tbody>
@@ -283,9 +289,9 @@ function DatabaseHealthTable({ rows }: { rows: PostgresDashboardSummary["databas
 }
 
 export function PostgresDashboardPage() {
+  const { t } = useTranslation()
   const { id = "" } = useParams<{ id?: string }>()
   const [timeSelection, setTimeSelection] = useState<TimeSelection>({ mode: "preset", preset: TIME_RANGES[1] })
-
 
   const serviceQuery = useQuery({
     queryKey: ["discovery-service", id],
@@ -337,64 +343,65 @@ export function PostgresDashboardPage() {
   const tempBytesLatest = latest(data?.temp_timeseries, "bytes")
   const totalSizeLatest = totalLatest(data?.size_timeseries)
 
-  if (!id) return <div className="p-6 text-sm text-red-600">Missing service id.</div>
-  if (serviceQuery.isLoading) return <div className="p-6 text-sm text-muted-foreground">Loading...</div>
-  if (!service) return <div className="p-6 text-sm text-red-600">Service not found for id {id}.</div>
+  if (!id) return <div className="p-6 text-sm text-red-600">{t("shared.missingServiceId")}</div>
+  if (serviceQuery.isLoading) return <div className="p-6 text-sm text-muted-foreground">{t("shared.loading")}</div>
+  if (!service) return <div className="p-6 text-sm text-red-600">{t("shared.serviceNotFound", id)}</div>
 
   return (
     <Page className="max-w-none">
       <PageHeader
-        title="PostgreSQL Dashboard"
-        description={`Service ${service.service_name} on ${service.hostname || service.machine_id}. Metrics from postgres_exporter, logs from PostgreSQL log file collection.`}
+        title={t("pgDashboard.title")}
+        description={t("pgDashboard.description", service.service_name, service.hostname || service.machine_id)}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
+            <LangToggle />
             <Link to={`/integrations/postgres-logs/${id}`} className="rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500">
-              View Logs
+              {t("shared.viewLogs")}
             </Link>
             <Link to={`/integrations/postgres-config/${id}`} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">
-              Configuration
+              {t("shared.configuration")}
             </Link>
           </div>
         }
       />
 
       {dashQuery.isError ? (
-        <SectionCard title="Dashboard unavailable">
-          <div className="text-sm text-red-600">Failed to fetch PostgreSQL dashboard data.</div>
+        <SectionCard title={t("pgDashboard.dashUnavailable")}>
+          <div className="text-sm text-red-600">{t("pgDashboard.fetchFailed")}</div>
         </SectionCard>
       ) : null}
       {timeWindow.error ? (
-        <SectionCard title="Invalid manual time">
+        <SectionCard title={t("pgDashboard.invalidTime")}>
           <div className="text-sm text-red-600">{timeWindow.error}</div>
         </SectionCard>
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Postgres" value={data?.up === 1 ? "Up" : data?.up === 0 ? "Down" : "-"} tone={data?.up === 1 ? "good" : data?.up === 0 ? "bad" : "neutral"} hint="pg_up" />
-        <StatCard label="Scrape" value={data?.scrape_error === 1 ? "Error" : data?.scrape_error === 0 ? "Healthy" : "-"} tone={data?.scrape_error === 1 ? "bad" : data?.scrape_error === 0 ? "good" : "neutral"} hint="postgres_exporter last scrape" />
-        <StatCard label="Connection Saturation" value={data?.connection_saturation_pct != null ? formatPercent(data.connection_saturation_pct) : "-"} tone={(data?.connection_saturation_pct ?? 0) > 85 ? "bad" : (data?.connection_saturation_pct ?? 0) > 70 ? "warn" : "good"} hint={`max_connections ${data?.max_connections ? formatNumber(data.max_connections, 0) : "-"}`} />
-        <StatCard label="Cache Hit Ratio" value={data?.cache_hit_ratio_pct != null ? formatPercent(data.cache_hit_ratio_pct) : "-"} tone={(data?.cache_hit_ratio_pct ?? 100) < 95 ? "warn" : "good"} hint="Target is usually above 95%" />
-        <StatCard label="Database Size" value={data?.database_size_bytes != null ? formatBytes(data.database_size_bytes) : "-"} hint="sum(pg_database_size_bytes)" />
-        <StatCard label="WAL Size" value={data?.wal_size_bytes != null ? formatBytes(data.wal_size_bytes) : "-"} tone={(data?.wal_size_bytes ?? 0) > 1024 * 1024 * 1024 ? "warn" : "neutral"} hint="Large spikes can mean heavy writes or lag" />
-        <StatCard label="Replication Lag" value={data?.replication_lag_seconds != null ? formatDuration(data.replication_lag_seconds) : "-"} tone={(data?.replication_lag_seconds ?? 0) > 30 ? "bad" : "good"} hint="Only present on replica setups" />
-        <StatCard label="Idle In Transaction" value={idleInTx != null ? formatNumber(idleInTx, 0) : "-"} tone={(idleInTx ?? 0) > 0 ? "warn" : "good"} hint="Open transactions can block vacuum" />
-        <StatCard label="Rollback Rate" value={data?.rollback_rate_pct != null ? formatPercent(data.rollback_rate_pct) : "-"} tone={(data?.rollback_rate_pct ?? 0) > 2 ? "bad" : (data?.rollback_rate_pct ?? 0) > 1 ? "warn" : "good"} hint="rollbacks / total transactions" />
-        <StatCard label="Deadlocks Per Min" value={data?.deadlocks_per_min != null ? formatNumber(data.deadlocks_per_min, 2) : "-"} tone={(data?.deadlocks_per_min ?? 0) > 0 ? "bad" : "good"} hint="any value above 0 is risky" />
-        <StatCard label="Max Active Tx Duration" value={data?.max_tx_duration_seconds != null ? formatDuration(data.max_tx_duration_seconds) : "-"} tone={(data?.max_tx_duration_seconds ?? 0) > 30 ? "warn" : "good"} />
-        <StatCard label="Archive Failures /s" value={data?.archive_failed != null ? formatNumber(data.archive_failed, 4) : "-"} tone={(data?.archive_failed ?? 0) > 0 ? "bad" : "good"} />
-        <StatCard label="DB Growth Rate" value={sizeGrowthPerHour != null ? `${formatBytes(Math.abs(sizeGrowthPerHour))}/h` : "-"} tone={(sizeGrowthPerHour ?? 0) > 100 * 1024 * 1024 ? "warn" : "neutral"} hint={totalSizeLatest != null ? `current total ${formatBytes(totalSizeLatest)}` : undefined} />
-        <StatCard label="Seq Scan Ratio" value={seqScanRatio != null ? formatPercent(seqScanRatio) : "-"} tone={(seqScanRatio ?? 0) > 60 ? "bad" : (seqScanRatio ?? 0) > 30 ? "warn" : "good"} hint="seq output / total tuple output" />
-        <StatCard label="Bgwriter Pressure" value={bgwriterPressure != null ? formatPercent(bgwriterPressure) : "-"} tone={(bgwriterPressure ?? 0) > 50 ? "warn" : "good"} hint="buffer alloc share vs clean writes" />
-        <StatCard label="Temp Spill Rate" value={tempBytesLatest != null ? `${formatBytes(tempBytesLatest)}/s` : "-"} tone={(tempBytesLatest ?? 0) > 0 ? "warn" : "good"} hint="sort/hash spills to disk" />
+        <StatCard label={t("pgDashboard.up")} value={data?.up === 1 ? "Up" : data?.up === 0 ? "Down" : "-"} tone={data?.up === 1 ? "good" : data?.up === 0 ? "bad" : "neutral"} hint={t("pgDashboard.upHint")} />
+        <StatCard label={t("pgDashboard.scrape")} value={data?.scrape_error === 1 ? "Error" : data?.scrape_error === 0 ? "Healthy" : "-"} tone={data?.scrape_error === 1 ? "bad" : data?.scrape_error === 0 ? "good" : "neutral"} hint={t("pgDashboard.scrapeHint")} />
+        <StatCard label={t("pgDashboard.connSat")} value={data?.connection_saturation_pct != null ? formatPercent(data.connection_saturation_pct) : "-"} tone={(data?.connection_saturation_pct ?? 0) > 85 ? "bad" : (data?.connection_saturation_pct ?? 0) > 70 ? "warn" : "good"} hint={t("pgDashboard.connSatHint", data?.max_connections ? formatNumber(data.max_connections, 0) : "-")} />
+        <StatCard label={t("pgDashboard.cacheHit")} value={data?.cache_hit_ratio_pct != null ? formatPercent(data.cache_hit_ratio_pct) : "-"} tone={(data?.cache_hit_ratio_pct ?? 100) < 95 ? "warn" : "good"} hint={t("pgDashboard.cacheHitHint")} />
+        <StatCard label={t("pgDashboard.dbSize")} value={data?.database_size_bytes != null ? formatBytes(data.database_size_bytes) : "-"} hint={t("pgDashboard.dbSizeHint")} />
+        <StatCard label={t("pgDashboard.walSize")} value={data?.wal_size_bytes != null ? formatBytes(data.wal_size_bytes) : "-"} tone={(data?.wal_size_bytes ?? 0) > 1024 * 1024 * 1024 ? "warn" : "neutral"} hint={t("pgDashboard.walSizeHint")} />
+        <StatCard label={t("pgDashboard.replLag")} value={data?.replication_lag_seconds != null ? formatDuration(data.replication_lag_seconds) : "-"} tone={(data?.replication_lag_seconds ?? 0) > 30 ? "bad" : "good"} hint={t("pgDashboard.replLagHint")} />
+        <StatCard label={t("pgDashboard.idleTx")} value={idleInTx != null ? formatNumber(idleInTx, 0) : "-"} tone={(idleInTx ?? 0) > 0 ? "warn" : "good"} hint={t("pgDashboard.idleTxHint")} />
+        <StatCard label={t("pgDashboard.rollbackRate")} value={data?.rollback_rate_pct != null ? formatPercent(data.rollback_rate_pct) : "-"} tone={(data?.rollback_rate_pct ?? 0) > 2 ? "bad" : (data?.rollback_rate_pct ?? 0) > 1 ? "warn" : "good"} hint={t("pgDashboard.rollbackRateHint")} />
+        <StatCard label={t("pgDashboard.deadlocks")} value={data?.deadlocks_per_min != null ? formatNumber(data.deadlocks_per_min, 2) : "-"} tone={(data?.deadlocks_per_min ?? 0) > 0 ? "bad" : "good"} hint={t("pgDashboard.deadlocksHint")} />
+        <StatCard label={t("pgDashboard.maxTxDuration")} value={data?.max_tx_duration_seconds != null ? formatDuration(data.max_tx_duration_seconds) : "-"} tone={(data?.max_tx_duration_seconds ?? 0) > 30 ? "warn" : "good"} />
+        <StatCard label={t("pgDashboard.archiveFailed")} value={data?.archive_failed != null ? formatNumber(data.archive_failed, 4) : "-"} tone={(data?.archive_failed ?? 0) > 0 ? "bad" : "good"} />
+        <StatCard label={t("pgDashboard.dbGrowth")} value={sizeGrowthPerHour != null ? `${formatBytes(Math.abs(sizeGrowthPerHour))}/h` : "-"} tone={(sizeGrowthPerHour ?? 0) > 100 * 1024 * 1024 ? "warn" : "neutral"} hint={totalSizeLatest != null ? `${t("pgDashboard.totalInRange", formatBytes(totalSizeLatest))}` : undefined} />
+        <StatCard label={t("pgDashboard.seqScan")} value={seqScanRatio != null ? formatPercent(seqScanRatio) : "-"} tone={(seqScanRatio ?? 0) > 60 ? "bad" : (seqScanRatio ?? 0) > 30 ? "warn" : "good"} hint={t("pgDashboard.seqScanHint")} />
+        <StatCard label={t("pgDashboard.bgwriterPressure")} value={bgwriterPressure != null ? formatPercent(bgwriterPressure) : "-"} tone={(bgwriterPressure ?? 0) > 50 ? "warn" : "good"} hint={t("pgDashboard.bgwriterPressureHint")} />
+        <StatCard label={t("pgDashboard.tempSpill")} value={tempBytesLatest != null ? `${formatBytes(tempBytesLatest)}/s` : "-"} tone={(tempBytesLatest ?? 0) > 0 ? "warn" : "good"} hint={t("pgDashboard.tempSpillHint")} />
       </div>
 
       <DatabaseHealthTable rows={data?.database_health ?? []} />
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <LinePanel title="Connections" data={connections} lines={[{ key: "connections", name: "connections", color: "#0ea5e9" }]} />
+        <LinePanel title={t("pgDashboard.chartConnections")} data={connections} lines={[{ key: "connections", name: "connections", color: "#0ea5e9" }]} />
         <LinePanel
-          title="Activity By State"
+          title={t("pgDashboard.chartActivity")}
           data={activity}
           lines={[
             { key: "active", name: "active", color: "#22c55e" },
@@ -403,7 +410,7 @@ export function PostgresDashboardPage() {
           ]}
         />
         <LinePanel
-          title="Transactions"
+          title={t("pgDashboard.chartTransactions")}
           data={transactions}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
@@ -413,7 +420,7 @@ export function PostgresDashboardPage() {
           ]}
         />
         <LinePanel
-          title="Cache And Disk Reads"
+          title={t("pgDashboard.chartCache")}
           data={cache}
           formatter={(value, key) => key === "hit_ratio" ? formatPercent(value) : `${formatNumber(value)} /s`}
           lines={[
@@ -423,7 +430,7 @@ export function PostgresDashboardPage() {
           ]}
         />
         <LinePanel
-          title="Temp Files And Bytes"
+          title={t("pgDashboard.chartTemp")}
           data={temp}
           formatter={(value, key) => key === "bytes" ? `${formatBytes(value)}/s` : `${formatNumber(value)} /s`}
           lines={[
@@ -431,9 +438,9 @@ export function PostgresDashboardPage() {
             { key: "bytes", name: "temp bytes/s", color: "#ef4444" },
           ]}
         />
-        <LinePanel title="WAL Size" data={wal} formatter={(value) => formatBytes(value)} lines={[{ key: "bytes", name: "WAL bytes", color: "#8b5cf6" }]} />
+        <LinePanel title={t("pgDashboard.chartWAL")} data={wal} formatter={(value) => formatBytes(value)} lines={[{ key: "bytes", name: "WAL bytes", color: "#8b5cf6" }]} />
         <LinePanel
-          title="Row Throughput"
+          title={t("pgDashboard.chartRowThroughput")}
           data={rowOps}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
@@ -443,7 +450,7 @@ export function PostgresDashboardPage() {
           ]}
         />
         <LinePanel
-          title="Seq vs Index Scan Output"
+          title={t("pgDashboard.chartSeqVsIndex")}
           data={seqVsIndex}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
@@ -452,7 +459,7 @@ export function PostgresDashboardPage() {
           ]}
         />
         <LinePanel
-          title="Bgwriter Efficiency"
+          title={t("pgDashboard.chartBgwriter")}
           data={bgwriter}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
@@ -462,7 +469,7 @@ export function PostgresDashboardPage() {
           ]}
         />
         <LinePanel
-          title="WAL Archiver"
+          title={t("pgDashboard.chartArchiver")}
           data={archiver}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
@@ -471,7 +478,7 @@ export function PostgresDashboardPage() {
           ]}
         />
         <LinePanel
-          title="Locks By Mode"
+          title={t("pgDashboard.chartLocks")}
           data={locks}
           lines={[
             { key: "AccessShareLock", name: "AccessShare", color: "#64748b" },
@@ -480,10 +487,10 @@ export function PostgresDashboardPage() {
             { key: "AccessExclusiveLock", name: "AccessExclusive", color: "#b91c1c" },
           ]}
         />
-        <BarPanel title="Database Sizes" data={data?.database_sizes ?? []} valueFormatter={formatBytes} />
-        <BarPanel title="Connections Per Database" data={data?.conn_by_database ?? []} />
+        <BarPanel title={t("pgDashboard.chartDbSizes")} data={data?.database_sizes ?? []} valueFormatter={formatBytes} />
+        <BarPanel title={t("pgDashboard.chartConnsByDb")} data={data?.conn_by_database ?? []} />
       </div>
-      <SectionCard title="Config Reference">
+      <SectionCard title={t("pgDashboard.configRef")}>
         <div className="grid gap-3 md:grid-cols-3">
           <StatCard label="shared_buffers" value={data?.shared_buffers_bytes != null ? formatBytes(data.shared_buffers_bytes) : "-"} />
           <StatCard label="work_mem" value={data?.work_mem_bytes != null ? formatBytes(data.work_mem_bytes) : "-"} />
@@ -491,15 +498,15 @@ export function PostgresDashboardPage() {
         </div>
       </SectionCard>
 
-      <SectionCard title="Log Signals" description="Counts come from the selected window and the PostgreSQL log format in the catalog guide. The monitoring user connection churn is expected when postgres_exporter scrapes.">
+      <SectionCard title={t("pgDashboard.logSignals")} description={t("pgDashboard.logSignalsDesc")}>
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <StatCard label="Slow Queries" value={formatNumber(data?.log_summary.slow_queries ?? 0, 0)} tone={(data?.log_summary.slow_queries ?? 0) > 0 ? "warn" : "good"} />
-          <StatCard label="Errors" value={formatNumber(data?.log_summary.errors ?? 0, 0)} tone={(data?.log_summary.errors ?? 0) > 0 ? "bad" : "good"} />
-          <StatCard label="Auth Failures" value={formatNumber(data?.log_summary.auth_failures ?? 0, 0)} tone={(data?.log_summary.auth_failures ?? 0) > 0 ? "bad" : "good"} />
-          <StatCard label="Lock Waits" value={formatNumber(data?.log_summary.lock_waits ?? 0, 0)} tone={(data?.log_summary.lock_waits ?? 0) > 0 ? "warn" : "good"} />
-          <StatCard label="Temp Files" value={formatNumber(data?.log_summary.temp_files ?? 0, 0)} tone={(data?.log_summary.temp_files ?? 0) > 0 ? "warn" : "good"} />
-          <StatCard label="Schema Changes" value={formatNumber(data?.log_summary.schema_changes ?? 0, 0)} />
-          <StatCard label="Checkpoints" value={formatNumber(data?.log_summary.checkpoints ?? 0, 0)} tone={(data?.log_summary.checkpoints ?? 0) > 0 ? "warn" : "good"} />
+          <StatCard label={t("pgDashboard.slowQueries")} value={formatNumber(data?.log_summary.slow_queries ?? 0, 0)} tone={(data?.log_summary.slow_queries ?? 0) > 0 ? "warn" : "good"} />
+          <StatCard label={t("pgDashboard.errors")} value={formatNumber(data?.log_summary.errors ?? 0, 0)} tone={(data?.log_summary.errors ?? 0) > 0 ? "bad" : "good"} />
+          <StatCard label={t("pgDashboard.authFailures")} value={formatNumber(data?.log_summary.auth_failures ?? 0, 0)} tone={(data?.log_summary.auth_failures ?? 0) > 0 ? "bad" : "good"} />
+          <StatCard label={t("pgDashboard.lockWaits")} value={formatNumber(data?.log_summary.lock_waits ?? 0, 0)} tone={(data?.log_summary.lock_waits ?? 0) > 0 ? "warn" : "good"} />
+          <StatCard label={t("pgDashboard.tempFiles")} value={formatNumber(data?.log_summary.temp_files ?? 0, 0)} tone={(data?.log_summary.temp_files ?? 0) > 0 ? "warn" : "good"} />
+          <StatCard label={t("pgDashboard.schemaChanges")} value={formatNumber(data?.log_summary.schema_changes ?? 0, 0)} />
+          <StatCard label={t("pgDashboard.checkpoints")} value={formatNumber(data?.log_summary.checkpoints ?? 0, 0)} tone={(data?.log_summary.checkpoints ?? 0) > 0 ? "warn" : "good"} />
         </div>
       </SectionCard>
 

@@ -15,6 +15,7 @@ import {
   secondsToNanos,
 } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
+import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ function TimeRangeSelector({
   selected: TimeSelection
   onChange: (value: TimeSelection) => void
 }) {
+  const { t } = useTranslation()
   const manual = selected.mode === "manual" ? selected : createDefaultManualSelection()
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -130,7 +132,7 @@ function TimeRangeSelector({
               : "text-muted-foreground hover:bg-muted",
           )}
         >
-          Manual
+          {t("shared.manual")}
         </button>
       </div>
       {selected.mode === "manual" ? (
@@ -173,6 +175,7 @@ function Pagination({
   hasMore: boolean
   onChange: (page: number) => void
 }) {
+  const { t } = useTranslation()
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1
   const to = Math.min(page * pageSize, total)
@@ -180,7 +183,7 @@ function Pagination({
   return (
     <div className="flex items-center justify-between border-t border-border pt-4">
       <span className="text-xs text-muted-foreground">
-        {total === 0 ? "No results" : `${formatNumber(from, 0)}–${formatNumber(to, 0)} of ${formatNumber(total, 0)} events`}
+        {total === 0 ? t("pgLogs.paginationNoResults") : t("pgLogs.paginationOf", formatNumber(from, 0), formatNumber(to, 0), formatNumber(total, 0))}
       </span>
       <div className="flex items-center gap-1">
         <button
@@ -200,7 +203,7 @@ function Pagination({
           ‹
         </button>
         <span className="px-3 text-xs">
-          Page {page} of {totalPages}
+          {t("pgLogs.pageOf", String(page), String(totalPages))}
         </span>
         <button
           type="button"
@@ -226,6 +229,7 @@ function Pagination({
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export function PostgresLogsPage() {
+  const { t } = useTranslation()
   const { id = "" } = useParams<{ id?: string }>()
 
   const [timeSelection, setTimeSelection] = useState<TimeSelection>({
@@ -234,8 +238,6 @@ export function PostgresLogsPage() {
   })
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("all")
   const [search, setSearch] = useState("")
-  // searchInput is what the user is typing; search is what we actually query
-  // (only committed on Enter or blur so we don't fire a request on every keystroke)
   const [searchInput, setSearchInput] = useState("")
   const [showMonitoring, setShowMonitoring] = useState(false)
   const [page, setPage] = useState(1)
@@ -249,7 +251,6 @@ export function PostgresLogsPage() {
 
   const timeWindow = useMemo(() => getTimeWindow(timeSelection), [timeSelection])
 
-  // Reset to page 1 whenever filters / window change
   function handleCategoryChange(value: (typeof CATEGORIES)[number]) {
     setCategory(value)
     setPage(1)
@@ -266,11 +267,6 @@ export function PostgresLogsPage() {
     setOpenEvent(null)
   }
 
-  // ── THE KEY FIX ─────────────────────────────────────────────────────────────
-  // We now call the DEDICATED /api/postgres/:id/logs endpoint, not the dashboard
-  // endpoint. The backend fetches ALL Loki entries for the window (walking
-  // through all pages), filters them in Go, and returns the correct page slice.
-  // No more "top 60 only" truncation, no more disappearing logs.
   const logsQuery = useQuery({
     queryKey: ["postgres-logs", id, timeWindow.start, timeWindow.end, category, search, showMonitoring, page],
     enabled: !!id && !!serviceQuery.data && !timeWindow.error,
@@ -286,7 +282,6 @@ export function PostgresLogsPage() {
       }),
     placeholderData: (prev) => prev,
     staleTime: 20_000,
-    // Auto-refresh only for live preset windows, not manual ranges
     refetchInterval: timeWindow.isManual ? false : 30_000,
     refetchOnWindowFocus: false,
   })
@@ -294,34 +289,35 @@ export function PostgresLogsPage() {
   const result = logsQuery.data
   const events = result?.events ?? []
 
-  if (!id) return <div className="p-6 text-sm text-red-600">Missing service id.</div>
+  if (!id) return <div className="p-6 text-sm text-red-600">{t("shared.missingServiceId")}</div>
 
   return (
     <Page className="max-w-none">
       <PageHeader
-        title="PostgreSQL Logs"
-        description="Slow statements, errors, auth failures, locks, schema changes, and connection events parsed from PostgreSQL logs."
+        title={t("pgLogs.title")}
+        description={t("pgLogs.description")}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={handleTimeChange} />
+            <LangToggle />
             <Link
               to={`/integrations/postgres-dashboard/${id}`}
               className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
             >
-              Dashboard
+              {t("shared.dashboard")}
             </Link>
           </div>
         }
       />
 
       {timeWindow.error ? (
-        <SectionCard title="Invalid manual time">
+        <SectionCard title={t("pgLogs.invalidTime")}>
           <div className="text-sm text-red-600">{timeWindow.error}</div>
         </SectionCard>
       ) : null}
 
       {/* ── Filters ── */}
-      <SectionCard title="Filters">
+      <SectionCard title={t("pgLogs.filters")}>
         <div className="grid gap-3 lg:grid-cols-[220px_1fr_auto_auto]">
           <select
             className="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none"
@@ -330,7 +326,7 @@ export function PostgresLogsPage() {
           >
             {CATEGORIES.map((item) => (
               <option key={item} value={item}>
-                {item === "all" ? "All categories" : item}
+                {item === "all" ? t("pgLogs.allCategories") : item}
               </option>
             ))}
           </select>
@@ -340,14 +336,14 @@ export function PostgresLogsPage() {
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && commitSearch()}
             onBlur={commitSearch}
-            placeholder="Search user, database, client, message… (Enter to apply)"
+            placeholder={t("pgLogs.searchPlaceholder")}
           />
           <button
             type="button"
             onClick={commitSearch}
             className="h-10 rounded-md border border-border px-4 text-sm hover:bg-muted"
           >
-            Search
+            {t("shared.search")}
           </button>
           <label className="flex cursor-pointer items-center gap-2 text-sm">
             <input
@@ -360,25 +356,25 @@ export function PostgresLogsPage() {
               }}
               className="h-4 w-4 rounded border-border accent-foreground"
             />
-            Show monitoring connections
+            {t("pgLogs.showMonitoring")}
           </label>
         </div>
       </SectionCard>
 
       {/* ── Events table ── */}
       <SectionCard
-        title="Events"
+        title={t("pgLogs.eventsTitle")}
         description={
           logsQuery.isFetching
-            ? "Loading…"
+            ? t("shared.loading")
             : result
-              ? `${formatNumber(result.total, 0)} total events in this window`
+              ? t("pgLogs.totalEvents", formatNumber(result.total, 0))
               : ""
         }
       >
         {logsQuery.isError ? (
           <div className="py-6 text-center text-sm text-red-500">
-            Failed to load logs. Check that the logs endpoint is available.
+            {t("pgLogs.loadError")}
           </div>
         ) : (
           <>
@@ -386,13 +382,13 @@ export function PostgresLogsPage() {
               <table className="min-w-full text-sm">
                 <thead className="text-xs uppercase text-muted-foreground">
                   <tr className="border-b border-border">
-                    <th className="py-2 pr-4 text-left">Time</th>
-                    <th className="py-2 pr-4 text-left">Kind</th>
-                    <th className="py-2 pr-4 text-left">User</th>
-                    <th className="py-2 pr-4 text-left">Database</th>
-                    <th className="py-2 pr-4 text-left">Client</th>
-                    <th className="py-2 pr-4 text-left">Duration</th>
-                    <th className="py-2 text-left">Message</th>
+                    <th className="py-2 pr-4 text-left">{t("pgLogs.colTime")}</th>
+                    <th className="py-2 pr-4 text-left">{t("pgLogs.colKind")}</th>
+                    <th className="py-2 pr-4 text-left">{t("pgLogs.colUser")}</th>
+                    <th className="py-2 pr-4 text-left">{t("pgLogs.colDatabase")}</th>
+                    <th className="py-2 pr-4 text-left">{t("pgLogs.colClient")}</th>
+                    <th className="py-2 pr-4 text-left">{t("pgLogs.colDuration")}</th>
+                    <th className="py-2 text-left">{t("pgLogs.colMessage")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -437,30 +433,30 @@ export function PostgresLogsPage() {
                             <td colSpan={7} className="py-3 pl-4">
                               <div className="space-y-2 text-xs">
                                 <div>
-                                  <span className="text-muted-foreground">Severity:</span>{" "}
+                                  <span className="text-muted-foreground">{t("pgLogs.labelSeverity")}</span>{" "}
                                   <span className="font-mono">{event.severity}</span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">User / DB:</span>{" "}
+                                  <span className="text-muted-foreground">{t("pgLogs.labelUserDb")}</span>{" "}
                                   <span className="font-mono">
                                     {event.user || "-"} / {event.database || "-"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Client / App:</span>{" "}
+                                  <span className="text-muted-foreground">{t("pgLogs.labelClientApp")}</span>{" "}
                                   <span className="font-mono">
                                     {event.client || "-"} / {event.app || "-"}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">Full message:</span>
+                                  <span className="text-muted-foreground">{t("pgLogs.labelFullMsg")}</span>
                                   <div className="mt-1 whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono">
                                     {event.message}
                                   </div>
                                 </div>
                                 {event.labels && Object.keys(event.labels).length ? (
                                   <div>
-                                    <span className="text-muted-foreground">Extra fields:</span>
+                                    <span className="text-muted-foreground">{t("pgLogs.labelExtra")}</span>
                                     <div className="mt-1 grid gap-1 sm:grid-cols-2">
                                       {Object.entries(event.labels).map(([key, value]) => (
                                         <div key={key} className="font-mono">
@@ -481,14 +477,14 @@ export function PostgresLogsPage() {
                   {!logsQuery.isFetching && events.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
-                        No PostgreSQL log events matched this filter in the selected time window.
+                        {t("pgLogs.emptyFilter")}
                       </td>
                     </tr>
                   ) : null}
                   {logsQuery.isFetching && events.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
-                        Loading…
+                        {t("shared.loading")}
                       </td>
                     </tr>
                   ) : null}

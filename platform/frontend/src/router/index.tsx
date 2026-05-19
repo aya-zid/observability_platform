@@ -9,6 +9,8 @@ import ServiceConfigPage from "@/pages/services/ServiceConfigPage"
 import { NginxDashboardPage } from "@/pages/integrations/NginxDashboardPage"
 import { NginxLogsPage } from "@/pages/integrations/NginxLogsPage"
 import { NginxSlowRequestsPage } from "@/pages/integrations/NginxSlowRequestsPage"
+import { ApacheDashboardPage } from "@/pages/integrations/ApacheDashboardPage"
+import { ApacheLogsPage } from "@/pages/integrations/ApacheLogsPage"
 import { PostgresDashboardPage } from "@/pages/integrations/PostgresDashboardPage"
 import { PostgresConfigPage } from "@/pages/integrations/PostgresConfigPage"
 import { PostgresLogsPage } from "@/pages/integrations/PostgresLogsPage"
@@ -47,6 +49,8 @@ export const router = createBrowserRouter([
           { path: "/integrations/nginx-dashboard/:id", element: <NginxDashboardPage /> },
           { path: "/integrations/nginx-dashboard/:id/slow-requests", element: <NginxSlowRequestsPage /> },
           { path: "/integrations/nginx-logs/:id", element: <NginxLogsPage /> },
+          { path: "/integrations/apache-dashboard/:id", element: <ApacheDashboardPage /> },
+          { path: "/integrations/apache-logs/:id", element: <ApacheLogsPage /> },
           { path: "/integrations/postgres-dashboard/:id", element: <PostgresDashboardPage /> },
           { path: "/integrations/postgres-config/:id", element: <PostgresConfigPage /> },
           { path: "/integrations/postgres-logs/:id", element: <PostgresLogsPage /> },

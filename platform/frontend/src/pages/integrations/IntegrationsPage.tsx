@@ -22,6 +22,10 @@ function isPostgresService(name: string) {
   return name.toLowerCase().includes("postgres")
 }
 
+function isRedisService(name: string) {
+  return name.toLowerCase().includes("redis")
+}
+
 function ServiceRow({ service }: { service: DiscoveryService }) {
   return (
     <div className="rounded-xl border border-border bg-card/50 p-3">
@@ -75,6 +79,22 @@ function ServiceRow({ service }: { service: DiscoveryService }) {
           </Link>
           <Link
             to={`/integrations/postgres-logs/${service.id}`}
+            className="inline-flex items-center rounded-md border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted"
+          >
+            Logs
+          </Link>
+        </div>
+      ) : null}
+      {isRedisService(service.service_name) && service.log_collection_on && service.metric_collection_on ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            to={`/integrations/redis-dashboard/${service.id}`}
+            className="inline-flex items-center rounded-md bg-red-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-red-500"
+          >
+            Open Redis Dashboard
+          </Link>
+          <Link
+            to={`/integrations/redis-logs/${service.id}`}
             className="inline-flex items-center rounded-md border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted"
           >
             Logs

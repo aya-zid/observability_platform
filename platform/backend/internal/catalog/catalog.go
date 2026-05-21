@@ -434,6 +434,99 @@ Follow PART 1 in the LogsGuide above to switch to a static file for proper colle
 		DetectionHints: []string{"postgres", "postgresql"},
 		NVD:            &NVDProduct{Vendor: "postgresql", Product: "postgresql"},
 	},
+
+	"redis": {
+		Name:                   "redis",
+		DisplayName:            "Redis",
+		Category:               "cache",
+		DefaultLogPaths:        []string{"/var/log/redis/redis-server.log"},
+		DefaultLoggingMode:     LoggingModeFile,
+		MetricsPattern:         MetricsPatternExporter,
+		DefaultMetricsEndpoint: "http://127.0.0.1:9121/metrics",
+		ExporterName:           "redis_exporter",
+		ExporterPort:           9121,
+		MetricsGuide: `## Redis Metrics (redis_exporter)
+
+Redis exposes metrics via a Prometheus exporter — there is no built-in HTTP endpoint.
+
+**Step 1 — Install redis_exporter**
+
+` + "```bash" + `
+wget https://github.com/oliver006/redis_exporter/releases/download/v1.58.0/redis_exporter-v1.58.0.linux-amd64.tar.gz
+tar xzf redis_exporter-v1.58.0.linux-amd64.tar.gz
+sudo mv redis_exporter-v1.58.0.linux-amd64/redis_exporter /usr/local/bin/
+sudo chmod +x /usr/local/bin/redis_exporter
+` + "```" + `
+
+**Step 2 — Create systemd service**
+
+` + "```bash" + `
+sudo tee /etc/systemd/system/redis_exporter.service <<EOF
+[Unit]
+Description=Redis Exporter
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/redis_exporter \\
+  --redis.addr redis://localhost:6379 \\
+  --web.listen-address 127.0.0.1:9121 \\
+  --include-system-metrics
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+` + "```" + `
+
+**Step 3 — Start and verify**
+
+` + "```bash" + `
+sudo systemctl daemon-reload
+sudo systemctl enable --now redis_exporter
+curl -s http://127.0.0.1:9121/metrics | grep redis_up
+` + "```" + `
+
+The **--web.listen-address 127.0.0.1:9121** flag binds the exporter to localhost only — same security model as Nginx stub_status.`,
+		LogsGuide: `## Redis Log Collection
+
+**Step 1 — Configure logging in redis.conf**
+
+Edit **/etc/redis/redis.conf**:
+
+` + "```conf" + `
+logfile /var/log/redis/redis-server.log
+loglevel notice
+slowlog-log-slower-than 10000
+slowlog-max-len 256
+` + "```" + `
+
+**Step 2 — Create log directory**
+
+` + "```bash" + `
+sudo mkdir -p /var/log/redis
+sudo chown redis:redis /var/log/redis
+sudo chmod 755 /var/log/redis
+` + "```" + `
+
+**Step 3 — Restart and verify**
+
+` + "```bash" + `
+sudo systemctl restart redis-server
+sudo tail -n 20 /var/log/redis/redis-server.log
+` + "```" + `
+
+Expected output:
+
+` + "```" + `
+1016:M 20 May 2026 11:38:45.591 * Ready to accept connections tcp
+` + "```" + `
+
+Log lines prefixed with **#** are warnings and errors — these are your actionable alerts.`,
+		DetectionHints: []string{"redis", "redis-server"},
+		NVD:            &NVDProduct{Vendor: "redis", Product: "redis"},
+	},
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

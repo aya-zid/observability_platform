@@ -73,6 +73,13 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		tenantRepo,
 	)
 
+	redisDashboardService := service.NewRedisDashboardService(cfg, infrastructure.Redis)
+	redisDashboardHandler := NewRedisDashboardHandler(
+		redisDashboardService,
+		discoveryRepo,
+		tenantRepo,
+	)
+
 	e.GET("/install.sh", installHandler.AgentInstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
@@ -118,6 +125,10 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/postgres/:id/dashboard", postgresDashboardHandler.Dashboard)
 		api.GET("/postgres/:id/config", postgresDashboardHandler.Config)
 		api.GET("/postgres/:id/logs", postgresDashboardHandler.Logs)
+
+		// Redis dashboard routes
+		api.GET("/redis/:id/dashboard", redisDashboardHandler.Dashboard)
+		api.GET("/redis/:id/logs", redisDashboardHandler.Logs)
 
 		// Apache dashboard routes
 		api.GET("/apache/:id/dashboard", apacheDashboardHandler.Dashboard)

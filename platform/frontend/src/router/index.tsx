@@ -14,6 +14,8 @@ import { ApacheLogsPage } from "@/pages/integrations/ApacheLogsPage"
 import { PostgresDashboardPage } from "@/pages/integrations/PostgresDashboardPage"
 import { PostgresConfigPage } from "@/pages/integrations/PostgresConfigPage"
 import { PostgresLogsPage } from "@/pages/integrations/PostgresLogsPage"
+import { RedisDashboardPage } from "@/pages/integrations/RedisDashboardPage"
+import { RedisLogsPage } from "@/pages/integrations/RedisLogsPage"
 import LogsPage from "@/pages/logs/LogsPage"
 import MetricsPage from "@/pages/metrics/MetricsPage"
 import OverviewPage from "@/pages/overview/OverviewPage"
@@ -54,6 +56,8 @@ export const router = createBrowserRouter([
           { path: "/integrations/postgres-dashboard/:id", element: <PostgresDashboardPage /> },
           { path: "/integrations/postgres-config/:id", element: <PostgresConfigPage /> },
           { path: "/integrations/postgres-logs/:id", element: <PostgresLogsPage /> },
+          { path: "/integrations/redis-dashboard/:id", element: <RedisDashboardPage /> },
+          { path: "/integrations/redis-logs/:id", element: <RedisLogsPage /> },
           { path: "/settings/api-keys", element: <ApiKeysPage /> },
           { path: "/profile", element: <ProfilePage /> },
         ],

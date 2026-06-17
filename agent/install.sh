@@ -638,18 +638,25 @@ discover_postgresql() {
 # ---------- MYSQL / MARIADB ----------
 discover_mysql() {
   local UNIT=$1
-  info "  Discovering mysql/mariadb ($UNIT)..."
+  local SVC_NAME=${2:-mysql}
+  info "  Discovering ${SVC_NAME} ($UNIT)..."
   local PORT; PORT=$(get_unit_port "${UNIT}.service" || echo "3306")
   local PATHS=""
+  local VERSION=""
 
   if command -v mysql &>/dev/null; then
-    local LOG_FILE ERR_LOG
+    local LOG_FILE ERR_LOG SLOW_LOG
     LOG_FILE=$(mysql -u root --batch --skip-column-names \
       -e "SELECT @@general_log_file;" 2>/dev/null | tr -d ' ') || true
     ERR_LOG=$(mysql -u root --batch --skip-column-names \
       -e "SELECT @@log_error;" 2>/dev/null | tr -d ' ') || true
+    SLOW_LOG=$(mysql -u root --batch --skip-column-names \
+      -e "SELECT @@slow_query_log_file;" 2>/dev/null | tr -d ' ') || true
+    VERSION=$(mysql -u root --batch --skip-column-names \
+      -e "SELECT @@version;" 2>/dev/null | tr -d ' ') || true
     [ -f "$LOG_FILE" ] && PATHS="$LOG_FILE"
     [ -f "$ERR_LOG"  ] && PATHS="${PATHS}"$'\n'"$ERR_LOG"
+    [ -f "$SLOW_LOG" ] && PATHS="${PATHS}"$'\n'"$SLOW_LOG"
   fi
   [ -f /var/log/mysql/error.log ]     && PATHS="${PATHS}"$'\n'"/var/log/mysql/error.log"
   [ -f /var/log/mysql/mysql.log ]     && PATHS="${PATHS}"$'\n'"/var/log/mysql/mysql.log"
@@ -657,13 +664,13 @@ discover_mysql() {
   [ -f /var/log/mysqld.log ]          && PATHS="${PATHS}"$'\n'"/var/log/mysqld.log"
   PATHS=$(echo "$PATHS" | sort -u | filter_existing)
 
-  LOG_FORMAT["mysql"]="mysql_log"
+  LOG_FORMAT["$SVC_NAME"]="mysql_log"
   local STATUS="no_logs"
   [ -n "$PATHS" ] && STATUS="logs_found"
-  local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  [ -z "$VERSION" ] && VERSION=$(get_unit_version "${UNIT}.service" || echo "")
   local NOTES="port=${PORT}"
   unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
-  register_service "mysql" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
+  register_service "$SVC_NAME" "$PATHS" "$STATUS" "$PORT" "$NOTES" "$VERSION"
 }
 
 # ---------- MONGODB ----------
@@ -1014,7 +1021,8 @@ unit_canonical() {
     nginx)                          echo "nginx" ;;
     apache2|httpd)                  echo "apache" ;;
     postgresql@*|postgresql)        echo "postgresql" ;;
-    mysql|mysqld|mariadb)           echo "mysql" ;;
+    mysql|mysqld)                   echo "mysql" ;;
+    mariadb)                        echo "mariadb" ;;
     mongod|mongodb)                 echo "mongodb" ;;
     redis|redis-server|redis@*)     echo "redis" ;;
     php*fpm*|php-fpm)               echo "phpfpm" ;;
@@ -1072,6 +1080,11 @@ while IFS= read -r UNIT; do
       postgresql)
         discover_postgresql "$UNIT"
         ;;
+      mysql|mariadb)
+        [ "${PROCESSED_CANONICALS[$CANONICAL]+_}" ] && continue
+        PROCESSED_CANONICALS[$CANONICAL]=1
+        discover_mysql "$UNIT" "$CANONICAL"
+        ;;
       *)
         [ "${PROCESSED_CANONICALS[$CANONICAL]+_}" ] && continue
         PROCESSED_CANONICALS[$CANONICAL]=1
@@ -1114,7 +1127,8 @@ identify_container_service() {
   case "$IMG_BASE" in
     nginx)                                 echo "nginx" ; return ;;
     apache*|httpd)                         echo "apache" ; return ;;
-    mysql|mariadb)                         echo "mysql" ; return ;;
+    mysql)                                echo "mysql" ; return ;;
+    mariadb)                              echo "mariadb" ; return ;;
     postgres*|postgresql*)                 echo "postgresql" ; return ;;
     redis*)                                echo "redis" ; return ;;
     mongo*)                                echo "mongodb" ; return ;;
@@ -1147,7 +1161,8 @@ identify_container_service() {
     *postgres*) echo "postgresql" ; return ;;
     *redis-server*|*redis*) echo "redis" ; return ;;
     *mongod*)   echo "mongodb" ; return ;;
-    *mysqld*|*mariadbd*) echo "mysql" ; return ;;
+    *mysqld*)   echo "mysql" ; return ;;
+    *mariadbd*) echo "mariadb" ; return ;;
     *loki*)     echo "loki" ; return ;;
     *tempo*)    echo "tempo" ; return ;;
     *vmselect*) echo "vmselect" ; return ;;
@@ -1567,45 +1582,52 @@ DOCKERMETRICTIMER
   if systemctl start agent-docker-metrics.timer && systemctl start agent-docker-metrics; then
     log "  Docker container metrics collector started (timer: every 30s)"
     DOCKER_METRICS_OK=true
+    METRIC_PIPELINE+=("prometheus/docker_containers")
+  else
+    warn "  Docker metrics collector failed to start"
+    MANUAL_STEPS+=("Docker container metrics: systemctl start agent-docker-metrics.timer")
+  fi
+else
+  info "  Docker not available — skipping container metrics collector"
+fi
 
-    if command -v python3 &>/dev/null; then
-      cat > /usr/local/bin/agent-prom-file-server <<'PROMSERVER'
+# ============================================
+# PROM FILE SERVER (always installed, serves docker + mariadb)
+# ============================================
+if command -v python3 &>/dev/null; then
+  cat > /usr/local/bin/agent-prom-file-server <<'PROMSERVER'
 #!/usr/bin/env python3
-"""Serve Prometheus text files from /var/lib/otelcol/ on port 19101."""
+"""Serve Prometheus text files on port 19101."""
 import http.server, os, socketserver
 
 PORT = 19101
-PROM_DIR = "/var/lib/otelcol"
+
+ROUTES = {
+    "/docker":  "/var/lib/otelcol/docker-metrics.prom",
+    "/metrics": "/var/lib/otelcol/docker-metrics.prom",
+    "/mariadb": "/var/lib/agent-prom/mariadb_query_digests.prom",
+    "/phpfpm":  "/var/lib/agent-prom/phpfpm_opcache.prom",
+}
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
-        files = {
-            "/docker":  "docker-metrics.prom",
-            "/metrics": None,
-        }
-        if self.path not in files:
+        fpath = ROUTES.get(self.path)
+        if fpath is None:
             self.send_response(404); self.end_headers(); return
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4")
         self.end_headers()
-        if files[self.path] is None:
-            fpath = os.path.join(PROM_DIR, "docker-metrics.prom")
-            if os.path.exists(fpath):
-                with open(fpath, "rb") as f:
-                    self.wfile.write(f.read())
-        else:
-            fpath = os.path.join(PROM_DIR, files[self.path])
-            if os.path.exists(fpath):
-                with open(fpath, "rb") as f:
-                    self.wfile.write(f.read())
+        if os.path.exists(fpath):
+            with open(fpath, "rb") as f:
+                self.wfile.write(f.read())
 
 with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
     httpd.serve_forever()
 PROMSERVER
-      chmod +x /usr/local/bin/agent-prom-file-server
+  chmod +x /usr/local/bin/agent-prom-file-server
 
-      cat > /etc/systemd/system/agent-prom-file-server.service <<'PROMSERVERSVC'
+  cat > /etc/systemd/system/agent-prom-file-server.service <<'PROMSERVERSVC'
 [Unit]
 Description=Observability Agent — Prometheus metrics file server (port 19101)
 After=network.target
@@ -1621,32 +1643,17 @@ SyslogIdentifier=agent-prom-file-server
 WantedBy=multi-user.target
 PROMSERVERSVC
 
-      systemctl daemon-reload
-      systemctl enable agent-prom-file-server
-      if systemctl start agent-prom-file-server && sleep 1 && systemctl is-active --quiet agent-prom-file-server; then
-        log "  Prometheus file server started on 127.0.0.1:19101"
-        METRIC_PIPELINE+=("prometheus/docker_containers")
-      else
-        warn "  Prometheus file server failed to start"
-        MANUAL_STEPS+=("Start the metrics file server: systemctl start agent-prom-file-server")
-      fi
-    else
-      warn "  python3 not found — cannot start Prometheus file server"
-      if ask "  Install python3 to enable container metrics scraping?"; then
-        apt-get install -y python3 2>/dev/null || yum install -y python3 2>/dev/null || true
-        command -v python3 &>/dev/null && {
-          fixed "  python3 installed"
-          systemctl start agent-prom-file-server 2>/dev/null && \
-            METRIC_PIPELINE+=("prometheus/docker_containers") || true
-        }
-      fi
-    fi
+  systemctl daemon-reload
+  systemctl enable agent-prom-file-server
+  if systemctl start agent-prom-file-server && sleep 1 && systemctl is-active --quiet agent-prom-file-server; then
+    log "Prometheus file server started on 127.0.0.1:19101 (routes: /docker, /mariadb)"
   else
-    warn "  Docker metrics collector failed to start"
-    MANUAL_STEPS+=("Docker container metrics: systemctl start agent-docker-metrics.timer")
+    warn "Prometheus file server failed to start"
+    MANUAL_STEPS+=("Start the metrics file server: systemctl start agent-prom-file-server")
   fi
 else
-  info "  Docker not available — skipping container metrics collector"
+  warn "python3 not found — Prometheus file server not installed"
+  MANUAL_STEPS+=("Install python3 and then: systemctl enable --now agent-prom-file-server")
 fi
 
 # ============================================
@@ -1838,10 +1845,17 @@ ${PATHS_YAML}
 RECV
       ;;
     mysql_log)
-      cat >> "$RECV_TMP" << RECV
-  filelog/${SVC}:
+      # Split paths: error.log → log_kind="error", slow.log/general log → log_kind="slow"
+      ERR_PATHS=$(echo "$PATHS" | grep -iE "error\." || true)
+      SLOW_PATHS=$(echo "$PATHS" | grep -ivE "error\." || true)
+      ERR_YAML=$(echo "$ERR_PATHS" | while IFS= read -r P; do [ -n "$P" ] && echo "      - $P"; done)
+      SLOW_YAML=$(echo "$SLOW_PATHS" | while IFS= read -r P; do [ -n "$P" ] && echo "      - $P"; done)
+
+      if [ -n "$ERR_YAML" ]; then
+        cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}_error:
     include:
-${PATHS_YAML}
+${ERR_YAML}
     include_file_path: true
     start_at: end
     operators:
@@ -1856,7 +1870,32 @@ ${PATHS_YAML}
       service.name: ${SVC}
       job: ${SVC}
       log.format: mysql_log
+      log_kind: error
 RECV
+      fi
+
+      if [ -n "$SLOW_YAML" ]; then
+        cat >> "$RECV_TMP" << RECV
+  filelog/${SVC}_slow:
+    include:
+${SLOW_YAML}
+    include_file_path: true
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.\dZ+:\-]*\s+\d+\s+\[(?P<log_level>System|Warning|ERROR|Note)\](?:\s+\[(?P<mysql_error_code>MY-\d+)\])?\s+\[(?P<mysql_subsystem>\w+)\]\s+(?P<mysql_message>.{0,400})'
+        on_error: send_quiet
+      - type: add
+        field: attributes.log_format
+        value: mysql_log
+        on_error: send_quiet
+    resource:
+      service.name: ${SVC}
+      job: ${SVC}
+      log.format: mysql_log
+      log_kind: slow
+RECV
+      fi
       ;;
     phpfpm_log)
       cat >> "$RECV_TMP" << RECV
@@ -1960,6 +1999,38 @@ if [ "${DOCKER_METRICS_OK:-false}" = "true" ]; then
           metrics_path: /docker
           scrape_interval: 35s
 "
+fi
+
+# ---- MariaDB query digest receiver (if .prom file exists) ----
+MARIADB_DIGEST_YAML=""
+if [ -f /var/lib/agent-prom/mariadb_query_digests.prom ]; then
+  MARIADB_DIGEST_YAML="
+  prometheus/mariadb_digests:
+    config:
+      scrape_configs:
+        - job_name: mariadb_query_digests
+          static_configs:
+            - targets: ['localhost:19101']
+          metrics_path: /mariadb
+          scrape_interval: 60s
+"
+  METRIC_PIPELINE+=("prometheus/mariadb_digests")
+fi
+
+# ---- PHP-FPM OPcache receiver (if .prom file exists) ----
+PHPFPM_OPCACHE_YAML=""
+if [ -f /var/lib/agent-prom/phpfpm_opcache.prom ]; then
+  PHPFPM_OPCACHE_YAML="
+  prometheus/phpfpm_opcache:
+    config:
+      scrape_configs:
+        - job_name: phpfpm_opcache
+          static_configs:
+            - targets: ['localhost:19101']
+          metrics_path: /phpfpm
+          scrape_interval: 60s
+"
+  METRIC_PIPELINE+=("prometheus/phpfpm_opcache")
 fi
 
 # ---- Assemble pipeline receiver lists ----
@@ -2121,6 +2192,8 @@ receivers:
     enable_metric_type: true
 
 ${DOCKER_STATS_YAML}
+${MARIADB_DIGEST_YAML}
+${PHPFPM_OPCACHE_YAML}
 ${FILELOG_RECEIVERS_YAML}
 
 processors:

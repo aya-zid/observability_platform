@@ -11,11 +11,14 @@ import { NginxLogsPage } from "@/pages/integrations/NginxLogsPage"
 import { NginxSlowRequestsPage } from "@/pages/integrations/NginxSlowRequestsPage"
 import { ApacheDashboardPage } from "@/pages/integrations/ApacheDashboardPage"
 import { ApacheLogsPage } from "@/pages/integrations/ApacheLogsPage"
+import { ApacheSlowRequestsPage } from "@/pages/integrations/ApacheSlowRequestsPage"
 import { PostgresDashboardPage } from "@/pages/integrations/PostgresDashboardPage"
 import { PostgresConfigPage } from "@/pages/integrations/PostgresConfigPage"
 import { PostgresLogsPage } from "@/pages/integrations/PostgresLogsPage"
 import { RedisDashboardPage } from "@/pages/integrations/RedisDashboardPage"
 import { RedisLogsPage } from "@/pages/integrations/RedisLogsPage"
+import { MariaDBDashboardPage } from "@/pages/integrations/MariaDBDashboardPage"
+import { MariaDBLogsPage } from "@/pages/integrations/MariaDBLogsPage"
 import LogsPage from "@/pages/logs/LogsPage"
 import MetricsPage from "@/pages/metrics/MetricsPage"
 import OverviewPage from "@/pages/overview/OverviewPage"
@@ -52,12 +55,15 @@ export const router = createBrowserRouter([
           { path: "/integrations/nginx-dashboard/:id/slow-requests", element: <NginxSlowRequestsPage /> },
           { path: "/integrations/nginx-logs/:id", element: <NginxLogsPage /> },
           { path: "/integrations/apache-dashboard/:id", element: <ApacheDashboardPage /> },
+          { path: "/integrations/apache-dashboard/:id/slow-requests", element: <ApacheSlowRequestsPage /> },
           { path: "/integrations/apache-logs/:id", element: <ApacheLogsPage /> },
           { path: "/integrations/postgres-dashboard/:id", element: <PostgresDashboardPage /> },
           { path: "/integrations/postgres-config/:id", element: <PostgresConfigPage /> },
           { path: "/integrations/postgres-logs/:id", element: <PostgresLogsPage /> },
           { path: "/integrations/redis-dashboard/:id", element: <RedisDashboardPage /> },
           { path: "/integrations/redis-logs/:id", element: <RedisLogsPage /> },
+          { path: "/integrations/mariadb-dashboard/:id", element: <MariaDBDashboardPage /> },
+          { path: "/integrations/mariadb-logs/:id", element: <MariaDBLogsPage /> },
           { path: "/settings/api-keys", element: <ApiKeysPage /> },
           { path: "/profile", element: <ProfilePage /> },
         ],

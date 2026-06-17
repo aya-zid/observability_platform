@@ -53,6 +53,9 @@ type RedisDashboardSummary struct {
 	CpuSysPerSec           *float64 `json:"cpu_sys_per_sec,omitempty"`
 	CpuUserPerSec          *float64 `json:"cpu_user_per_sec,omitempty"`
 	ConnectedSlaves        *float64 `json:"connected_slaves,omitempty"`
+	MemLuaBytes            *float64 `json:"mem_lua_bytes,omitempty"`
+	MemScriptsBytes        *float64 `json:"mem_scripts_bytes,omitempty"`
+	MemStartupBytes        *float64 `json:"mem_startup_bytes,omitempty"`
 	LatestForkSeconds      *float64 `json:"latest_fork_seconds,omitempty"`
 	RDBChangesSinceSave    *float64 `json:"rdb_changes_since_last_save,omitempty"`
 	RDBSaveInProgress      *float64 `json:"rdb_save_in_progress,omitempty"`
@@ -221,6 +224,9 @@ func (s *RedisDashboardService) fetchDashboard(
 		"rejected_conns":    "rate(redis_rejected_connections_total[" + rateWindow + "]) or vector(0)",
 		"conn_received":     "rate(redis_connections_received_total[" + rateWindow + "]) or vector(0)",
 		"connected_slaves":  "redis_connected_slaves",
+		"mem_lua_bytes":     "redis_memory_used_lua_bytes",
+		"mem_scripts_bytes": "redis_memory_used_scripts_bytes",
+		"mem_startup_bytes": "redis_memory_used_startup_bytes",
 		"latest_fork":       "redis_latest_fork_seconds",
 		"rdb_changes":       "redis_rdb_changes_since_last_save",
 		"rdb_save":          "redis_rdb_bgsave_in_progress",
@@ -335,6 +341,9 @@ func (s *RedisDashboardService) fetchDashboard(
 		CpuSysPerSec:           latestVMValue(results["cpu_sys"].data),
 		CpuUserPerSec:          latestVMValue(results["cpu_user"].data),
 		ConnectedSlaves:        latestVMValue(results["connected_slaves"].data),
+		MemLuaBytes:            latestVMValue(results["mem_lua_bytes"].data),
+		MemScriptsBytes:        latestVMValue(results["mem_scripts_bytes"].data),
+		MemStartupBytes:        latestVMValue(results["mem_startup_bytes"].data),
 		LatestForkSeconds:      latestVMValue(results["latest_fork"].data),
 		RDBChangesSinceSave:    latestVMValue(results["rdb_changes"].data),
 		RDBSaveInProgress:      latestVMValue(results["rdb_save"].data),

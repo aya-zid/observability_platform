@@ -156,34 +156,20 @@ export function formatTimestampNano(unixNano: string | number): string {
   return formatTimestamp(seconds)
 }
 
-/**
- * Format a number with commas and appropriate units.
- *
- * @param value - Numeric value
- * @param decimals - Number of decimal places (default 2)
- * @returns Formatted string (e.g., "1,234.56")
- */
-export function formatNumber(value: number, decimals = 2): string {
-  return value.toLocaleString('en-US', {
+export function formatNumber(value: number | null | undefined, digits = 2): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(value) >= 10_000) return `${(value / 1_000).toFixed(1)}k`;
+  return value.toLocaleString(undefined, {
     minimumFractionDigits: 0,
-    maximumFractionDigits: decimals,
-    useGrouping: false
-  })
+    maximumFractionDigits: digits,
+  });
 }
 
-/**
- * Format a number as a percentage.
- *
- * @param value - Numeric value (0-100 or 0-1)
- * @param decimals - Number of decimal places (default 2)
- * @returns Formatted string like "95.12%"
- */
-export function formatPercent(value: number, decimals = 2): string {
-  const normalized = value > 1 ? value : value * 100
-  return normalized.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: decimals
-  }) + '%'
+export function formatPercent(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (value >= 10) return `${value.toFixed(1)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 /**
@@ -232,26 +218,16 @@ export function parseCountResponse(data: any): number {
   )
 }
 
-/**
- * Convert seconds to a human-readable duration string.
- *
- * @param seconds - Duration in seconds
- * @returns String like "1h 23m 45s" or "45s"
- */
-export function formatDuration(seconds: number): string {
-  if (seconds < 60) {
-    return `${Math.round(seconds)}s`
-  }
-
-  if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60)
-    const secs = Math.round(seconds % 60)
-    return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`
-  }
-
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  if (seconds < 1) return `${(seconds * 1000).toFixed(0)}ms`;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m ${Math.floor(seconds % 60)}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
 }
 
 function pad2(value: number): string {
@@ -312,20 +288,16 @@ export function dateTimeInputToSeconds(dateValue: string, timeValue: string): nu
   return Math.floor(parsed.getTime() / 1000)
 }
 
-/**
- * Convert bytes to human-readable format.
- *
- * @param bytes - Size in bytes
- * @returns String like "1.5 MB"
- */
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
-
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -66,9 +66,6 @@ func (r *DiscoveryRepository) UpdateServiceConfigCtx(
 	confirmedLogPath string,
 	logPathSource string,
 	userMetricsEndpoint string,
-	metricsMode string,
-	isJavaApp bool,
-	jmxExporterPort *int,
 ) error {
 	tx := r.db.WithContext(ctx).
 		Model(&domain.DiscoveredService{}).
@@ -77,9 +74,6 @@ func (r *DiscoveryRepository) UpdateServiceConfigCtx(
 			"confirmed_log_path":    confirmedLogPath,
 			"log_path_source":       logPathSource,
 			"user_metrics_endpoint": userMetricsEndpoint,
-			"metrics_mode":          metricsMode,
-			"is_java_app":           isJavaApp,
-			"jmx_exporter_port":     jmxExporterPort,
 			"updated_at":            time.Now(),
 		})
 	if tx.Error != nil {

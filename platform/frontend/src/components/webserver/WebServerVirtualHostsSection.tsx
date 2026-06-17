@@ -22,6 +22,7 @@ type Props = {
   hosts: VirtualHostEntry[]
   onChange: (hosts: VirtualHostEntry[]) => void
   service?: "nginx" | "apache"
+  hideGuide?: boolean
 }
 
 function LogFormatWarning({ hasSharedLog, service }: { hasSharedLog: boolean; service: "nginx" | "apache" }) {
@@ -243,7 +244,7 @@ function VirtualHostRow({
   )
 }
 
-export default function WebServerVirtualHostsSection({ hosts, onChange, service = "nginx" }: Props) {
+export default function WebServerVirtualHostsSection({ hosts, onChange, service = "nginx", hideGuide = false }: Props) {
   const hasSharedLog = hosts.some((h) => h.is_shared_log)
   const displayName = service === "apache" ? "Apache" : "Nginx"
 
@@ -273,7 +274,7 @@ export default function WebServerVirtualHostsSection({ hosts, onChange, service 
 
   return (
     <div className="grid gap-4">
-      <LogFormatWarning hasSharedLog={hasSharedLog} service={service} />
+      {!hideGuide && <LogFormatWarning hasSharedLog={hasSharedLog} service={service} />}
 
       {hosts.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-muted/10 py-10 text-center text-sm text-muted-foreground">
@@ -305,11 +306,15 @@ export default function WebServerVirtualHostsSection({ hosts, onChange, service 
         Add virtual host manually
       </button>
 
-      <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground leading-relaxed">
-        <strong>How this works:</strong> Each row is one domain (virtual host). Per-domain log files let us show you separate dashboards per domain.
-        If multiple domains share one log file, mark it as "Shared log" — we'll parse the <code className="rounded bg-muted px-1">host=</code> field to split traffic.
-        The agent auto-detects this table by reading your {displayName} site configs.
-      </div>
+      {!hideGuide && (
+        <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground leading-relaxed">
+          <strong>How this works:</strong> Each row is one domain (virtual host). Per-domain log files let us show you separate dashboards per domain.
+          If multiple domains share one log file, mark it as "Shared log" — we'll parse the <code className="rounded bg-muted px-1">host=</code> field to split traffic.
+          The agent auto-detects this table by reading your {displayName} site configs.
+        </div>
+      )}
     </div>
   )
 }
+
+export { LogFormatWarning }

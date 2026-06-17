@@ -26,11 +26,7 @@ import (
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/repository"
 )
 
-var (
-	ErrInvalidMetricsMode      = errors.New("invalid metrics mode")
-	ErrMetricsEndpointRequired = errors.New("metrics endpoint is required for prometheus mode")
-	ErrJMXExporterPortRequired = errors.New("jmx exporter port is required for jmx mode")
-)
+var ErrMetricsEndpointRequired = errors.New("metrics endpoint is required")
 
 type DiscoveryService struct {
 	hostRepo      *repository.HostRepository
@@ -103,7 +99,6 @@ func (s *DiscoveryService) ListServices(ctx context.Context, tenantID uint, mach
 		if supported {
 			category = def.Category
 		}
-		metricsMode := normalizedMetricsMode(row.MetricsMode, supported)
 		logPathSource := normalizedLogPathSource(row.LogPathSource)
 
 		out = append(out, dto.DiscoveryServiceListItem{
@@ -116,7 +111,6 @@ func (s *DiscoveryService) ListServices(ctx context.Context, tenantID uint, mach
 			IsSupported:        supported,
 			ConfirmedLogPath:   row.ConfirmedLogPath,
 			LogPathSource:      logPathSource,
-			MetricsMode:        metricsMode,
 			LogCollectionOn:    row.LogCollectionOn,
 			MetricCollectionOn: row.MetricCollectionOn,
 			IntegrationStatus:  string(row.IntegrationStatus),
@@ -173,7 +167,6 @@ func (s *DiscoveryService) GetServiceDetail(ctx context.Context, tenantID uint, 
 	if def != nil {
 		category = def.Category
 	}
-	metricsMode := normalizedMetricsMode(service.MetricsMode, supported)
 	logPathSource := normalizedLogPathSource(service.LogPathSource)
 	suggestedMetricsEndpoint := strings.TrimSpace(service.UserMetricsEndpoint)
 	if suggestedMetricsEndpoint == "" && def != nil {
@@ -221,9 +214,6 @@ func (s *DiscoveryService) GetServiceDetail(ctx context.Context, tenantID uint, 
 		SuggestedLogPath:         suggestedLogPath,
 		UserMetricsEndpoint:      service.UserMetricsEndpoint,
 		SuggestedMetricsEndpoint: suggestedMetricsEndpoint,
-		MetricsMode:              metricsMode,
-		IsJavaApp:                service.IsJavaApp,
-		JMXExporterPort:          service.JMXExporterPort,
 		DetectedLogPaths:         paths,
 		LogCollectionOn:          service.LogCollectionOn,
 		MetricCollectionOn:       service.MetricCollectionOn,
@@ -373,25 +363,11 @@ func (s *DiscoveryService) UpdateCollection(ctx context.Context, tenantID uint, 
 }
 
 func (s *DiscoveryService) UpdateServiceConfig(ctx context.Context, tenantID uint, serviceID uint, req dto.UpdateServiceConfigRequest) error {
-	req.MetricsMode = strings.TrimSpace(req.MetricsMode)
-	switch req.MetricsMode {
-	case "", "catalog", "prometheus", "jmx", "none", "unknown":
-	default:
-		return ErrInvalidMetricsMode
-	}
-
 	confirmedLogPath := strings.TrimSpace(req.ConfirmedLogPath)
 	userMetricsEndpoint := strings.TrimSpace(req.UserMetricsEndpoint)
 	logPathSource := "detected"
 	if confirmedLogPath != "" {
 		logPathSource = "user"
-	}
-
-	if req.MetricsMode == "prometheus" && userMetricsEndpoint == "" {
-		return ErrMetricsEndpointRequired
-	}
-	if req.MetricsMode == "jmx" && req.JMXExporterPort == nil {
-		return ErrJMXExporterPortRequired
 	}
 
 	// Handle web-server virtual hosts update
@@ -489,9 +465,6 @@ func (s *DiscoveryService) UpdateServiceConfig(ctx context.Context, tenantID uin
 		confirmedLogPath,
 		logPathSource,
 		userMetricsEndpoint,
-		req.MetricsMode,
-		req.IsJavaApp,
-		req.JMXExporterPort,
 	)
 }
 
@@ -500,17 +473,6 @@ func IsNotFoundError(err error) bool {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-func normalizedMetricsMode(metricsMode string, supported bool) string {
-	metricsMode = strings.TrimSpace(metricsMode)
-	if metricsMode != "" {
-		return metricsMode
-	}
-	if supported {
-		return "catalog"
-	}
-	return "unknown"
-}
 
 func normalizedLogPathSource(source string) string {
 	source = strings.TrimSpace(source)

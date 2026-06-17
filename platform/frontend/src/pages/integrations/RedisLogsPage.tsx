@@ -15,6 +15,7 @@ import {
   secondsToNanos,
 } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
+import { RefreshCw } from "lucide-react"
 import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
 
 const TIME_RANGES = [
@@ -226,6 +227,14 @@ export function RedisLogsPage() {
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={handleTimeChange} />
             <LangToggle />
+            <button
+              type="button"
+              onClick={() => logsQuery.refetch()}
+              className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
+              title="Refresh"
+            >
+              <RefreshCw className={cn('h-4 w-4', logsQuery.isRefetching && 'animate-spin')} />
+            </button>
             <Link to={`/integrations/redis-dashboard/${id}`} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">
               {t("shared.dashboard")}
             </Link>

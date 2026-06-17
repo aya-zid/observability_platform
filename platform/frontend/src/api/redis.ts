@@ -66,6 +66,9 @@ export type RedisDashboardSummary = {
   cpu_sys_per_sec?: number
   cpu_user_per_sec?: number
   connected_slaves?: number
+  mem_lua_bytes?: number
+  mem_scripts_bytes?: number
+  mem_startup_bytes?: number
   latest_fork_seconds?: number
   rdb_changes_since_last_save?: number
   rdb_save_in_progress?: number

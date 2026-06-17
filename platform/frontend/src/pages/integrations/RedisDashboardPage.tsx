@@ -19,6 +19,7 @@ import { getRedisDashboardSummary, type RedisDashboardSummary, type RedisTimePoi
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { dateTimeInputToSeconds, formatBytes, formatDateInputValue, formatDuration, formatNumber, formatPercent, formatTimeInputValue, getNowSeconds, getStartSeconds, secondsToNanos } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
+import { RefreshCw } from "lucide-react"
 import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
 
 const TIME_RANGES = [
@@ -149,6 +150,12 @@ function TimeRangeSelector({
   )
 }
 
+const C = {
+  blue: "#0ea5e9", green: "#22c55e", amber: "#f59e0b", red: "#ef4444",
+  violet: "#8b5cf6", teal: "#14b8a6", rose: "#f43f5e", cyan: "#06b6d4",
+  indigo: "#6366f1", orange: "#f97316", slate: "#64748b",
+}
+
 const chartStyle = {
   grid: "hsl(var(--border))",
   tick: { fill: "#94a3b8", fontSize: 10 },
@@ -159,6 +166,15 @@ const chartStyle = {
     color: "hsl(var(--foreground))",
     fontSize: "12px",
   },
+}
+
+function SectionHeader({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="mb-1 mt-6">
+      <h2 className="text-base font-semibold">{title}</h2>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+    </div>
+  )
 }
 
 function LinePanel({
@@ -294,6 +310,14 @@ export function RedisDashboardPage() {
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
             <LangToggle />
+            <button
+              type="button"
+              onClick={() => dashQuery.refetch()}
+              className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
+              title="Refresh"
+            >
+              <RefreshCw className={cn('h-4 w-4', dashQuery.isRefetching && 'animate-spin')} />
+            </button>
             <Link to={`/integrations/redis-logs/${id}`} className="rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500">
               {t("shared.viewLogs")}
             </Link>
@@ -312,107 +336,54 @@ export function RedisDashboardPage() {
         </SectionCard>
       ) : null}
 
+      {/* ═══════════════════════════════ 1. STATUS ═══════════════════════════ */}
+      <SectionHeader title="Status" description="Instance health and uptime" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label={t("redisDashboard.up")} value={data?.up === 1 ? "Up" : data?.up === 0 ? "Down" : "-"} tone={data?.up === 1 ? "good" : data?.up === 0 ? "bad" : "neutral"} hint={t("redisDashboard.upHint")} />
         <StatCard label={t("redisDashboard.scrape")} value={data?.scrape_error === 1 ? "Error" : data?.scrape_error === 0 ? "Healthy" : "-"} tone={data?.scrape_error === 1 ? "bad" : data?.scrape_error === 0 ? "good" : "neutral"} hint={t("redisDashboard.scrapeHint")} />
-        <StatCard label={t("redisDashboard.memUsage")} value={data?.memory_usage_pct != null ? formatPercent(data.memory_usage_pct) : "-"} tone={(data?.memory_usage_pct ?? 0) > 80 ? "bad" : (data?.memory_usage_pct ?? 0) > 60 ? "warn" : "good"} hint={data?.memory_used_bytes != null ? formatBytes(data.memory_used_bytes) : undefined} />
-        <StatCard label={t("redisDashboard.memFrag")} value={data?.memory_frag_ratio != null ? formatNumber(data.memory_frag_ratio, 2) : "-"} tone={(data?.memory_frag_ratio ?? 1) > 5 ? "bad" : (data?.memory_frag_ratio ?? 1) > 2 ? "warn" : "good"} hint={t("redisDashboard.memFragHint")} />
-        <StatCard label={t("redisDashboard.clients")} value={data?.connected_clients != null ? formatNumber(data.connected_clients, 0) : "-"} tone={(data?.client_saturation_pct ?? 0) > 80 ? "bad" : (data?.client_saturation_pct ?? 0) > 60 ? "warn" : "good"} hint={data?.client_saturation_pct != null ? t("redisDashboard.clientSatHint", formatPercent(data.client_saturation_pct)) : undefined} />
-        <StatCard label={t("redisDashboard.blockedClients")} value={data?.blocked_clients != null ? formatNumber(data.blocked_clients, 0) : "-"} tone={(data?.blocked_clients ?? 0) > 0 ? "bad" : "good"} hint={t("redisDashboard.blockedClientsHint")} />
-        <StatCard label={t("redisDashboard.cmdsPerSec")} value={data?.commands_per_sec != null ? formatNumber(data.commands_per_sec, 0) : "-"} />
-        <StatCard label={t("redisDashboard.errorReplies")} value={data?.error_replies_per_sec != null ? formatNumber(data.error_replies_per_sec, 2) : "-"} tone={(data?.error_replies_per_sec ?? 0) > 0 ? "warn" : "good"} />
-        <StatCard label={t("redisDashboard.cmdFailures")} value={data?.command_failures_per_sec != null ? formatNumber(data.command_failures_per_sec, 2) : "-"} tone={(data?.command_failures_per_sec ?? 0) > 0 ? "bad" : "good"} />
-        <StatCard label={t("redisDashboard.cacheHit")} value={data?.cache_hit_ratio_pct != null ? formatPercent(data.cache_hit_ratio_pct) : "-"} tone={(data?.cache_hit_ratio_pct ?? 100) < 90 ? "bad" : (data?.cache_hit_ratio_pct ?? 100) < 95 ? "warn" : "good"} hint={t("redisDashboard.cacheHitHint")} />
-        <StatCard label={t("redisDashboard.keys")} value={data?.keys_total != null ? formatNumber(data.keys_total, 0) : "-"} />
-        <StatCard label={t("redisDashboard.slowLog")} value={data?.slow_log_length != null ? formatNumber(data.slow_log_length, 0) : "-"} tone={(data?.slow_log_length ?? 0) > 0 ? "warn" : "good"} />
-        <StatCard label={t("redisDashboard.rejectedConns")} value={data?.rejected_conns_per_sec != null ? formatNumber(data.rejected_conns_per_sec, 2) : "-"} tone={(data?.rejected_conns_per_sec ?? 0) > 0 ? "bad" : "good"} />
-        <StatCard label={t("redisDashboard.latestFork")} value={data?.latest_fork_seconds != null ? `${formatNumber(data.latest_fork_seconds, 3)}s` : "-"} tone={(data?.latest_fork_seconds ?? 0) > 1 ? "warn" : "good"} />
-        <StatCard label={t("redisDashboard.persistenceState")} value={persistenceState} tone={data?.aof_rewrite_in_progress === 1 || data?.rdb_save_in_progress === 1 ? "warn" : "neutral"} hint={data?.rdb_changes_since_last_save != null ? t("redisDashboard.rdbChangesHint", formatNumber(data.rdb_changes_since_last_save, 0)) : undefined} />
-        <StatCard label={t("redisDashboard.netInput")} value={data?.net_input_bytes_per_sec != null ? `${formatBytes(data.net_input_bytes_per_sec)}/s` : "-"} />
-        <StatCard label={t("redisDashboard.netOutput")} value={data?.net_output_bytes_per_sec != null ? `${formatBytes(data.net_output_bytes_per_sec)}/s` : "-"} />
-        <StatCard label={t("redisDashboard.cpuUser")} value={data?.cpu_user_per_sec != null ? formatNumber(data.cpu_user_per_sec, 2) : "-"} />
-        <StatCard label={t("redisDashboard.cpuSys")} value={data?.cpu_sys_per_sec != null ? formatNumber(data.cpu_sys_per_sec, 2) : "-"} />
         <StatCard label={t("redisDashboard.uptime")} value={data?.uptime_seconds != null ? formatDuration(data.uptime_seconds) : "-"} />
-        <StatCard label={t("redisDashboard.peakMem")} value={data?.memory_peak_bytes != null ? formatBytes(data.memory_peak_bytes) : "-"} />
+        <StatCard label="Connected Slaves" value={data?.connected_slaves != null ? formatNumber(data.connected_slaves, 0) : "-"} tone={(data?.connected_slaves ?? 0) === 0 ? "warn" : "good"} hint="Replication clients connected" />
       </div>
 
+      {/* ═══════════════════════════════ 2. MEMORY ══════════════════════════ */}
+      <SectionHeader title="Memory" description="Memory usage, fragmentation, and breakdown by category" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("redisDashboard.memUsage")} value={data?.memory_usage_pct != null ? formatPercent(data.memory_usage_pct) : "-"} tone={(data?.memory_usage_pct ?? 0) > 80 ? "bad" : (data?.memory_usage_pct ?? 0) > 60 ? "warn" : "good"} hint={data?.memory_used_bytes != null ? formatBytes(data.memory_used_bytes) : undefined} />
+        <StatCard label={t("redisDashboard.memFrag")} value={data?.memory_frag_ratio != null ? formatNumber(data.memory_frag_ratio, 2) : "-"} tone={(data?.memory_frag_ratio ?? 1) > 5 ? "bad" : (data?.memory_frag_ratio ?? 1) > 2 ? "warn" : "good"} hint={t("redisDashboard.memFragHint")} />
+        <StatCard label={t("redisDashboard.peakMem")} value={data?.memory_peak_bytes != null ? formatBytes(data.memory_peak_bytes) : "-"} />
+        <StatCard label="Lua Memory" value={data?.mem_lua_bytes != null ? formatBytes(data.mem_lua_bytes) : "-"} hint="Memory used by Lua scripts" />
+        <StatCard label="Scripts Cache" value={data?.mem_scripts_bytes != null ? formatBytes(data.mem_scripts_bytes) : "-"} hint="Cached script bodies" />
+        <StatCard label="Startup Overhead" value={data?.mem_startup_bytes != null ? formatBytes(data.mem_startup_bytes) : "-"} hint="Initial memory overhead" />
+      </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <LinePanel
           title={t("redisDashboard.chartMemory")}
           data={memory}
           formatter={(value) => formatBytes(value)}
           lines={[
-            { key: "used", name: t("redisDashboard.memUsed"), color: "#ef4444" },
-            { key: "rss", name: t("redisDashboard.memRss"), color: "#f59e0b" },
-            { key: "peak", name: t("redisDashboard.memPeak"), color: "#64748b" },
+            { key: "used", name: t("redisDashboard.memUsed"), color: C.red },
+            { key: "rss", name: t("redisDashboard.memRss"), color: C.amber },
+            { key: "peak", name: t("redisDashboard.memPeak"), color: C.slate },
           ]}
         />
+        <LinePanel title={t("redisDashboard.chartFrag")} data={frag} formatter={(value) => formatNumber(value, 2)} lines={[{ key: "ratio", name: t("redisDashboard.fragRatio"), color: C.violet }]} />
+      </div>
+
+      {/* ═══════════════════════════════ 3. CLIENTS & CONNECTIONS ═══════════ */}
+      <SectionHeader title="Clients & Connections" description="Connection pool saturation and blocked clients" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("redisDashboard.clients")} value={data?.connected_clients != null ? formatNumber(data.connected_clients, 0) : "-"} tone={(data?.client_saturation_pct ?? 0) > 80 ? "bad" : (data?.client_saturation_pct ?? 0) > 60 ? "warn" : "good"} hint={data?.client_saturation_pct != null ? t("redisDashboard.clientSatHint", formatPercent(data.client_saturation_pct)) : undefined} />
+        <StatCard label={t("redisDashboard.blockedClients")} value={data?.blocked_clients != null ? formatNumber(data.blocked_clients, 0) : "-"} tone={(data?.blocked_clients ?? 0) > 0 ? "bad" : "good"} hint={t("redisDashboard.blockedClientsHint")} />
+        <StatCard label={t("redisDashboard.rejectedConns")} value={data?.rejected_conns_per_sec != null ? formatNumber(data.rejected_conns_per_sec, 2) : "-"} tone={(data?.rejected_conns_per_sec ?? 0) > 0 ? "bad" : "good"} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
         <LinePanel
           title={t("redisDashboard.chartClients")}
           data={clients}
           formatter={(value) => formatNumber(value, 0)}
           lines={[
-            { key: "clients", name: t("redisDashboard.clients"), color: "#0ea5e9" },
-            { key: "blocked", name: t("redisDashboard.blockedClients"), color: "#ef4444" },
-          ]}
-        />
-        <LinePanel title={t("redisDashboard.chartCommands")} data={commands} formatter={(value) => `${formatNumber(value)} /s`} lines={[{ key: "commands", name: t("redisDashboard.cmdsPerSec"), color: "#22c55e" }]} />
-        <LinePanel
-          title={t("redisDashboard.chartCache")}
-          data={cache}
-          formatter={(value) => `${formatNumber(value)} /s`}
-          lines={[
-            { key: "hits", name: t("redisDashboard.hits"), color: "#22c55e" },
-            { key: "misses", name: t("redisDashboard.misses"), color: "#ef4444" },
-          ]}
-        />
-        <LinePanel
-          title={t("redisDashboard.chartErrors")}
-          data={errors}
-          formatter={(value) => `${formatNumber(value, 2)} /s`}
-          lines={[
-            { key: "errors", name: t("redisDashboard.errorReplies"), color: "#f59e0b" },
-            { key: "unexpected", name: t("redisDashboard.unexpectedErrors"), color: "#ef4444" },
-            { key: "failed", name: t("redisDashboard.cmdFailures"), color: "#8b5cf6" },
-            { key: "rejected", name: t("redisDashboard.cmdRejects"), color: "#64748b" },
-          ]}
-        />
-        <LinePanel
-          title={t("redisDashboard.chartNet")}
-          data={net}
-          formatter={(value, key) => key === "input" || key === "output" ? `${formatBytes(value)}/s` : `${formatNumber(value)}/s`}
-          lines={[
-            { key: "input", name: t("redisDashboard.netInputShort"), color: "#0ea5e9" },
-            { key: "output", name: t("redisDashboard.netOutputShort"), color: "#f59e0b" },
-          ]}
-        />
-        <LinePanel
-          title={t("redisDashboard.chartCpu")}
-          data={cpu}
-          formatter={(value) => formatNumber(value, 3)}
-          lines={[
-            { key: "user", name: t("redisDashboard.cpuUser"), color: "#22c55e" },
-            { key: "sys", name: t("redisDashboard.cpuSys"), color: "#0ea5e9" },
-          ]}
-        />
-        <LinePanel title={t("redisDashboard.chartKeys")} data={keys} formatter={(value) => formatNumber(value, 0)} lines={[{ key: "keys", name: t("redisDashboard.keys"), color: "#8b5cf6" }]} />
-        <LinePanel
-          title={t("redisDashboard.chartEvictExpire")}
-          data={evictExpire}
-          formatter={(value) => formatNumber(value, 2)}
-          lines={[
-            { key: "evicted", name: t("redisDashboard.evicted"), color: "#ef4444" },
-            { key: "expired", name: t("redisDashboard.expired"), color: "#f59e0b" },
-          ]}
-        />
-        <LinePanel title={t("redisDashboard.chartFrag")} data={frag} formatter={(value) => formatNumber(value, 2)} lines={[{ key: "ratio", name: t("redisDashboard.fragRatio"), color: "#8b5cf6" }]} />
-        <LinePanel
-          title={t("redisDashboard.chartPersistence")}
-          data={persistence}
-          formatter={(value, key) => key === "fork_sec" ? `${formatNumber(value, 3)}s` : formatNumber(value, 0)}
-          lines={[
-            { key: "rdb_changes", name: t("redisDashboard.rdbChanges"), color: "#0ea5e9" },
-            { key: "fork_sec", name: t("redisDashboard.latestFork"), color: "#f59e0b" },
+            { key: "clients", name: t("redisDashboard.clients"), color: C.blue },
+            { key: "blocked", name: t("redisDashboard.blockedClients"), color: C.red },
           ]}
         />
         <LinePanel
@@ -420,16 +391,119 @@ export function RedisDashboardPage() {
           data={connRate}
           formatter={(value) => formatNumber(value, 2)}
           lines={[
-            { key: "received", name: t("redisDashboard.connReceived"), color: "#22c55e" },
-            { key: "rejected", name: t("redisDashboard.rejectedConns"), color: "#ef4444" },
+            { key: "received", name: t("redisDashboard.connReceived"), color: C.green },
+            { key: "rejected", name: t("redisDashboard.rejectedConns"), color: C.red },
           ]}
         />
-        <BarPanel title={t("redisDashboard.chartKeysByDb")} data={data?.keys_by_db ?? []} />
+      </div>
+
+      {/* ═══════════════════════════════ 4. COMMANDS & THROUGHPUT ═══════════ */}
+      <SectionHeader title="Commands & Throughput" description="Command processing rate and failures" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("redisDashboard.cmdsPerSec")} value={data?.commands_per_sec != null ? formatNumber(data.commands_per_sec, 0) : "-"} />
+        <StatCard label={t("redisDashboard.cmdFailures")} value={data?.command_failures_per_sec != null ? formatNumber(data.command_failures_per_sec, 2) : "-"} tone={(data?.command_failures_per_sec ?? 0) > 0 ? "bad" : "good"} />
+        <StatCard label={t("redisDashboard.slowLog")} value={data?.slow_log_length != null ? formatNumber(data.slow_log_length, 0) : "-"} tone={(data?.slow_log_length ?? 0) > 0 ? "warn" : "good"} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel title={t("redisDashboard.chartCommands")} data={commands} formatter={(value) => `${formatNumber(value)} /s`} lines={[{ key: "commands", name: t("redisDashboard.cmdsPerSec"), color: C.green }]} />
+        <LinePanel
+          title={t("redisDashboard.chartErrors")}
+          data={errors}
+          formatter={(value) => `${formatNumber(value, 2)} /s`}
+          lines={[
+            { key: "errors", name: t("redisDashboard.errorReplies"), color: C.amber },
+            { key: "unexpected", name: t("redisDashboard.unexpectedErrors"), color: C.red },
+            { key: "failed", name: t("redisDashboard.cmdFailures"), color: C.violet },
+            { key: "rejected", name: t("redisDashboard.cmdRejects"), color: C.slate },
+          ]}
+        />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
         <BarPanel title={t("redisDashboard.chartCommandRates")} data={data?.command_rates ?? []} valueFormatter={(value) => `${formatNumber(value, 2)}/s`} />
         <BarPanel title={t("redisDashboard.chartTopCommands")} data={data?.commands_top ?? []} valueFormatter={(value) => formatNumber(value, 3)} />
       </div>
 
-      <SectionCard title={t("redisDashboard.logSignals")} description={t("redisDashboard.logSignalsDesc")}>
+      {/* ═══════════════════════════════ 5. CACHE EFFICIENCY ════════════════ */}
+      <SectionHeader title="Cache Efficiency" description="Keyspace hit ratio and eviction/expiration rates" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("redisDashboard.cacheHit")} value={data?.cache_hit_ratio_pct != null ? formatPercent(data.cache_hit_ratio_pct) : "-"} tone={(data?.cache_hit_ratio_pct ?? 100) < 90 ? "bad" : (data?.cache_hit_ratio_pct ?? 100) < 95 ? "warn" : "good"} hint={t("redisDashboard.cacheHitHint")} />
+        <StatCard label={t("redisDashboard.keys")} value={data?.keys_total != null ? formatNumber(data.keys_total, 0) : "-"} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel
+          title={t("redisDashboard.chartCache")}
+          data={cache}
+          formatter={(value) => `${formatNumber(value)} /s`}
+          lines={[
+            { key: "hits", name: t("redisDashboard.hits"), color: C.green },
+            { key: "misses", name: t("redisDashboard.misses"), color: C.red },
+          ]}
+        />
+        <LinePanel title={t("redisDashboard.chartKeys")} data={keys} formatter={(value) => formatNumber(value, 0)} lines={[{ key: "keys", name: t("redisDashboard.keys"), color: C.violet }]} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel
+          title={t("redisDashboard.chartEvictExpire")}
+          data={evictExpire}
+          formatter={(value) => formatNumber(value, 2)}
+          lines={[
+            { key: "evicted", name: t("redisDashboard.evicted"), color: C.red },
+            { key: "expired", name: t("redisDashboard.expired"), color: C.amber },
+          ]}
+        />
+        <BarPanel title={t("redisDashboard.chartKeysByDb")} data={data?.keys_by_db ?? []} />
+      </div>
+
+      {/* ═══════════════════════════════ 6. PERSISTENCE & REPLICATION ═══════ */}
+      <SectionHeader title="Persistence & Replication" description="RDB/AOF state, fork times, and replication health" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("redisDashboard.persistenceState")} value={persistenceState} tone={data?.aof_rewrite_in_progress === 1 || data?.rdb_save_in_progress === 1 ? "warn" : "neutral"} hint={data?.rdb_changes_since_last_save != null ? t("redisDashboard.rdbChangesHint", formatNumber(data.rdb_changes_since_last_save, 0)) : undefined} />
+        <StatCard label={t("redisDashboard.latestFork")} value={data?.latest_fork_seconds != null ? `${formatNumber(data.latest_fork_seconds, 3)}s` : "-"} tone={(data?.latest_fork_seconds ?? 0) > 1 ? "warn" : "good"} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel
+          title={t("redisDashboard.chartPersistence")}
+          data={persistence}
+          formatter={(value, key) => key === "fork_sec" ? `${formatNumber(value, 3)}s` : formatNumber(value, 0)}
+          lines={[
+            { key: "rdb_changes", name: t("redisDashboard.rdbChanges"), color: C.blue },
+            { key: "fork_sec", name: t("redisDashboard.latestFork"), color: C.amber },
+          ]}
+        />
+      </div>
+
+      {/* ═══════════════════════════════ 7. NETWORK & CPU ════════════════════ */}
+      <SectionHeader title="Network & CPU" description="Data transfer rates and CPU utilization" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("redisDashboard.netInput")} value={data?.net_input_bytes_per_sec != null ? `${formatBytes(data.net_input_bytes_per_sec)}/s` : "-"} />
+        <StatCard label={t("redisDashboard.netOutput")} value={data?.net_output_bytes_per_sec != null ? `${formatBytes(data.net_output_bytes_per_sec)}/s` : "-"} />
+        <StatCard label={t("redisDashboard.cpuUser")} value={data?.cpu_user_per_sec != null ? formatNumber(data.cpu_user_per_sec, 2) : "-"} />
+        <StatCard label={t("redisDashboard.cpuSys")} value={data?.cpu_sys_per_sec != null ? formatNumber(data.cpu_sys_per_sec, 2) : "-"} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel
+          title={t("redisDashboard.chartNet")}
+          data={net}
+          formatter={(value, key) => key === "input" || key === "output" ? `${formatBytes(value)}/s` : `${formatNumber(value)}/s`}
+          lines={[
+            { key: "input", name: t("redisDashboard.netInputShort"), color: C.blue },
+            { key: "output", name: t("redisDashboard.netOutputShort"), color: C.amber },
+          ]}
+        />
+        <LinePanel
+          title={t("redisDashboard.chartCpu")}
+          data={cpu}
+          formatter={(value) => formatNumber(value, 3)}
+          lines={[
+            { key: "user", name: t("redisDashboard.cpuUser"), color: C.green },
+            { key: "sys", name: t("redisDashboard.cpuSys"), color: C.blue },
+          ]}
+        />
+      </div>
+
+      {/* ═══════════════════════════════ 8. LOG SIGNALS ═════════════════════ */}
+      <SectionHeader title="Log Signals" description="Events parsed from Redis logs via Loki" />
+      <SectionCard title="">
         <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
           <StatCard label={t("redisDashboard.warnings")} value={formatNumber(data?.log_summary.warnings ?? 0, 0)} tone={(data?.log_summary.warnings ?? 0) > 0 ? "warn" : "good"} />
           <StatCard label={t("redisDashboard.errors")} value={formatNumber(data?.log_summary.errors ?? 0, 0)} tone={(data?.log_summary.errors ?? 0) > 0 ? "bad" : "good"} />

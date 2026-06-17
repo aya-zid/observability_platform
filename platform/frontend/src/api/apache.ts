@@ -28,7 +28,7 @@ export type ApacheSlowRequest = {
   method: string
   status: number
   ip: string
-  rt: number // seconds
+  rt: number // milliseconds
   referer?: string // HTTP referer header
   user_agent?: string // HTTP user-agent header
   timestamp?: string // Log timestamp

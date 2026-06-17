@@ -18,7 +18,7 @@ type ApacheVirtualHost struct {
 	LogPath string `gorm:"type:text;not null;uniqueIndex:idx_apache_vhost_service_domain_kind_path"`
 
 	Source      string `gorm:"type:varchar(20);not null;default:'detected'"`
-	Enabled     bool   `gorm:"type:boolean;not null;default:true"`
+	Enabled     bool   `gorm:"type:boolean;not null"`
 	IsSharedLog bool   `gorm:"type:boolean;not null;default:false"`
 	IsDefault   bool   `gorm:"type:boolean;not null;default:false"`
 

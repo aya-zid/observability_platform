@@ -26,7 +26,6 @@ type DiscoveryServiceListItem struct {
 	IsSupported        bool   `json:"is_supported"`
 	ConfirmedLogPath   string `json:"confirmed_log_path,omitempty"`
 	LogPathSource      string `json:"log_path_source"`
-	MetricsMode        string `json:"metrics_mode"`
 	LogCollectionOn    bool   `json:"log_collection_on"`
 	MetricCollectionOn bool   `json:"metric_collection_on"`
 	IntegrationStatus  string `json:"integration_status"`
@@ -56,9 +55,6 @@ type DiscoveryServiceDetailResponse struct {
 	SuggestedLogPath         string                         `json:"suggested_log_path,omitempty"`
 	UserMetricsEndpoint      string                         `json:"user_metrics_endpoint,omitempty"`
 	SuggestedMetricsEndpoint string                         `json:"suggested_metrics_endpoint,omitempty"`
-	MetricsMode              string                         `json:"metrics_mode"`
-	IsJavaApp                bool                           `json:"is_java_app"`
-	JMXExporterPort          *int                           `json:"jmx_exporter_port,omitempty"`
 	DetectedLogPaths         []string                       `json:"detected_log_paths"`
 	LogCollectionOn          bool                           `json:"log_collection_on"`
 	MetricCollectionOn       bool                           `json:"metric_collection_on"`
@@ -109,9 +105,6 @@ type UpdateCollectionRequest struct {
 type UpdateServiceConfigRequest struct {
 	ConfirmedLogPath    string                        `json:"confirmed_log_path"`
 	UserMetricsEndpoint string                        `json:"user_metrics_endpoint"`
-	MetricsMode         string                        `json:"metrics_mode"`
-	IsJavaApp           bool                          `json:"is_java_app"`
-	JMXExporterPort     *int                          `json:"jmx_exporter_port"`
 	NginxVirtualHosts   []WebServerVirtualHostRequest `json:"nginx_virtual_hosts,omitempty"`
 	ApacheVirtualHosts  []WebServerVirtualHostRequest `json:"apache_virtual_hosts,omitempty"`
 }

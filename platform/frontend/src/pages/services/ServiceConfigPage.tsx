@@ -7,10 +7,7 @@ import {
   updateDiscoveryServiceConfig,
   updateDiscoveryServiceCollection,
 } from "@/api/discovery"
-import { Button } from "@/components/ui/button"
-import NginxVirtualHostsSection from "@/components/nginx/NginxVirtualHostsSection"
-import ApacheVirtualHostsSection from "@/components/apache/ApacheVirtualHostsSection"
-import type { VirtualHostEntry } from "@/components/webserver/WebServerVirtualHostsSection"
+import WebServerVirtualHostsSection, { LogFormatWarning, type VirtualHostEntry } from "@/components/webserver/WebServerVirtualHostsSection"
 import MarkdownRenderer from "@/components/MarkdownRenderer"
 import { cn } from "@/lib/utils"
 import {
@@ -52,23 +49,6 @@ function formatScanTime(value?: string) {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return parsed.toLocaleString()
-}
-
-function resolveInitialMetricsMode(
-  metricsMode: string | undefined,
-  isSupported: boolean,
-  suggestedMetricsEndpoint?: string
-) {
-  if (metricsMode && metricsMode !== "unknown") {
-    return metricsMode
-  }
-  if (isSupported) {
-    return "catalog"
-  }
-  if (suggestedMetricsEndpoint) {
-    return "prometheus"
-  }
-  return "unknown"
 }
 
 function isPostgresService(name: string) {
@@ -116,7 +96,7 @@ interface GuideData {
   result?: string
 }
 
-const CollapsibleGuide = ({ title, icon: Icon, guide, content }: { title: string; icon: React.ComponentType<any>; guide: GuideData; content?: string }) => {
+const CollapsibleGuide = ({ title, icon: Icon, guide, content, children }: { title: string; icon: React.ComponentType<any>; guide: GuideData; content?: string; children?: React.ReactNode }) => {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden transition-all">
@@ -138,7 +118,9 @@ const CollapsibleGuide = ({ title, icon: Icon, guide, content }: { title: string
 
       {open && (
         <div className="px-5 pb-5 pt-3 border-t border-border">
-          {content ? (
+          {children ? (
+            children
+          ) : content ? (
             <MarkdownRenderer content={content} />
           ) : (
             <div className="space-y-4">
@@ -214,10 +196,7 @@ export default function ServiceConfigPage() {
   const [logOn, setLogOn] = useState(false)
   const [metricsOn, setMetricsOn] = useState(false)
   const [confirmedLogPath, setConfirmedLogPath] = useState("")
-  const [metricsMode, setMetricsMode] = useState("unknown")
   const [metricsEndpoint, setMetricsEndpoint] = useState("")
-  const [isJavaApp, setIsJavaApp] = useState(false)
-  const [jmxExporterPort, setJMXExporterPort] = useState("")
   const [installCommand, setInstallCommand] = useState("")
   const [nginxVirtualHosts, setNginxVirtualHosts] = useState<VirtualHostEntry[]>([])
   const [apacheVirtualHosts, setApacheVirtualHosts] = useState<VirtualHostEntry[]>([])
@@ -229,18 +208,9 @@ export default function ServiceConfigPage() {
       setLogOn(serviceQuery.data.log_collection_on)
       setMetricsOn(serviceQuery.data.metric_collection_on)
       setConfirmedLogPath(serviceQuery.data.confirmed_log_path ?? serviceQuery.data.suggested_log_path ?? "")
-      setMetricsMode(
-        resolveInitialMetricsMode(
-          serviceQuery.data.metrics_mode,
-          serviceQuery.data.is_supported,
-          serviceQuery.data.suggested_metrics_endpoint
-        )
-      )
       setMetricsEndpoint(
         serviceQuery.data.user_metrics_endpoint ?? serviceQuery.data.suggested_metrics_endpoint ?? ""
       )
-      setIsJavaApp(serviceQuery.data.is_java_app)
-      setJMXExporterPort(serviceQuery.data.jmx_exporter_port ? String(serviceQuery.data.jmx_exporter_port) : "")
 
       if (serviceQuery.data.service_name === "nginx") {
         setNginxVirtualHosts(
@@ -255,29 +225,21 @@ export default function ServiceConfigPage() {
     }
   }, [serviceQuery.data])
 
-  const saveMutation = useMutation({
-    mutationFn: () =>
-      updateDiscoveryServiceCollection(id, {
+  const configMutation = useMutation({
+    mutationFn: async () => {
+      const svc = serviceQuery.data
+
+      await updateDiscoveryServiceCollection(id, {
         log_collection_on: logOn,
         metric_collection_on: metricsOn,
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["discovery-service", id] })
-      await queryClient.invalidateQueries({ queryKey: ["discovery-services"] })
-    },
-  })
+      })
 
-  const configMutation = useMutation({
-    mutationFn: () => {
       const payload: any = {
         confirmed_log_path: confirmedLogPath,
         user_metrics_endpoint: metricsEndpoint,
-        metrics_mode: metricsMode,
-        is_java_app: isJavaApp,
-        jmx_exporter_port: jmxExporterPort ? Number(jmxExporterPort) : undefined,
       }
 
-      if (data?.service_name === "nginx") {
+      if (svc?.service_name === "nginx") {
         payload.nginx_virtual_hosts = nginxVirtualHosts.map((vh) => ({
           id: vh.id,
           domain: vh.domain || "(default)",
@@ -288,7 +250,7 @@ export default function ServiceConfigPage() {
           is_default: vh.is_default,
         }))
       }
-      if (data?.service_name === "apache") {
+      if (svc?.service_name === "apache") {
         payload.apache_virtual_hosts = apacheVirtualHosts.map((vh) => ({
           id: vh.id,
           domain: vh.domain || "(default)",
@@ -318,9 +280,6 @@ export default function ServiceConfigPage() {
   })
 
   const data = serviceQuery.data
-  const canEditMetricsEndpoint =
-    metricsMode === "prometheus" || metricsMode === "catalog" || metricsMode === "unknown"
-
   const metricsGuide = data?.catalog
     ? data.catalog.metrics_pattern === "builtin"
       ? adaptGuideToPort(data.catalog.metrics_guide, data.catalog.default_metrics_endpoint, data.port)
@@ -489,62 +448,32 @@ export default function ServiceConfigPage() {
             </div>
           ) : null}
 
-          {/* Metrics mode + endpoint */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-foreground mb-1.5 block">Metrics Mode</label>
-              <select
-                className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
-                value={metricsMode}
-                onChange={(e) => setMetricsMode(e.target.value)}
-              >
-                {data.is_supported ? <option value="catalog">Use Catalog Defaults</option> : null}
-                <option value="prometheus">Prometheus Endpoint</option>
-                <option value="jmx">JMX Exporter</option>
-                <option value="none">Logs Only</option>
-                {!data.is_supported ? <option value="unknown">Not Configured Yet</option> : null}
-              </select>
-            </div>
-            {canEditMetricsEndpoint ? (
-              <div>
-                <label className="text-xs font-medium text-foreground mb-1.5 block">Metrics Endpoint</label>
-                <input
-                  value={metricsEndpoint}
-                  onChange={(e) => setMetricsEndpoint(e.target.value)}
-                  placeholder={data.suggested_metrics_endpoint || "http://127.0.0.1:8080/metrics"}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2.5 font-mono text-xs text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors placeholder:text-muted-foreground"
-                />
-              </div>
-            ) : null}
+          {/* Metrics endpoint */}
+          <div>
+            <label className="text-xs font-medium text-foreground mb-1.5 block">Metrics Endpoint</label>
+            <input
+              value={metricsEndpoint}
+              onChange={(e) => setMetricsEndpoint(e.target.value)}
+              placeholder={data.suggested_metrics_endpoint || "http://127.0.0.1:8080/metrics"}
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 font-mono text-xs text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors placeholder:text-muted-foreground"
+            />
           </div>
 
-          {metricsMode === "jmx" ? (
-            <div>
-              <label className="text-xs font-medium text-foreground mb-1.5 block">JMX Exporter Port</label>
-              <input
-                value={jmxExporterPort}
-                onChange={(e) => setJMXExporterPort(e.target.value)}
-                placeholder="7070"
-                className="w-full bg-background border border-border rounded-lg px-3 py-2.5 text-sm text-foreground font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors"
+          {/* Virtual hosts — inline in Configuration for nginx/apache */}
+          {(data.service_name === "nginx" || data.service_name === "apache") && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Globe className="w-4 h-4 text-primary" />
+                Virtual Hosts (Domains)
+              </div>
+              <WebServerVirtualHostsSection
+                hosts={data.service_name === "nginx" ? nginxVirtualHosts : apacheVirtualHosts}
+                onChange={data.service_name === "nginx" ? setNginxVirtualHosts : setApacheVirtualHosts}
+                service={data.service_name as "nginx" | "apache"}
+                hideGuide
               />
             </div>
-          ) : null}
-
-          <label className="flex items-center justify-between cursor-pointer bg-background rounded-lg px-4 py-3 border border-border hover:border-primary/30 transition-colors">
-            <span className="text-sm text-foreground font-medium">Java Application</span>
-            <button
-              onClick={() => setIsJavaApp(!isJavaApp)}
-              className={`w-11 h-6 rounded-full relative transition-colors ${
-                isJavaApp ? "bg-gradient-to-r from-primary/80 to-primary" : "bg-secondary"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-foreground shadow-lg transition-transform ${
-                  isJavaApp ? "translate-x-5" : ""
-                }`}
-              />
-            </button>
-          </label>
+          )}
 
           {/* Collection toggles */}
           <div className="grid grid-cols-2 gap-4">
@@ -581,53 +510,44 @@ export default function ServiceConfigPage() {
           </button>
         </div>
 
-        {/* Nginx Virtual Hosts — only shown for nginx services */}
-        {data.service_name === "nginx" ? (
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-              <Globe className="w-4 h-4 text-primary" />
-              Virtual Hosts (Domains)
-            </h2>
-            <p className="text-xs text-muted-foreground mb-4">
-              Map each domain to its log files. The agent auto-detects these from your Nginx config.
-            </p>
-            <NginxVirtualHostsSection hosts={nginxVirtualHosts} onChange={setNginxVirtualHosts} />
-          </div>
-        ) : null}
-
-        {/* Apache Virtual Hosts — only shown for apache services */}
-        {data.service_name === "apache" ? (
-          <div className="rounded-xl border border-border bg-card p-5">
-            <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-              <Globe className="w-4 h-4 text-primary" />
-              Virtual Hosts (Domains)
-            </h2>
-            <p className="text-xs text-muted-foreground mb-4">
-              Map each Apache virtual host to its access and error log files.
-            </p>
-            <ApacheVirtualHostsSection hosts={apacheVirtualHosts} onChange={setApacheVirtualHosts} />
-          </div>
-        ) : null}
-
         {/* Guide — collapsible */}
-        {(logsGuide || metricsGuide) && (
+        {(logsGuide || metricsGuide || data.service_name === "nginx" || data.service_name === "apache") && (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <BookOpen className="w-4 h-4 text-primary" />
               Setup Guide
             </h2>
-            <CollapsibleGuide
-              title={logsGuide && metricsGuide ? "Configure Logs & Metrics" : logsGuide ? "Configure Logs" : "Configure Metrics"}
-              icon={BookOpen}
-              guide={{
-                intro: logsGuide && metricsGuide
-                  ? "Enable log collection and metrics exposure for this service"
-                  : logsGuide
-                    ? "Configure log collection for this service"
-                    : "Configure metrics exposure for this service",
-              }}
-              content={[logsGuide, metricsGuide].filter(Boolean).join("\n\n---\n\n")}
-            />
+            {(logsGuide || metricsGuide) && (
+              <CollapsibleGuide
+                title={logsGuide && metricsGuide ? "Configure Logs & Metrics" : logsGuide ? "Configure Logs" : "Configure Metrics"}
+                icon={BookOpen}
+                guide={{
+                  intro: logsGuide && metricsGuide
+                    ? "Enable log collection and metrics exposure for this service"
+                    : logsGuide
+                      ? "Configure log collection for this service"
+                      : "Configure metrics exposure for this service",
+                }}
+                content={[logsGuide, metricsGuide].filter(Boolean).join("\n\n---\n\n")}
+              />
+            )}
+
+            {/* Virtual host configuration guide — only for nginx/apache */}
+            {(data.service_name === "nginx" || data.service_name === "apache") && (
+              <CollapsibleGuide
+                title="Configure Virtual Hosts"
+                icon={Globe}
+                guide={{
+                  intro: `Add the host= field to your ${data.service_name === "apache" ? "Apache" : "Nginx"} log format for per-domain traffic separation`,
+                }}
+                content={""}
+              >
+                <LogFormatWarning
+                  hasSharedLog={[...nginxVirtualHosts, ...apacheVirtualHosts].some((h) => h.is_shared_log)}
+                  service={data.service_name as "nginx" | "apache"}
+                />
+              </CollapsibleGuide>
+            )}
           </div>
         )}
 
@@ -750,51 +670,38 @@ export default function ServiceConfigPage() {
           ) : null}
         </div>
 
-        {/* Collection Controls */}
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-primary" />
-            Collection Controls
-          </h2>
-          <div className="space-y-3">
-            <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()} className="w-full">
-              {saveMutation.isPending ? "Saving..." : "Save Integration Settings"}
-            </Button>
-
-            {data.service_name === "nginx" && logOn && metricsOn ? (
-              <Link
-                to={`/integrations/nginx-dashboard/${id}`}
-                className="inline-block w-full text-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition-colors"
-              >
-                Open Nginx Dashboard
-              </Link>
-            ) : null}
-            {data.service_name === "apache" && logOn && metricsOn ? (
-              <Link
-                to={`/integrations/apache-dashboard/${id}`}
-                className="inline-block w-full text-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition-colors"
-              >
-                Open Apache Dashboard
-              </Link>
-            ) : null}
-            {isPostgresService(data.service_name) && logOn && metricsOn ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Link
-                  to={`/integrations/postgres-dashboard/${id}`}
-                  className="inline-block w-full text-center rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500 transition-colors"
-                >
-                  Open PostgreSQL Dashboard
-                </Link>
-                <Link
-                  to={`/integrations/postgres-logs/${id}`}
-                  className="inline-block w-full text-center rounded-md border border-border px-3 py-2 text-sm font-semibold hover:bg-muted transition-colors"
-                >
-                  Open PostgreSQL Logs
-                </Link>
-              </div>
-            ) : null}
+        {data.service_name === "nginx" && logOn && metricsOn ? (
+          <Link
+            to={`/integrations/nginx-dashboard/${id}`}
+            className="block w-full text-center rounded-xl border border-border bg-card p-4 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/5 transition-colors"
+          >
+            Open Nginx Dashboard
+          </Link>
+        ) : null}
+        {data.service_name === "apache" && logOn && metricsOn ? (
+          <Link
+            to={`/integrations/apache-dashboard/${id}`}
+            className="block w-full text-center rounded-xl border border-border bg-card p-4 text-sm font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/5 transition-colors"
+          >
+            Open Apache Dashboard
+          </Link>
+        ) : null}
+        {isPostgresService(data.service_name) && logOn && metricsOn ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Link
+              to={`/integrations/postgres-dashboard/${id}`}
+              className="block w-full text-center rounded-xl border border-border bg-card p-4 text-sm font-semibold text-sky-600 dark:text-sky-400 hover:bg-sky-600/5 transition-colors"
+            >
+              Open PostgreSQL Dashboard
+            </Link>
+            <Link
+              to={`/integrations/postgres-logs/${id}`}
+              className="block w-full text-center rounded-xl border border-border bg-card p-4 text-sm font-semibold hover:bg-muted transition-colors"
+            >
+              Open PostgreSQL Logs
+            </Link>
           </div>
-        </div>
+        ) : null}
       </main>
     </div>
   )

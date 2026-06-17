@@ -30,7 +30,7 @@ type NginxVirtualHost struct {
 	Source string `gorm:"type:varchar(20);not null;default:'detected'"`
 
 	// Enabled controls whether this row is included in the OTel collector config.
-	Enabled bool `gorm:"type:boolean;not null;default:true"`
+	Enabled bool `gorm:"type:boolean;not null"`
 
 	// IsSharedLog is true when multiple domains write to the same log file.
 	// The platform will parse the host= field to split traffic by domain.

@@ -25,6 +25,7 @@ import {
   secondsToNanos,
 } from '@/lib/queryHelpers'
 import { cn } from '@/lib/utils'
+import { RefreshCw } from 'lucide-react'
 
 const PAGE_SIZE = 200
 
@@ -308,7 +309,7 @@ export function NginxLogsPage() {
   // ── Initial / live-refresh query ───────────────────────────────────────────
   // Fetches the NEWEST PAGE_SIZE logs. direction=backward means Loki returns
   // newest first — so the first entry in the response is the most recent log.
-  const { isLoading: initialLoading, refetch } = useQuery({
+  const { isLoading: initialLoading, refetch, isRefetching } = useQuery({
     queryKey: [`nginx-logs-initial-${id}`, selectedDomain, timeRange.seconds],
     queryFn: async () => {
       // Compute the window boundaries fresh on every fetch (auto-refresh).
@@ -456,8 +457,9 @@ export function NginxLogsPage() {
           <button
             type="button"
             onClick={() => refetch()}
-            className="inline-block rounded-md bg-muted px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+            className="inline-flex items-center gap-1.5 rounded-md bg-muted px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
           >
+            <RefreshCw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>

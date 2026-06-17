@@ -15,6 +15,7 @@ import {
   secondsToNanos,
 } from '@/lib/queryHelpers'
 import { cn } from '@/lib/utils'
+import { RefreshCw } from 'lucide-react'
 
 const PER_PAGE = 100
 
@@ -191,12 +192,22 @@ export function NginxSlowRequestsPage() {
             {formatWindowLabel(start, end)} • RT &gt; {slowQuery.data?.min_rt ?? minRT}s
           </p>
         </div>
-        <Link
-          to={dashboardHref}
-          className="rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
-        >
-          Back to Dashboard
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => slowQuery.refetch()}
+            className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
+            title="Refresh"
+          >
+            <RefreshCw className={`h-4 w-4 ${slowQuery.isRefetching ? 'animate-spin' : ''}`} />
+          </button>
+          <Link
+            to={dashboardHref}
+            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+          >
+            Back to Dashboard
+          </Link>
+        </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card p-4">

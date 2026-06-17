@@ -435,6 +435,325 @@ Follow PART 1 in the LogsGuide above to switch to a static file for proper colle
 		NVD:            &NVDProduct{Vendor: "postgresql", Product: "postgresql"},
 	},
 
+	"mariadb": {
+		Name:                   "mariadb",
+		DisplayName:            "MariaDB",
+		Category:               "database",
+		DefaultLogPaths:        []string{"/var/log/mysql/error.log", "/var/log/mysql/slow.log"},
+		DefaultLoggingMode:     LoggingModeFile,
+		MetricsPattern:         MetricsPatternExporter,
+		DefaultMetricsEndpoint: "http://127.0.0.1:9104/metrics",
+		ExporterName:           "mysqld_exporter",
+		ExporterPort:           9104,
+		MetricsGuide: `## Enable MariaDB Metrics
+
+Follow the complete instructions in the LogsGuide below. Metrics come from:
+
+- mysqld_exporter on http://127.0.0.1:9104/metrics
+- the query digest collector writing Prometheus text metrics to /var/lib/agent-prom/mariadb_query_digests.prom`,
+		LogsGuide: `Complete MariaDB Integration Guide
+
+BEFORE YOU START
+
+This guide assumes MariaDB is already installed. Do not use root for collectors. Create a least-privilege monitor user and use that user for mysqld_exporter and the query digest collector.
+
+PART 1 — Configure MariaDB for Observability
+
+Step 1 — Edit the server config
+
+` + "```bash" + `
+sudo nano /etc/mysql/mariadb.conf.d/50-server.cnf
+` + "```" + `
+
+Add or update these lines under [mariadb]:
+
+` + "```ini" + `
+[mariadb]
+bind-address            = 0.0.0.0
+performance_schema      = ON
+
+slow_query_log                  = 1
+slow_query_log_file             = /var/log/mysql/slow.log
+long_query_time                 = 1
+log_queries_not_using_indexes   = 1
+log_slow_admin_statements       = 1
+
+log_error               = /var/log/mysql/error.log
+log_warnings            = 3
+
+server-id               = 1
+log_bin                 = /var/log/mysql/mariadb-bin
+binlog_format           = ROW
+` + "```" + `
+
+Do not set log_error_verbosity on MariaDB 11.x. MariaDB uses log_warnings; log_error_verbosity can prevent the service from starting.
+
+Step 2 — Create the log directory and restart
+
+` + "```bash" + `
+sudo mkdir -p /var/log/mysql
+sudo chown -R mysql:mysql /var/log/mysql
+sudo chmod 755 /var/log/mysql
+sudo systemctl restart mariadb
+` + "```" + `
+
+Step 3 — Verify the observability streams
+
+` + "```bash" + `
+sudo mariadb -u root -p -e "SHOW VARIABLES LIKE 'performance_schema';"
+sudo mariadb -u root -p -e "SHOW VARIABLES LIKE 'slow_query_log%';"
+sudo mariadb -u root -p -e "SHOW VARIABLES LIKE 'log_error%';"
+sudo mariadb -u root -p -e "SHOW VARIABLES LIKE 'log_warnings';"
+` + "```" + `
+
+Expected: performance_schema is ON, slow_query_log is ON, slow_query_log_file is /var/log/mysql/slow.log, log_error is /var/log/mysql/error.log.
+
+PART 2 — Create the Monitoring User
+
+` + "```bash" + `
+sudo mariadb -u root -p
+` + "```" + `
+
+Run:
+
+` + "```sql" + `
+CREATE USER IF NOT EXISTS 'monitor'@'%' IDENTIFIED BY 'choose_a_strong_password_here';
+CREATE USER IF NOT EXISTS 'monitor'@'localhost' IDENTIFIED BY 'choose_a_strong_password_here';
+
+GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'monitor'@'%';
+GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'monitor'@'localhost';
+
+GRANT SELECT ON performance_schema.* TO 'monitor'@'%';
+GRANT SELECT ON performance_schema.* TO 'monitor'@'localhost';
+
+FLUSH PRIVILEGES;
+EXIT;
+` + "```" + `
+
+Verify:
+
+` + "```bash" + `
+mariadb -u monitor -p -e "SELECT * FROM performance_schema.events_statements_summary_by_digest LIMIT 1;"
+` + "```" + `
+
+PART 3 — Install mysqld_exporter
+
+Step 1 — Download and install
+
+` + "```bash" + `
+cd /tmp
+wget https://github.com/prometheus/mysqld_exporter/releases/download/v0.15.1/mysqld_exporter-0.15.1.linux-amd64.tar.gz
+tar xzf mysqld_exporter-0.15.1.linux-amd64.tar.gz
+sudo mv mysqld_exporter-0.15.1.linux-amd64/mysqld_exporter /usr/local/bin/
+sudo chmod +x /usr/local/bin/mysqld_exporter
+` + "```" + `
+
+Step 2 — Create credentials file
+
+` + "```bash" + `
+sudo mkdir -p /etc/mysqld_exporter
+sudo tee /etc/mysqld_exporter/.my.cnf <<EOF
+[client]
+user=monitor
+password=choose_a_strong_password_here
+host=localhost
+port=3306
+EOF
+sudo chmod 600 /etc/mysqld_exporter/.my.cnf
+` + "```" + `
+
+Step 3 — Create systemd service
+
+` + "```bash" + `
+sudo tee /etc/systemd/system/mysqld_exporter.service <<EOF
+[Unit]
+Description=MySQL Exporter
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/mysqld_exporter \
+  --config.my-cnf=/etc/mysqld_exporter/.my.cnf \
+  --collect.info_schema.processlist \
+  --collect.info_schema.innodb_metrics \
+  --collect.engine_innodb_status \
+  --collect.perf_schema.tablelocks \
+  --collect.perf_schema.file_events \
+  --collect.perf_schema.events_statements_summary_by_digest \
+  --collect.binlog_size \
+  --collect.info_schema.tables \
+  --collect.info_schema.userstats
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+` + "```" + `
+
+Step 4 — Start and verify
+
+` + "```bash" + `
+sudo systemctl daemon-reload
+sudo systemctl enable --now mysqld_exporter
+curl -s http://127.0.0.1:9104/metrics | grep mysql_up
+` + "```" + `
+
+PART 4 — Add Query Digest Metrics
+
+The platform agent already exposes /var/lib/agent-prom/*.prom through its local Prometheus file server. This collector writes query digest metrics there, so they flow into VictoriaMetrics through the existing agent pipeline.
+
+Step 1 — Create collector credentials
+
+` + "```bash" + `
+sudo mkdir -p /opt/observability
+sudo tee /opt/observability/.my.cnf <<EOF
+[client]
+user=monitor
+password=choose_a_strong_password_here
+host=localhost
+port=3306
+EOF
+sudo chmod 600 /opt/observability/.my.cnf
+sudo chown root:root /opt/observability/.my.cnf
+` + "```" + `
+
+Step 2 — Create /opt/observability/query_collector.sh
+
+` + "```bash" + `
+sudo tee /opt/observability/query_collector.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_FILE="/opt/observability/.my.cnf"
+PROM_DIR="/var/lib/agent-prom"
+PROM_FILE="${PROM_DIR}/mariadb_query_digests.prom"
+TMP_FILE=$(mktemp)
+
+mkdir -p "$PROM_DIR"
+COLLECTED_EPOCH=$(date +%s)000
+
+cat > "$TMP_FILE" <<HEADER
+# HELP mariadb_query_digest_exec_count Total executions of this query digest since server start
+# TYPE mariadb_query_digest_exec_count counter
+# HELP mariadb_query_digest_total_time_seconds Total time spent on this digest since server start
+# TYPE mariadb_query_digest_total_time_seconds counter
+# HELP mariadb_query_digest_avg_time_seconds Average execution time for this digest
+# TYPE mariadb_query_digest_avg_time_seconds gauge
+# HELP mariadb_query_digest_max_time_seconds Max execution time seen for this digest
+# TYPE mariadb_query_digest_max_time_seconds gauge
+# HELP mariadb_query_digest_rows_examined_total Total rows examined by this digest
+# TYPE mariadb_query_digest_rows_examined_total counter
+# HELP mariadb_query_digest_rows_sent_total Total rows sent by this digest
+# TYPE mariadb_query_digest_rows_sent_total counter
+# HELP mariadb_query_digest_no_index_used_count Executions that did not use an index
+# TYPE mariadb_query_digest_no_index_used_count counter
+# HELP mariadb_query_digest_tmp_tables_total Temporary tables created by this digest
+# TYPE mariadb_query_digest_tmp_tables_total counter
+# HELP mariadb_query_digest_tmp_disk_tables_total Temporary disk tables created by this digest
+# TYPE mariadb_query_digest_tmp_disk_tables_total counter
+HEADER
+
+mariadb --defaults-file="$CONFIG_FILE" -D performance_schema -BNe "
+SELECT
+    DIGEST,
+    COALESCE(SCHEMA_NAME, 'none'),
+    LEFT(REPLACE(REPLACE(REPLACE(COALESCE(DIGEST_TEXT, ''), '\n', ' '), '\r', ' '), '\t', ' '), 200),
+    COUNT_STAR,
+    ROUND(SUM_TIMER_WAIT / 1000000000000, 6),
+    ROUND(AVG_TIMER_WAIT / 1000000000000, 6),
+    ROUND(MAX_TIMER_WAIT / 1000000000000, 6),
+    SUM_ROWS_EXAMINED,
+    SUM_ROWS_SENT,
+    SUM_NO_INDEX_USED,
+    SUM_CREATED_TMP_TABLES,
+    SUM_CREATED_TMP_DISK_TABLES
+FROM performance_schema.events_statements_summary_by_digest
+WHERE DIGEST IS NOT NULL
+ORDER BY SUM_TIMER_WAIT DESC
+LIMIT 100;
+" | while IFS=$'\t' read -r digest db query_text exec_count total_time avg_time max_time rows_examined rows_sent no_index tmp_tables tmp_disk; do
+    qt=${query_text//\\/\\\\}
+    qt=${qt//\"/\\\"}
+    labels="digest=\"${digest}\",db=\"${db}\",digest_text=\"${qt}\""
+    printf 'mariadb_query_digest_exec_count{%s} %s %s\n' "$labels" "$exec_count" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_total_time_seconds{%s} %s %s\n' "$labels" "$total_time" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_avg_time_seconds{%s} %s %s\n' "$labels" "$avg_time" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_max_time_seconds{%s} %s %s\n' "$labels" "$max_time" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_rows_examined_total{%s} %s %s\n' "$labels" "$rows_examined" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_rows_sent_total{%s} %s %s\n' "$labels" "$rows_sent" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_no_index_used_count{%s} %s %s\n' "$labels" "$no_index" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_tmp_tables_total{%s} %s %s\n' "$labels" "$tmp_tables" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_tmp_disk_tables_total{%s} %s %s\n' "$labels" "$tmp_disk" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+done
+
+mv "$TMP_FILE" "$PROM_FILE"
+echo "Emitted $(grep -c 'mariadb_query_digest_exec_count' "$PROM_FILE" 2>/dev/null || echo 0) query digest metric sets to $PROM_FILE"
+EOF
+sudo chmod +x /opt/observability/query_collector.sh
+` + "```" + `
+
+Step 3 — Create timer
+
+` + "```bash" + `
+sudo tee /etc/systemd/system/query-collector.service <<EOF
+[Unit]
+Description=Query Digest Collector (runs once per trigger)
+After=mariadb.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/observability/query_collector.sh
+StandardOutput=journal
+StandardError=journal
+EOF
+
+sudo tee /etc/systemd/system/query-collector.timer <<EOF
+[Unit]
+Description=Run Query Digest Collector every 60 seconds
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now query-collector.timer
+` + "```" + `
+
+Step 4 — Verify
+
+` + "```bash" + `
+sudo bash /opt/observability/query_collector.sh
+head -20 /var/lib/agent-prom/mariadb_query_digests.prom
+sudo systemctl list-timers --all | grep query-collector
+` + "```" + `
+
+PART 5 — Configure in the Platform
+
+1. Go to the service config page for MariaDB / MySQL
+2. Set Log Path to /var/log/mysql/error.log,/var/log/mysql/slow.log if both are available
+3. Set Metrics Endpoint to http://127.0.0.1:9104/metrics
+4. Set Metrics Mode to prometheus or catalog
+5. Click Install Integration
+
+PART 6 — Checklist Before Clicking Install Integration
+
+- [ ] performance_schema is ON
+- [ ] /var/log/mysql/error.log exists and has content
+- [ ] /var/log/mysql/slow.log exists after running a slow query
+- [ ] curl http://127.0.0.1:9104/metrics | grep mysql_up returns mysql_up 1
+- [ ] /var/lib/agent-prom/mariadb_query_digests.prom exists
+- [ ] The platform service config has the MariaDB log paths and metrics endpoint`,
+		DetectionHints: []string{"mysql", "mariadb", "mysqld", "mariadbd"},
+		NVD:            &NVDProduct{Vendor: "mariadb", Product: "mariadb"},
+	},
+
 	"redis": {
 		Name:                   "redis",
 		DisplayName:            "Redis",
@@ -527,6 +846,602 @@ Log lines prefixed with **#** are warnings and errors — these are your actiona
 		DetectionHints: []string{"redis", "redis-server"},
 		NVD:            &NVDProduct{Vendor: "redis", Product: "redis"},
 	},
+
+	"phpfpm": {
+		Name:                   "phpfpm",
+		DisplayName:            "PHP-FPM",
+		Category:               "appserver",
+		DefaultLogPaths:        []string{"/var/log/php-fpm/error.log", "/var/log/php-fpm/access.log", "/var/log/php-fpm/slow.log"},
+		DefaultLoggingMode:     LoggingModeFile,
+		MetricsPattern:         MetricsPatternExporter,
+		DefaultMetricsEndpoint: "http://127.0.0.1:9253/metrics",
+		ExporterName:           "php-fpm_exporter",
+		ExporterPort:           9253,
+		MetricsGuide: `## Enable PHP-FPM Metrics
+
+Follow the complete instructions in the LogsGuide below. Metrics come from:
+
+- php-fpm_exporter on http://127.0.0.1:9253/metrics (pool health, workers, queue)
+- the OPcache collector writing Prometheus text metrics to /var/lib/agent-prom/phpfpm_opcache.prom (optional)`,
+		LogsGuide: `Complete PHP-FPM Integration Guide
+
+BEFORE YOU START — DO NOT
+
+* ❌ Do not skip enabling pm.status_path — without it the exporter cannot collect any pool metrics
+* ❌ Do not expose /status publicly — always restrict it to 127.0.0.1 in your web server config
+* ❌ Do not use the default access.log format — it omits memory and CPU which are the most valuable PHP-specific fields
+* ❌ Do not set request_slowlog_timeout without also setting a slowlog path — it silently does nothing
+* ❌ Do not use root for the exporter — create a dedicated system user with socket read access
+* ❌ Do not skip the access log — it provides script-level memory and CPU data that Nginx/Apache cannot provide
+
+PART 1 — Configure PHP-FPM Pool
+
+PHP-FPM configuration is split between a main config file (php-fpm.conf) and per-pool files (www.conf).
+Almost everything you need to change is in the pool file.
+
+Step 1 — Find your pool config file
+
+` + "```bash" + `
+# Debian/Ubuntu
+sudo find /etc/php -name "www.conf" 2>/dev/null
+
+# RHEL/CentOS/Fedora
+sudo find /etc/php-fpm.d -name "www.conf" 2>/dev/null
+` + "```" + `
+
+Common paths:
+- /etc/php/8.x/fpm/pool.d/www.conf   (Debian/Ubuntu)
+- /etc/php-fpm.d/www.conf             (RHEL/CentOS)
+
+Step 2 — Enable the status endpoint
+
+Open the pool config and find or add these lines:
+
+` + "```ini" + `
+; Metrics endpoint — required for php-fpm_exporter
+pm.status_path = /status
+
+; Optional ping endpoint for uptime checks
+ping.path = /ping
+ping.response = pong
+` + "```" + `
+
+Step 3 — Enable the access log with the platform format
+
+Find the access.log and access.format lines (they are commented out by default) and set them:
+
+` + "```ini" + `
+; PHP-FPM access log — independent of Nginx/Apache access logs
+; Provides script-level memory and CPU data unavailable in web server logs
+access.log = /var/log/php-fpm/access.log
+
+; Platform log format — do not change this format
+; Fields: pool | pid | client_ip | method | uri+querystring | status | script | duration_ms | memory_kb | cpu_pct
+; Note: %{milli}d = milliseconds | %{kilo}M = kilobytes | %Q = literal "?" only when query string exists
+access.format = "%n %p %R \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
+` + "```" + `
+
+Step 4 — Enable the slow log
+
+` + "```ini" + `
+; Log requests that exceed this threshold (in seconds)
+; Includes a full PHP backtrace showing which function was slow
+request_slowlog_timeout = 5
+slowlog = /var/log/php-fpm/slow.log
+` + "```" + `
+
+Step 5 — Check and configure the error log path
+
+First check where PHP-FPM is currently writing errors. Do not skip this step — on Debian/Ubuntu the
+default is a versioned path like /var/log/php8.4-fpm.log (not a subdirectory), so blindly adding a
+new path would create a second log file while errors keep going to the original one.
+
+` + "```bash" + `
+# Debian/Ubuntu — check the main php-fpm.conf for the current error_log
+grep "^error_log" /etc/php/*/fpm/php-fpm.conf
+
+# RHEL/CentOS
+grep "^error_log" /etc/php-fpm.conf
+` + "```" + `
+
+You will see one of three situations:
+
+Situation A — Already set to a file path (e.g. /var/log/php8.4-fpm.log):
+Update it to the unified platform path so all versions log to the same place:
+
+` + "```ini" + `
+error_log = /var/log/php-fpm/error.log
+` + "```" + `
+
+Situation B — Set to /dev/stderr (logs go to journald):
+Change it to the file path above and follow the JournaledLogGuide note at the bottom.
+
+Situation C — Line is commented out or missing:
+Add it:
+
+` + "```ini" + `
+error_log = /var/log/php-fpm/error.log
+` + "```" + `
+
+After any change to php-fpm.conf, restart PHP-FPM (see Step 7).
+
+Step 6 — Restrict the status endpoint in your web server
+
+The /status endpoint must not be publicly accessible. Add a location block to your Nginx or Apache config.
+
+For Nginx — add inside the server block that proxies to PHP-FPM:
+
+` + "```nginx" + `
+location ~ ^/(status|ping)$ {
+    access_log off;
+    allow 127.0.0.1;
+    deny all;
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    fastcgi_param SCRIPT_NAME $1;
+    fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+}
+` + "```" + `
+
+For Apache — add inside the VirtualHost block:
+
+` + "```apache" + `
+<LocationMatch "^/(status|ping)$">
+    Require local
+    ProxyPass "unix:/run/php/php8.4-fpm.sock|fcgi://localhost/status"
+</LocationMatch>
+` + "```" + `
+
+Adjust the socket path to match your PHP version (e.g. php8.1-fpm.sock, php8.3-fpm.sock).
+
+Step 7 — Create the log directory and restart
+
+` + "```bash" + `
+sudo mkdir -p /var/log/php-fpm
+sudo chown www-data:www-data /var/log/php-fpm
+sudo chmod 755 /var/log/php-fpm
+
+# Debian/Ubuntu
+sudo systemctl restart php8.4-fpm
+
+# RHEL/CentOS
+sudo systemctl restart php-fpm
+` + "```" + `
+
+Step 8 — Verify all four sources are working
+
+` + "```bash" + `
+# 1. Status endpoint (via your web server, which must proxy /status to FPM)
+curl -s http://127.0.0.1/status?json | python3 -m json.tool
+
+# 2. Access log (generate a request first, then check)
+sudo tail -n 5 /var/log/php-fpm/access.log
+
+# 3. Error log (should exist even if empty)
+sudo ls -la /var/log/php-fpm/error.log
+
+# 4. Slow log (will be empty until a slow request is made)
+sudo ls -la /var/log/php-fpm/slow.log
+` + "```" + `
+
+Expected status output:
+
+` + "```json" + `
+{
+    "pool": "www",
+    "process manager": "dynamic",
+    "accepted conn": 42,
+    "listen queue": 0,
+    "idle processes": 4,
+    "active processes": 1,
+    "total processes": 5,
+    "max active processes": 3,
+    "max children reached": 0,
+    "slow requests": 0
+}
+` + "```" + `
+
+Expected access log line:
+
+` + "```" + `
+www 12345 192.168.1.10 "GET /index.php?page=1" 200 /var/www/html/index.php 45 2048 1.23
+` + "```" + `
+
+Fields: pool | pid | client_ip | "method uri?querystring" | status | script | duration_ms | memory_kb | cpu_pct
+
+If /status returns 404, the web server location block is missing or PHP-FPM has not restarted.
+If the access log is empty, check that access.log is uncommented and the log directory is writable.
+
+PART 2 — Install php-fpm_exporter
+
+The exporter connects directly to the PHP-FPM Unix socket and exposes pool metrics in Prometheus format on port 9253. No web server is required — it speaks FastCGI directly.
+
+Step 1 — Find your PHP-FPM socket path
+
+` + "```bash" + `
+# Check what socket PHP-FPM is using
+sudo grep "listen\s*=" /etc/php/*/fpm/pool.d/www.conf 2>/dev/null || \
+sudo grep "listen\s*=" /etc/php-fpm.d/www.conf 2>/dev/null
+` + "```" + `
+
+Common paths:
+- /run/php/php8.4-fpm.sock
+- /run/php/php8.1-fpm.sock
+- /var/run/php-fpm/www.sock
+
+Note your socket path — you will need it in Step 3.
+
+Step 2 — Download and install the exporter
+
+` + "```bash" + `
+cd /tmp
+
+# Check latest version at https://github.com/hipages/php-fpm_exporter/releases
+wget https://github.com/hipages/php-fpm_exporter/releases/download/v2.2.0/php-fpm_exporter_2.2.0_linux_amd64.tar.gz
+tar xzf php-fpm_exporter_2.2.0_linux_amd64.tar.gz
+sudo mv php-fpm_exporter /usr/local/bin/
+sudo chmod +x /usr/local/bin/php-fpm_exporter
+` + "```" + `
+
+Step 3 — Create a system user with socket access
+
+` + "```bash" + `
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin phpfpm-exporter
+sudo usermod -aG www-data phpfpm-exporter
+` + "```" + `
+
+Step 4 — Create the systemd service
+
+Replace /run/php/php8.4-fpm.sock with the socket path you found in Step 1.
+
+` + "```bash" + `
+sudo tee /etc/systemd/system/phpfpm-exporter.service <<EOF
+[Unit]
+Description=PHP-FPM Exporter
+After=network.target php8.4-fpm.service
+
+[Service]
+Type=simple
+User=phpfpm-exporter
+Group=phpfpm-exporter
+ExecStart=/usr/local/bin/php-fpm_exporter server \\
+  --phpfpm.scrape-uri "unix:///run/php/php8.4-fpm.sock;/status" \\
+  --web.listen-address "127.0.0.1:9253"
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+` + "```" + `
+
+Step 5 — Start and verify
+
+` + "```bash" + `
+sudo systemctl daemon-reload
+sudo systemctl enable --now phpfpm-exporter
+sudo systemctl status phpfpm-exporter
+curl -s http://127.0.0.1:9253/metrics | grep phpfpm_up
+` + "```" + `
+
+Expected output:
+
+` + "```" + `
+phpfpm_up 1
+` + "```" + `
+
+If phpfpm_up is 0, the exporter cannot reach the socket. Check the socket path and that the phpfpm-exporter user is in the www-data group.
+
+If you have multiple pools (e.g. www and laravel), add them as additional --phpfpm.scrape-uri flags:
+
+` + "```bash" + `
+ExecStart=/usr/local/bin/php-fpm_exporter server \
+  --phpfpm.scrape-uri "unix:///run/php/php8.4-fpm.sock;/status" \
+  --phpfpm.scrape-uri "unix:///run/php/php8.4-fpm-laravel.sock;/status" \
+  --web.listen-address "127.0.0.1:9253"
+` + "```" + `
+
+PART 3 — Configure Log Collection
+
+Your platform agent already monitors the log paths set in Part 1. No additional software is needed — just verify the paths are correct.
+
+Log path defaults:
+
+| Log | Default Path | What It Contains |
+|-----|-------------|-----------------|
+| Error log | /var/log/php-fpm/error.log | Worker crashes, max children events, startup errors |
+| Access log | /var/log/php-fpm/access.log | Per-request: URI, status, script, duration, memory, CPU |
+| Slow log | /var/log/php-fpm/slow.log | Requests exceeding slowlog timeout with PHP backtrace |
+
+If your distro uses different paths, update them in the platform config page:
+
+` + "```bash" + `
+# Check actual log paths
+sudo php-fpm8.4 --test 2>&1 | grep -i log
+
+# Or check the running process config
+sudo cat /proc/$(pgrep -f php-fpm | head -1)/cmdline | tr '\0' ' '
+` + "```" + `
+
+PART 4 — OPcache Collector (Optional — Bonus Dashboard)
+
+This is the same pattern as the MariaDB query digest collector. A PHP script calls opcache_get_status() and the collector writes Prometheus metrics to /var/lib/agent-prom/phpfpm_opcache.prom, which the platform agent already picks up through its prom-file-server.
+
+Skip this part if you do not need the OPcache dashboard.
+
+Step 1 — Install cgi-fcgi (needed to call PHP-FPM from bash)
+
+` + "```bash" + `
+# Debian/Ubuntu
+sudo apt-get install -y libfcgi-bin
+
+# RHEL/CentOS
+sudo yum install -y fcgi
+` + "```" + `
+
+Step 2 — Create the PHP script
+
+` + "```bash" + `
+sudo mkdir -p /opt/observability
+sudo tee /opt/observability/opcache_status.php <<'EOF'
+<?php
+// Called by opcache_collector.sh via cgi-fcgi
+// Outputs Prometheus metrics from opcache_get_status()
+
+if (!function_exists('opcache_get_status')) {
+    // OPcache not enabled — emit a single gauge so the dashboard shows clearly
+    echo "# HELP phpfpm_opcache_enabled Whether OPcache is enabled\n";
+    echo "# TYPE phpfpm_opcache_enabled gauge\n";
+    echo "phpfpm_opcache_enabled 0\n";
+    exit(0);
+}
+
+$s = opcache_get_status(false);
+$m = $s['memory_usage'];
+$st = $s['opcache_statistics'];
+
+$used   = $m['used_memory'];
+$free   = $m['free_memory'];
+$wasted = $m['wasted_memory'];
+$total  = $used + $free + $wasted;
+
+echo "# HELP phpfpm_opcache_enabled Whether OPcache is enabled\n";
+echo "# TYPE phpfpm_opcache_enabled gauge\n";
+echo "phpfpm_opcache_enabled " . ($s['opcache_enabled'] ? '1' : '0') . "\n";
+
+echo "# HELP phpfpm_opcache_memory_used_bytes Memory used by OPcache\n";
+echo "# TYPE phpfpm_opcache_memory_used_bytes gauge\n";
+echo "phpfpm_opcache_memory_used_bytes {$used}\n";
+
+echo "# HELP phpfpm_opcache_memory_free_bytes Memory free in OPcache\n";
+echo "# TYPE phpfpm_opcache_memory_free_bytes gauge\n";
+echo "phpfpm_opcache_memory_free_bytes {$free}\n";
+
+echo "# HELP phpfpm_opcache_memory_wasted_bytes Wasted memory in OPcache\n";
+echo "# TYPE phpfpm_opcache_memory_wasted_bytes gauge\n";
+echo "phpfpm_opcache_memory_wasted_bytes {$wasted}\n";
+
+echo "# HELP phpfpm_opcache_memory_total_bytes Total OPcache memory allocated\n";
+echo "# TYPE phpfpm_opcache_memory_total_bytes gauge\n";
+echo "phpfpm_opcache_memory_total_bytes {$total}\n";
+
+echo "# HELP phpfpm_opcache_memory_used_ratio Memory used ratio (0–1)\n";
+echo "# TYPE phpfpm_opcache_memory_used_ratio gauge\n";
+echo "phpfpm_opcache_memory_used_ratio " . round($total > 0 ? $used / $total : 0, 6) . "\n";
+
+echo "# HELP phpfpm_opcache_wasted_ratio Wasted memory ratio (0–1)\n";
+echo "# TYPE phpfpm_opcache_wasted_ratio gauge\n";
+echo "phpfpm_opcache_wasted_ratio " . round($total > 0 ? $wasted / $total : 0, 6) . "\n";
+
+echo "# HELP phpfpm_opcache_hits_total Total cache hits since reset\n";
+echo "# TYPE phpfpm_opcache_hits_total counter\n";
+echo "phpfpm_opcache_hits_total {$st['hits']}\n";
+
+echo "# HELP phpfpm_opcache_misses_total Total cache misses since reset\n";
+echo "# TYPE phpfpm_opcache_misses_total counter\n";
+echo "phpfpm_opcache_misses_total {$st['misses']}\n";
+
+echo "# HELP phpfpm_opcache_hit_rate Cache hit rate (0–1)\n";
+echo "# TYPE phpfpm_opcache_hit_rate gauge\n";
+echo "phpfpm_opcache_hit_rate " . round($st['opcache_hit_rate'] / 100, 6) . "\n";
+
+echo "# HELP phpfpm_opcache_cached_scripts_total Number of scripts currently cached\n";
+echo "# TYPE phpfpm_opcache_cached_scripts_total gauge\n";
+echo "phpfpm_opcache_cached_scripts_total {$st['num_cached_scripts']}\n";
+
+echo "# HELP phpfpm_opcache_restarts_total Number of cache restarts since server start\n";
+echo "# TYPE phpfpm_opcache_restarts_total counter\n";
+echo "phpfpm_opcache_restarts_total {$st['oom_restarts']}\n";
+
+echo "# HELP phpfpm_opcache_manual_restarts_total Manual restarts (opcache_reset calls)\n";
+echo "# TYPE phpfpm_opcache_manual_restarts_total counter\n";
+echo "phpfpm_opcache_manual_restarts_total {$st['manual_restarts']}\n";
+EOF
+sudo chmod 644 /opt/observability/opcache_status.php
+` + "```" + `
+
+Step 3 — Create /opt/observability/opcache_collector.sh
+
+` + "```bash" + `
+sudo tee /opt/observability/opcache_collector.sh <<'EOF'
+#!/bin/bash
+# OPcache Collector — emits Prometheus metrics for the platform agent to scrape
+# Calls opcache_status.php through PHP-FPM via FastCGI (no web server needed)
+# Destination: /var/lib/agent-prom/phpfpm_opcache.prom
+
+set -euo pipefail
+
+SOCKET="/run/php/php8.4-fpm.sock"
+PHP_SCRIPT="/opt/observability/opcache_status.php"
+PROM_DIR="/var/lib/agent-prom"
+PROM_FILE="${PROM_DIR}/phpfpm_opcache.prom"
+TMP_FILE=$(mktemp)
+
+mkdir -p "$PROM_DIR"
+
+# Call PHP-FPM via FastCGI — cgi-fcgi handles the FastCGI protocol
+# SCRIPT_FILENAME tells PHP-FPM which script to execute
+SCRIPT_FILENAME="$PHP_SCRIPT" \
+QUERY_STRING="" \
+REQUEST_METHOD="GET" \
+cgi-fcgi -bind -connect "$SOCKET" 2>/dev/null \
+  | sed '1,/^\r$/d' \
+  > "$TMP_FILE"
+
+# Verify the output looks like Prometheus metrics before replacing
+if grep -q "^# HELP phpfpm_opcache" "$TMP_FILE"; then
+    mv "$TMP_FILE" "$PROM_FILE"
+    COUNT=$(grep -c "^phpfpm_opcache_enabled" "$PROM_FILE" 2>/dev/null || echo 0)
+    echo "Emitted OPcache metrics to $PROM_FILE (opcache_enabled lines: $COUNT)"
+else
+    rm -f "$TMP_FILE"
+    echo "ERROR: PHP script did not return valid Prometheus metrics — check SOCKET path and PHP-FPM status" >&2
+    exit 1
+fi
+EOF
+sudo chmod +x /opt/observability/opcache_collector.sh
+` + "```" + `
+
+Adjust SOCKET on line 10 to match your PHP version if needed.
+
+Step 4 — Create the timer
+
+` + "```bash" + `
+sudo tee /etc/systemd/system/opcache-collector.service <<EOF
+[Unit]
+Description=OPcache Metrics Collector (runs once per trigger)
+After=php8.4-fpm.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/observability/opcache_collector.sh
+StandardOutput=journal
+StandardError=journal
+EOF
+
+sudo tee /etc/systemd/system/opcache-collector.timer <<EOF
+[Unit]
+Description=Run OPcache Collector every 60 seconds
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now opcache-collector.timer
+` + "```" + `
+
+Step 5 — Verify
+
+` + "```bash" + `
+sudo bash /opt/observability/opcache_collector.sh
+head -20 /var/lib/agent-prom/phpfpm_opcache.prom
+sudo systemctl list-timers --all | grep opcache
+` + "```" + `
+
+Expected output:
+
+` + "```" + `
+# HELP phpfpm_opcache_enabled Whether OPcache is enabled
+# TYPE phpfpm_opcache_enabled gauge
+phpfpm_opcache_enabled 1
+# HELP phpfpm_opcache_hit_rate Cache hit rate (0-1)
+# TYPE phpfpm_opcache_hit_rate gauge
+phpfpm_opcache_hit_rate 0.971200
+` + "```" + `
+
+PART 5 — Configure in the Platform
+
+After completing Parts 1, 2, and 3 (and optionally Part 4):
+
+1. Go to the service config page for PHP-FPM
+2. Set Log Paths to:
+   /var/log/php-fpm/error.log
+   /var/log/php-fpm/access.log
+   /var/log/php-fpm/slow.log
+3. Set Metrics Endpoint to http://127.0.0.1:9253/metrics
+4. Set Metrics Mode to prometheus
+5. Click Install Integration
+
+PART 6 — What You Will See in the Platform
+
+From metrics (php-fpm_exporter):
+
+| Metric | What it tells you |
+|--------|-------------------|
+| Active workers | How many PHP processes are currently handling requests |
+| Idle workers | How many PHP processes are waiting for work |
+| Worker saturation % | active / total × 100 — alert above 85% |
+| Queue length | Requests waiting because all workers are busy — alert above 0 |
+| Queue utilization % | listen_queue / listen_queue_len × 100 — alert above 50% |
+| Max children reached | How often PHP wanted more workers but hit the pm.max_children limit |
+| Accepted connections/s | Overall request throughput handled by PHP-FPM |
+| Slow requests | Cumulative count of requests that exceeded request_slowlog_timeout |
+
+From access log:
+
+| Event | What you learn |
+|-------|----------------|
+| High memory per request | Which script is allocating excessive memory — not visible in Nginx logs |
+| High CPU per request | Which script is burning CPU — not visible in Nginx logs |
+| Slow duration | Response time at the PHP layer (excludes Nginx overhead) |
+| 5xx status codes | PHP-level errors before Nginx sees them |
+| Top URIs | Which endpoints receive the most PHP traffic |
+
+From slow log:
+
+| Event | What you learn |
+|-------|----------------|
+| Slow request entry | Exact script path, elapsed time, and which PHP function caused the slowness |
+| Backtrace | Full call stack at the moment the threshold was exceeded |
+
+From error log:
+
+| Event | What you learn |
+|-------|----------------|
+| WARNING: ...max_children | PHP-FPM rejected requests because the worker pool was full |
+| child ... exited | A worker process crashed — check the PHP error log for the cause |
+| Allowed memory size exhausted | A request hit the PHP memory_limit |
+| PHP Fatal error | Uncaught exception or fatal stopping a worker |
+
+From OPcache collector (if enabled):
+
+| Metric | What it tells you |
+|--------|-------------------|
+| Hit rate | Below 90% means PHP is re-compiling scripts — check memory_consumption in php.ini |
+| Memory used % | Above 80% means OPcache is evicting scripts to make room |
+| Wasted memory | High wasted % after deployments — consider opcache_reset() in deploy scripts |
+| Restarts | OOM restarts mean OPcache ran out of memory and had to clear itself |
+
+PART 7 — Checklist Before Clicking Install Integration
+
+- [ ] curl http://127.0.0.1/status?json returns valid JSON with pool metrics
+- [ ] pm.status_path = /status is set in the pool config
+- [ ] /status is restricted to 127.0.0.1 in the web server config
+- [ ] access.log is set and /var/log/php-fpm/access.log has lines after a test request
+- [ ] access.format is exactly "%n %p %R \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
+- [ ] slowlog is set and request_slowlog_timeout is set
+- [ ] curl http://127.0.0.1:9253/metrics | grep phpfpm_up returns phpfpm_up 1
+- [ ] /var/log/php-fpm/error.log exists (may be empty if no errors yet)
+- [ ] You have entered all three log paths and the metrics endpoint in the platform config page
+- [ ] (Optional) /var/lib/agent-prom/phpfpm_opcache.prom exists if OPcache collector is enabled`,
+		JournaledLogGuide: `PHP-FPM may be logging to journald if error_log is not set or points to /dev/stderr.
+
+Check:
+
+` + "```bash" + `
+sudo journalctl -u php8.4-fpm --no-pager | head -10
+` + "```" + `
+
+If you see PHP-FPM output there, follow PART 1 Step 5 in the LogsGuide above to set error_log to a static file path.`,
+		DetectionHints: []string{"php-fpm", "php8", "php7", "php-fpm8", "php-fpm7"},
+		NVD:            &NVDProduct{Vendor: "php", Product: "php"},
+	},
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -570,3 +1485,5 @@ func NVDServices() []ServiceDef {
 	}
 	return out
 }
+
+

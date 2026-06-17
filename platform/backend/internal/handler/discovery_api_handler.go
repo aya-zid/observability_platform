@@ -123,7 +123,7 @@ func (h *DiscoveryAPIHandler) UpdateServiceConfig(c echo.Context) error {
 	}
 
 	if err := h.discoveryService.UpdateServiceConfig(c.Request().Context(), claims.TenantID, uint(serviceID), req); err != nil {
-		if errors.Is(err, service.ErrInvalidMetricsMode) || errors.Is(err, service.ErrMetricsEndpointRequired) || errors.Is(err, service.ErrJMXExporterPortRequired) {
+		if errors.Is(err, service.ErrMetricsEndpointRequired) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		if service.IsNotFoundError(err) {

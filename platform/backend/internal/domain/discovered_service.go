@@ -36,9 +36,6 @@ type DiscoveredService struct {
 	ConfirmedLogPath  string `gorm:"type:text"`
 	LogPathSource     string `gorm:"type:varchar(20);not null;default:'detected'"`
 	UserMetricsEndpoint string `gorm:"type:text"`
-	MetricsMode         string `gorm:"type:varchar(20);not null;default:'unknown'"`
-	IsJavaApp           bool   `gorm:"type:boolean;not null;default:false"`
-	JMXExporterPort     *int
 
 	LoggingMode  string `gorm:"type:varchar(20);default:'unknown'"` // file|syslog|journald|mixed|unknown
 	UsesJournald bool   `gorm:"type:boolean;not null;default:false"`

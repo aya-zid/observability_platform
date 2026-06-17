@@ -41,23 +41,31 @@ type PostgresDashboardSummary struct {
 	WorkMemBytes            *float64 `json:"work_mem_bytes,omitempty"`
 	EffectiveCacheSizeBytes *float64 `json:"effective_cache_size_bytes,omitempty"`
 
-	ConnectionsTimeseries []TimePoint `json:"connections_timeseries"`
-	ActivityTimeseries    []TimePoint `json:"activity_timeseries"`
-	TransactionTimeseries []TimePoint `json:"transaction_timeseries"`
-	CacheTimeseries       []TimePoint `json:"cache_timeseries"`
-	TempTimeseries        []TimePoint `json:"temp_timeseries"`
-	LocksTimeseries       []TimePoint `json:"locks_timeseries"`
-	SizeTimeseries        []TimePoint `json:"size_timeseries"`
-	WalTimeseries         []TimePoint `json:"wal_timeseries"`
-	RowOpsTimeseries      []TimePoint `json:"row_ops_timeseries"`
-	SeqVsIndexTimeseries  []TimePoint `json:"seq_vs_index_timeseries"`
-	BgwriterTimeseries    []TimePoint `json:"bgwriter_timeseries"`
-	ArchiverTimeseries    []TimePoint `json:"archiver_timeseries"`
-	ConnByDbTimeseries    []TimePoint `json:"conn_by_db_timeseries"`
+	ReplicaRole              *float64 `json:"replica_role,omitempty"`
+	ReplicationLagBytes      *float64 `json:"replication_lag_bytes,omitempty"`
+	WalRatePerSec            *float64 `json:"wal_rate_per_sec,omitempty"`
+
+	ConnectionsTimeseries       []TimePoint `json:"connections_timeseries"`
+	ActivityTimeseries          []TimePoint `json:"activity_timeseries"`
+	TransactionTimeseries       []TimePoint `json:"transaction_timeseries"`
+	CacheTimeseries             []TimePoint `json:"cache_timeseries"`
+	TempTimeseries              []TimePoint `json:"temp_timeseries"`
+	LocksTimeseries             []TimePoint `json:"locks_timeseries"`
+	SizeTimeseries              []TimePoint `json:"size_timeseries"`
+	WalTimeseries               []TimePoint `json:"wal_timeseries"`
+	RowOpsTimeseries            []TimePoint `json:"row_ops_timeseries"`
+	SeqVsIndexTimeseries        []TimePoint `json:"seq_vs_index_timeseries"`
+	BgwriterTimeseries          []TimePoint `json:"bgwriter_timeseries"`
+	ArchiverTimeseries          []TimePoint `json:"archiver_timeseries"`
+	ConnByDbTimeseries          []TimePoint `json:"conn_by_db_timeseries"`
+	ReplicationConflictsSeries  []TimePoint `json:"replication_conflicts_timeseries"`
+	DiskIOTimeseries            []TimePoint `json:"disk_io_timeseries"`
+	ActiveSessionTimeseries     []TimePoint `json:"active_session_timeseries"`
 
 	DatabaseSizes  []LabelCount             `json:"database_sizes"`
 	LocksByMode    []LabelCount             `json:"locks_by_mode"`
 	ConnByDatabase []LabelCount             `json:"conn_by_database"`
+	ConnSaturationByDb []LabelCount         `json:"conn_saturation_by_db"`
 	DatabaseHealth []PostgresDatabaseHealth `json:"database_health"`
 
 	LogSummary    PostgresLogSummary `json:"log_summary"`
@@ -286,9 +294,17 @@ func (s *PostgresDashboardService) fetchDashboard(
 		"archive_fail":      "sum(rate(pg_stat_archiver_failed_count_total[" + rangeWindow + "])) or vector(0)",
 		"rollback_rate":     "100 * sum(rate(pg_stat_database_xact_rollback_total[" + rangeWindow + "])) / clamp_min(sum(rate(pg_stat_database_xact_commit_total[" + rangeWindow + "]) + rate(pg_stat_database_xact_rollback_total[" + rangeWindow + "])), 1)",
 		"deadlock_rate_min": "sum(rate(pg_stat_database_deadlocks_total[5m])) * 60",
-		"config_shared_buf": "pg_settings_shared_buffers_bytes",
-		"config_work_mem":   "pg_settings_work_mem_bytes",
-		"config_eff_cache":  "pg_settings_effective_cache_size_bytes",
+		"config_shared_buf":       "pg_settings_shared_buffers_bytes",
+		"config_work_mem":         "pg_settings_work_mem_bytes",
+		"config_eff_cache":        "pg_settings_effective_cache_size_bytes",
+		"replica_role":            "pg_replication_is_replica",
+		"replication_lag_bytes":   "pg_replication_lag_bytes",
+		"wal_rate":                "rate(pg_wal_size_bytes[" + rangeWindow + "]) or vector(0)",
+		"replication_conflicts":   "sum by (datname) (rate(pg_stat_database_conflicts_total[" + rangeWindow + "])) or vector(0)",
+		"replication_conflicts_total": "sum(rate(pg_stat_database_conflicts_total[" + rangeWindow + "])) or vector(0)",
+		"disk_io_backend":         "rate(pg_stat_bgwriter_buffers_backend_total[" + rangeWindow + "]) or vector(0)",
+		"disk_io_backend_fsync":   "rate(pg_stat_bgwriter_buffers_backend_fsync_total[" + rangeWindow + "]) or vector(0)",
+		"active_session_duration": "pg_stat_activity_max_tx_duration{state='active'}",
 	}
 
 	for name, q := range queries {
@@ -347,6 +363,9 @@ func (s *PostgresDashboardService) fetchDashboard(
 		SharedBuffersBytes:      latestVMValue(results["config_shared_buf"].data),
 		WorkMemBytes:            latestVMValue(results["config_work_mem"].data),
 		EffectiveCacheSizeBytes: latestVMValue(results["config_eff_cache"].data),
+		ReplicaRole:             latestVMValue(results["replica_role"].data),
+		ReplicationLagBytes:     latestVMValue(results["replication_lag_bytes"].data),
+		WalRatePerSec:           latestVMValue(results["wal_rate"].data),
 	}
 
 	summary.ConnectionsTimeseries = singleVMSeries(results["connections"].data, "connections")
@@ -387,10 +406,33 @@ func (s *PostgresDashboardService) fetchDashboard(
 		"failed":   results["archive_fail"].data,
 	})
 	summary.ConnByDbTimeseries = mergeVMSeriesByLabel(results["conn_by_db"].data, "datname")
+	summary.ReplicationConflictsSeries = singleVMSeries(results["replication_conflicts_total"].data, "conflicts")
+	summary.DiskIOTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
+		"backend_writes": results["disk_io_backend"].data,
+		"backend_fsync":  results["disk_io_backend_fsync"].data,
+	})
+	summary.ActiveSessionTimeseries = singleVMSeries(results["active_session_duration"].data, "seconds")
 
 	summary.DatabaseSizes = latestLabelCounts(results["db_size_by_name"].data, "datname", 10)
 	summary.LocksByMode = latestLabelCounts(results["locks"].data, "mode", 12)
 	summary.ConnByDatabase = latestLabelCounts(results["conn_by_db"].data, "datname", 10)
+
+	maxConns := float64(100)
+	if summary.MaxConnections != nil {
+		maxConns = *summary.MaxConnections
+	}
+	connSatMap := map[string]float64{}
+	for _, item := range results["conn_by_db"].data {
+		db := item.Metric["datname"]
+		if db == "" {
+			db = "unknown"
+		}
+		if v := lastValue(item.Values); v > 0 && maxConns > 0 {
+			connSatMap[db] = 100 * v / maxConns
+		}
+	}
+	summary.ConnSaturationByDb = topN(connSatMap, 10)
+
 	summary.DatabaseHealth = postgresDatabaseHealth(
 		results["db_size_by_name"].data,
 		results["conn_by_db"].data,

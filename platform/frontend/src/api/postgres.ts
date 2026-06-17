@@ -85,6 +85,9 @@ export type PostgresDashboardSummary = {
   shared_buffers_bytes?: number
   work_mem_bytes?: number
   effective_cache_size_bytes?: number
+  replica_role?: number
+  replication_lag_bytes?: number
+  wal_rate_per_sec?: number
 
   connections_timeseries: PostgresTimePoint[]
   activity_timeseries: PostgresTimePoint[]
@@ -99,10 +102,14 @@ export type PostgresDashboardSummary = {
   bgwriter_timeseries: PostgresTimePoint[]
   archiver_timeseries: PostgresTimePoint[]
   conn_by_db_timeseries: PostgresTimePoint[]
+  replication_conflicts_timeseries: PostgresTimePoint[]
+  disk_io_timeseries: PostgresTimePoint[]
+  active_session_timeseries: PostgresTimePoint[]
 
   database_sizes: PostgresLabelCount[]
   locks_by_mode: PostgresLabelCount[]
   conn_by_database: PostgresLabelCount[]
+  conn_saturation_by_db: PostgresLabelCount[]
   database_health: PostgresDatabaseHealth[]
   log_summary: PostgresLogSummary
   recent_logs: PostgresLogEvent[]

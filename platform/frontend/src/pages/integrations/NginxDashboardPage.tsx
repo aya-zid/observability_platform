@@ -35,20 +35,23 @@ import {
   getStatusBadgeClass,
   getNowSeconds,
   getStartSeconds,
+  getStep,
   secondsToNanos,
 } from '@/lib/queryHelpers'
 import { cn } from '@/lib/utils'
+import { RefreshCw } from 'lucide-react'
+import { methodBadgeColor } from '@/lib/methodBadgeColor'
+import { NginxSlowRequestTable } from '@/components/nginx/NginxSlowRequestTable'
 import { IPInvestigationBlock } from '@/components/nginx/IPInvestigationBlock'
 import { NginxPerformanceSection, NginxRTDistributionChart } from '@/components/nginx/NginxPerformanceSection'
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const TIME_RANGES = [
-  { label: '15m', seconds: 900 },
-  { label: '1h', seconds: 3600 },
-  { label: '6h', seconds: 21600 },
-  { label: '24h', seconds: 86400 },
-] as const
+import { StatCard } from '@/components/shared/StatCard'
+import { ChartBox } from '@/components/shared/ChartBox'
+import { DataTable } from '@/components/shared/DataTable'
+import {
+  TimeRangeSelector,
+  TIME_RANGES,
+  type TimeSelection,
+} from '@/components/shared/TimeRangeSelector'
 
 const STATUS_SUMMARY_STYLES = {
   green: {
@@ -96,10 +99,6 @@ const DEFAULT_RT_COLORS: Record<string, string> = {
   p99: '#ef4444',
 }
 
-type TimeRange = (typeof TIME_RANGES)[number]
-type DashboardTimeSelection =
-  | { mode: 'preset'; preset: TimeRange }
-  | { mode: 'manual'; date: string; startTime: string; endTime: string }
 type DashboardViewMode = 'server' | 'domain'
 
 function buildDomainHref(basePath: string, domain: string | null) {
@@ -150,26 +149,7 @@ const chartStyle = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getStep(rangeSeconds: number) {
-  if (rangeSeconds <= 900) return '15s'
-  if (rangeSeconds <= 3600) return '30s'
-  if (rangeSeconds <= 21600) return '2m'
-  return '5m'
-}
-
-function createDefaultManualSelection(): DashboardTimeSelection {
-  const end = new Date()
-  const start = new Date(end.getTime() - 60 * 60 * 1000)
-
-  return {
-    mode: 'manual',
-    date: formatDateInputValue(end),
-    startTime: formatTimeInputValue(start),
-    endTime: formatTimeInputValue(end),
-  }
-}
-
-function getTimeWindow(selection: DashboardTimeSelection) {
+function getTimeWindow(selection: TimeSelection) {
   if (selection.mode === 'preset') {
     const end = getNowSeconds()
     const start = getStartSeconds(selection.preset.seconds)
@@ -256,371 +236,13 @@ function normalizePercentileInput(value: string) {
   return parsed
 }
 
-// ─── Reusable components (identical to original) ──────────────────────────────
-
-function StatCard({
-  title,
-  value,
-  unit,
-  status = 'green',
-  loading,
-  icon,
-}: {
-  title: string
-  value: string | number
-  unit?: string
-  status?: 'green' | 'yellow' | 'red'
-  loading?: boolean
-  icon?: string
-}) {
-  const color = {
-    green: 'text-green-600 dark:text-green-400',
-    yellow: 'text-amber-600 dark:text-amber-400',
-    red: 'text-red-600 dark:text-red-400',
-  }[status]
-
-  return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <div className="mt-2 flex items-baseline gap-2">
-            <p className={cn('text-3xl font-bold', loading ? 'text-muted-foreground' : color)}>
-              {loading ? '—' : value}
-            </p>
-            {unit && !loading ? <p className="text-sm text-muted-foreground">{unit}</p> : null}
-          </div>
-        </div>
-        {icon ? <div className="text-4xl opacity-40">{icon}</div> : null}
-      </div>
-    </div>
-  )
-}
-
-function TimeRangeSelector({
-  selected,
-  onChange,
-}: {
-  selected: DashboardTimeSelection
-  onChange: (selection: DashboardTimeSelection) => void
-}) {
-  const manual = selected.mode === 'manual' ? selected : createDefaultManualSelection()
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex gap-1 rounded-lg border border-border bg-muted p-1 shadow-sm">
-        {TIME_RANGES.map((range) => (
-          <button
-            key={range.label}
-            type="button"
-            onClick={() => onChange({ mode: 'preset', preset: range })}
-            className={cn(
-              'rounded px-3 py-1.5 text-sm font-medium transition-all duration-200',
-              selected.mode === 'preset' && selected.preset.seconds === range.seconds
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
-            )}
-          >
-            {range.label}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => onChange(manual)}
-          className={cn(
-            'rounded px-3 py-1.5 text-sm font-medium transition-all duration-200',
-            selected.mode === 'manual'
-              ? 'bg-primary text-primary-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
-          )}
-        >
-          Manual
-        </button>
-      </div>
-
-      {selected.mode === 'manual' ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2 py-1 shadow-sm">
-          <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-            Date
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="DD-MM-YYYY"
-              value={selected.date}
-              onChange={(event) => onChange({ ...selected, date: event.target.value })}
-              className="h-8 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
-            />
-          </label>
-          <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-            Start
-            <input
-              type="time"
-              value={selected.startTime}
-              onChange={(event) => onChange({ ...selected, startTime: event.target.value })}
-              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
-            />
-          </label>
-          <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-            End
-            <input
-              type="time"
-              value={selected.endTime}
-              onChange={(event) => onChange({ ...selected, endTime: event.target.value })}
-              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
-            />
-          </label>
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function ChartBox({
-  title,
-  children,
-  loading,
-  empty,
-  hint,
-  actions,
-}: {
-  title: string
-  children: React.ReactNode
-  loading?: boolean
-  empty?: boolean
-  hint?: string
-  actions?: React.ReactNode
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        {actions}
-      </div>
-      {loading ? (
-        <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">Loading...</div>
-      ) : empty ? (
-        <div className="flex h-64 flex-col items-center justify-center gap-1 text-sm text-muted-foreground">
-          <span>No data for selected range</span>
-          {hint ? <span className="text-xs opacity-70">{hint}</span> : null}
-        </div>
-      ) : (
-        children
-      )}
-    </div>
-  )
-}
-
-function DataTable({
-  title,
-  subtitle,
-  rows,
-  loading,
-}: {
-  title: string
-  subtitle?: string
-  rows: Array<{ label: string; value: string; percent?: number; badgeClass?: string }>
-  loading?: boolean
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <h3 className="mb-1 text-sm font-semibold text-foreground">{title}</h3>
-      {subtitle ? <p className="mb-3 text-xs text-muted-foreground">{subtitle}</p> : <div className="mb-3" />}
-      <div className="max-h-64 space-y-1 overflow-y-auto">
-        {loading ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
-        ) : rows.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
-        ) : (
-          rows.map((row, index) => (
-            <div key={`${row.label}-${index}`} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-muted/50 transition-colors">
-              <div className="mr-2 flex min-w-0 flex-1 items-center gap-2">
-                {row.badgeClass ? (
-                  <span className={cn('rounded px-2 py-0.5 text-xs font-semibold', row.badgeClass)}>{row.label}</span>
-                ) : (
-                  <span className="truncate font-mono text-sm">{row.label}</span>
-                )}
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-2">
-                {row.percent !== undefined ? (
-                  <span className="text-xs text-muted-foreground">{row.percent.toFixed(1)}%</span>
-                ) : null}
-                <span className="font-semibold text-primary">{row.value}</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  )
-}
-
-function methodBadgeColor(method: string) {
-  switch (method) {
-    case 'GET':
-      return '#22c55e'
-    case 'POST':
-      return '#3b82f6'
-    case 'DELETE':
-      return '#ef4444'
-    default:
-      return '#8b5cf6'
-  }
-}
-
-function SlowRequestTable({
-  rows,
-  total,
-  minRT,
-  thresholdValue,
-  onThresholdChange,
-  onThresholdBlur,
-  viewMoreHref,
-  loading,
-}: {
-  rows: NginxDashboardSummary['slow_requests']
-  total: number
-  minRT: number
-  thresholdValue: string
-  onThresholdChange: (value: string) => void
-  onThresholdBlur: () => void
-  viewMoreHref: string
-  loading?: boolean
-}) {
-  const [expandedRow, setExpandedRow] = useState<number | null>(null)
-
-  return (
-    <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="mb-1 text-sm font-semibold text-foreground">Slow Requests (&gt;{minRT}s) — Recent 100</h3>
-          <p className="text-xs text-muted-foreground">
-            Showing {formatNumber(rows.length, 0)} of {formatNumber(total, 0)} found. Click a request to view more details.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground">
-            RT
-            <input
-              type="number"
-              min="0.1"
-              step="0.1"
-              value={thresholdValue}
-              onChange={(event) => onThresholdChange(event.target.value)}
-              onBlur={onThresholdBlur}
-              className="h-7 w-16 rounded border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
-            />
-            <span>s</span>
-          </label>
-          {total > rows.length ? (
-            <Link
-              to={viewMoreHref}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-            >
-              View More
-            </Link>
-          ) : null}
-        </div>
-      </div>
-      {loading ? (
-        <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
-      ) : rows.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          No requests over {minRT}s found in the selected range.
-        </p>
-      ) : (
-        <div className="max-h-[320px] overflow-auto">
-          <div className="space-y-2">
-            {rows.map((req, i) => {
-              const isOpen = expandedRow === i
-              return (
-                <div key={`${req.path}-${req.ip}-${i}`} className="rounded-lg border border-border/70 hover:border-border/100 transition-colors">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedRow(isOpen ? null : i)}
-                    className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/40 transition-colors"
-                  >
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs" title={req.path}>
-                      {req.path}
-                    </span>
-                    <span className="hidden w-28 flex-shrink-0 truncate font-mono text-xs text-muted-foreground md:inline" title={req.ip}>
-                      {req.ip || '—'}
-                    </span>
-                    <span
-                      className="rounded px-1.5 py-0.5 text-xs font-semibold text-white flex-shrink-0"
-                      style={{ background: methodBadgeColor(req.method) }}
-                    >
-                      {req.method}
-                    </span>
-                    <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold flex-shrink-0', getStatusBadgeClass(req.status))}>
-                      {req.status}
-                    </span>
-                    <span
-                      className={cn(
-                        'w-20 flex-shrink-0 text-right text-xs font-semibold tabular-nums',
-                        req.rt >= 5 ? 'text-red-500' : req.rt >= 2 ? 'text-amber-500' : 'text-foreground',
-                      )}
-                    >
-                      {(req.rt * 1000).toFixed(0)}ms
-                    </span>
-                  </button>
-                  {isOpen ? (
-                    <div className="border-t border-border bg-muted/30 px-3 py-3 text-xs">
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                        <div>
-                          <span className="text-muted-foreground">Timestamp:</span>{' '}
-                          <span className="font-mono">{req.timestamp || '—'}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Path:</span>{' '}
-                          <span className="font-mono break-all">{req.path}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Client IP:</span>{' '}
-                          <span className="font-mono">{req.ip}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Method:</span>{' '}
-                          <span>{req.method}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Status:</span>{' '}
-                          <span>{req.status}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Response Time:</span>{' '}
-                          <span className="font-mono">{req.rt.toFixed(3)}s</span>
-                        </div>
-                        {req.referer && (
-                          <div className="md:col-span-2">
-                            <span className="text-muted-foreground">Referer:</span>{' '}
-                            <span className="font-mono break-all">{req.referer}</span>
-                          </div>
-                        )}
-                        {req.user_agent && (
-                          <div className="md:col-span-2">
-                            <span className="text-muted-foreground">User Agent:</span>{' '}
-                            <span className="font-mono break-all text-[10px]">{req.user_agent}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function NginxDashboardPage() {
   const { id = '' } = useParams<{ id?: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [timeSelection, setTimeSelection] = useState<DashboardTimeSelection>({
+  const [timeSelection, setTimeSelection] = useState<TimeSelection>({
     mode: 'preset',
     preset: TIME_RANGES[1],
   })
@@ -872,6 +494,14 @@ export function NginxDashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => dashQuery.refetch()}
+            className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
+            title="Refresh"
+          >
+            <RefreshCw className={cn('h-4 w-4', dashQuery.isRefetching && 'animate-spin')} />
+          </button>
           <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
           <Link
             to={buildDomainHref(`/integrations/nginx-logs/${id}`, selectedDomain || null)}
@@ -1188,7 +818,7 @@ export function NginxDashboardPage() {
 
           {/* Slow Requests — both tables side by side */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <SlowRequestTable
+            <NginxSlowRequestTable
               rows={slowRequests}
               total={slowRequestsTotal}
               minRT={slowMinRT}

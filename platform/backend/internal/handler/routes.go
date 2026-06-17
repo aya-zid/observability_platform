@@ -80,6 +80,13 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		tenantRepo,
 	)
 
+	mariadbDashboardService := service.NewMariaDBDashboardService(cfg, infrastructure.Redis)
+	mariadbDashboardHandler := NewMariaDBDashboardHandler(
+		mariadbDashboardService,
+		discoveryRepo,
+		tenantRepo,
+	)
+
 	e.GET("/install.sh", installHandler.AgentInstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
@@ -129,6 +136,13 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		// Redis dashboard routes
 		api.GET("/redis/:id/dashboard", redisDashboardHandler.Dashboard)
 		api.GET("/redis/:id/logs", redisDashboardHandler.Logs)
+
+		// MariaDB dashboard routes
+		api.GET("/mariadb/:id/dashboard", mariadbDashboardHandler.Dashboard)
+		api.GET("/mariadb/:id/config", mariadbDashboardHandler.Config)
+		api.GET("/mariadb/:id/logs", mariadbDashboardHandler.Logs)
+		api.GET("/mariadb/:id/error-logs", mariadbDashboardHandler.ErrorLogs)
+		api.GET("/mariadb/:id/slow-query-logs", mariadbDashboardHandler.SlowQueryLogs)
 
 		// Apache dashboard routes
 		api.GET("/apache/:id/dashboard", apacheDashboardHandler.Dashboard)

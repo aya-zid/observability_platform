@@ -26,6 +26,11 @@ function isRedisService(name: string) {
   return name.toLowerCase().includes("redis")
 }
 
+function isMariaDBService(name: string) {
+  const n = name.toLowerCase()
+  return n.includes("mysql") || n.includes("mariadb") || n.includes("mysqld") || n.includes("mariadbd")
+}
+
 function ServiceRow({ service }: { service: DiscoveryService }) {
   return (
     <div className="rounded-xl border border-border bg-card/50 p-3">
@@ -95,6 +100,22 @@ function ServiceRow({ service }: { service: DiscoveryService }) {
           </Link>
           <Link
             to={`/integrations/redis-logs/${service.id}`}
+            className="inline-flex items-center rounded-md border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted"
+          >
+            Logs
+          </Link>
+        </div>
+      ) : null}
+      {isMariaDBService(service.service_name) && service.log_collection_on && service.metric_collection_on ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            to={`/integrations/mariadb-dashboard/${service.id}`}
+            className="inline-flex items-center rounded-md bg-sky-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-sky-500"
+          >
+            Open MariaDB Dashboard
+          </Link>
+          <Link
+            to={`/integrations/mariadb-logs/${service.id}`}
             className="inline-flex items-center rounded-md border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted"
           >
             Logs

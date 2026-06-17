@@ -64,9 +64,6 @@ export type DiscoveryServiceDetail = {
   suggested_log_path?: string
   user_metrics_endpoint?: string
   suggested_metrics_endpoint?: string
-  metrics_mode: string
-  is_java_app: boolean
-  jmx_exporter_port?: number
   detected_log_paths: string[]
   log_collection_on: boolean
   metric_collection_on: boolean
@@ -136,9 +133,6 @@ export async function updateDiscoveryServiceConfig(
   payload: {
     confirmed_log_path: string
     user_metrics_endpoint: string
-    metrics_mode: string
-    is_java_app: boolean
-    jmx_exporter_port?: number
     nginx_virtual_hosts?: VirtualHostEntry[]
     apache_virtual_hosts?: VirtualHostEntry[]
   }

@@ -88,16 +88,29 @@ func (s *IntegrationService) CreateInstallCommand(
 		return nil, err
 	}
 
-	logPaths := effectiveLogPathsForIntegration(svc, detectedLogPaths)
-	logPathsJoined := strings.Join(logPaths, ",")
+	var logPathsJoined string
+	if svc.LogCollectionOn {
+		logPaths := effectiveLogPathsForIntegration(svc, detectedLogPaths)
+		logPathsJoined = strings.Join(logPaths, ",")
+	}
 
 	var def *catalog.ServiceDef
-	if d, ok := catalog.Get(svc.ServiceName); ok {
+	if d, ok := catalog.ResolveService(svc.ServiceName); ok {
 		copy := d
 		def = &copy
 	}
 
-	metricsEndpoint := metricsEndpointForIntegration(svc, def)
+	var metricsEndpoint string
+	if svc.MetricCollectionOn {
+		metricsEndpoint = metricsEndpointForIntegration(svc, def)
+	}
+
+	// For web servers with virtual hosts, the per-domain vhost paths
+	// replace the generic log paths entirely.
+	if len(nginxVHosts) > 0 || len(apacheVHosts) > 0 {
+		logPathsJoined = ""
+	}
+
 	if logPathsJoined == "" && metricsEndpoint == "" && len(nginxVHosts) == 0 && len(apacheVHosts) == 0 {
 		return nil, ErrIntegrationConfigRequired
 	}
@@ -245,23 +258,70 @@ if not metrics_key:
 with open(cfg_path, "r", encoding="utf-8") as f:
     text = f.read()
 
-if log_paths and f"  {filelog_key}:\n" not in text:
-    include_lines = "\n".join([f"      - {p}" for p in log_paths])
-    filelog_block = (
-        f"  {filelog_key}:\n"
-        "    include:\n"
-        f"{include_lines}\n"
-        "    include_file_path: true\n"
-        "    start_at: end\n"
-        "    resource:\n"
-        f"      service.name: {service_name}\n"
-        f"      job: {service_name}\n"
-    )
-    marker = "\nprocessors:\n"
-    if marker in text:
-        text = text.replace(marker, "\n" + filelog_block + "\nprocessors:\n", 1)
-    else:
-        text += "\n" + filelog_block + "\n"
+if log_paths:
+    is_mysql = service_name.lower() in ("mysql", "mariadb", "mysqld", "mariadbd")
+    if is_mysql and f"  {filelog_key}:\n" not in text:
+        err_paths = [p for p in log_paths if "error" in p.lower()]
+        slow_paths = [p for p in log_paths if "error" not in p.lower()]
+        inserted_block = []
+
+        if err_paths:
+            err_lines = "\n".join([f"      - {p}" for p in err_paths])
+            err_key = f"filelog/{service_slug}_error_integration"
+            inserted_block.append(
+                f"  {err_key}:\n"
+                "    include:\n"
+                f"{err_lines}\n"
+                "    include_file_path: true\n"
+                "    start_at: end\n"
+                "    operators:\n"
+                "      - type: regex_parser\n"
+                "        regex: '^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}[.\\\\dZ+:\\\\-]*\\\\s+\\\\d+\\\\s+\\\\(?P<log_level>System|Warning|ERROR|Note)\\\\](?:\\\\s+\\\\(?P<mysql_error_code>MY-\\\\d+)\\\\])?\\\\s+\\\\(?P<mysql_subsystem>\\\\w+)\\\\]\\\\s+(?P<mysql_message>.{0,400})'\n"
+                "        on_error: send_quiet\n"
+                "    resource:\n"
+                f"      service.name: {service_name}\n"
+                f"      job: {service_name}\n"
+                "      log_kind: error\n"
+            )
+
+        if slow_paths:
+            slow_lines = "\n".join([f"      - {p}" for p in slow_paths])
+            slow_key = f"filelog/{service_slug}_slow_integration"
+            inserted_block.append(
+                f"  {slow_key}:\n"
+                "    include:\n"
+                f"{slow_lines}\n"
+                "    include_file_path: true\n"
+                "    start_at: end\n"
+                "    resource:\n"
+                f"      service.name: {service_name}\n"
+                f"      job: {service_name}\n"
+                "      log_kind: slow\n"
+            )
+
+        block = "\n".join(inserted_block)
+        marker = "\nprocessors:\n"
+        if marker in text:
+            text = text.replace(marker, "\n" + block + "\nprocessors:\n", 1)
+        else:
+            text += "\n" + block + "\n"
+    elif not is_mysql and f"  {filelog_key}:\n" not in text:
+        include_lines = "\n".join([f"      - {p}" for p in log_paths])
+        filelog_block = (
+            f"  {filelog_key}:\n"
+            "    include:\n"
+            f"{include_lines}\n"
+            "    include_file_path: true\n"
+            "    start_at: end\n"
+            "    resource:\n"
+            f"      service.name: {service_name}\n"
+            f"      job: {service_name}\n"
+        )
+        marker = "\nprocessors:\n"
+        if marker in text:
+            text = text.replace(marker, "\n" + filelog_block + "\nprocessors:\n", 1)
+        else:
+            text += "\n" + filelog_block + "\n"
 
 if metrics_endpoint and f"  {metrics_key}:\n" not in text:
     parsed = urlparse(metrics_endpoint)
@@ -306,10 +366,21 @@ for i, line in enumerate(lines):
         end = stripped.rfind("]")
         payload = stripped[start + 1 : end].strip()
         arr = [x.strip() for x in payload.split(",") if x.strip()]
-        receiver = metrics_key if current == "metrics" else filelog_key
-        if (current == "logs" and log_paths) or (current == "metrics" and metrics_endpoint):
-            if receiver not in arr:
-                arr.append(receiver)
+        if current == "logs" and log_paths:
+            if is_mysql:
+                receiver_keys = []
+                if err_paths:
+                    receiver_keys.append(f"filelog/{service_slug}_error_integration")
+                if slow_paths:
+                    receiver_keys.append(f"filelog/{service_slug}_slow_integration")
+                for rk in receiver_keys:
+                    if rk not in arr:
+                        arr.append(rk)
+            elif filelog_key not in arr:
+                arr.append(filelog_key)
+        elif current == "metrics" and metrics_endpoint:
+            if metrics_key not in arr:
+                arr.append(metrics_key)
         lines[i] = line[: line.index("receivers:")] + "receivers: [" + ", ".join(arr) + "]"
 
 with open(cfg_path, "w", encoding="utf-8") as f:
@@ -815,7 +886,8 @@ else
   }
 fi
 
-LOG_ON=true
+LOG_ON=false
+[ -n "$NGINX_VHOSTS_JSON" ] && [ "$NGINX_VHOSTS_JSON" != "[]" ] && LOG_ON=true
 METRICS_ON=false
 [ -n "$METRICS_ENDPOINT" ] && METRICS_ON=true
 
@@ -1183,7 +1255,8 @@ else
   }
 fi
 
-LOG_ON=true
+LOG_ON=false
+[ -n "$APACHE_VHOSTS_JSON" ] && [ "$APACHE_VHOSTS_JSON" != "[]" ] && LOG_ON=true
 METRICS_ON=false
 [ -n "$METRICS_ENDPOINT" ] && METRICS_ON=true
 
@@ -1253,35 +1326,14 @@ func metricsEndpointForIntegration(svc *domain.DiscoveredService, def *catalog.S
 	if svc == nil {
 		return ""
 	}
-	metricsMode := strings.TrimSpace(svc.MetricsMode)
 	userEndpoint := strings.TrimSpace(svc.UserMetricsEndpoint)
-	defaultEndpoint := ""
-	if def != nil {
-		defaultEndpoint = strings.TrimSpace(def.DefaultMetricsEndpoint)
-	}
-
-	switch metricsMode {
-	case "prometheus":
+	if userEndpoint != "" {
 		return userEndpoint
-	case "jmx":
-		if svc.JMXExporterPort != nil {
-			return fmt.Sprintf("http://127.0.0.1:%d/metrics", *svc.JMXExporterPort)
-		}
-		return ""
-	case "none":
-		return ""
-	case "catalog", "":
-		if userEndpoint != "" {
-			return userEndpoint
-		}
-		return defaultEndpoint
-	case "unknown":
-		if userEndpoint != "" {
-			return userEndpoint
-		}
-		return defaultEndpoint
 	}
-	return userEndpoint
+	if def != nil {
+		return strings.TrimSpace(def.DefaultMetricsEndpoint)
+	}
+	return ""
 }
 
 func shellEscapeSingle(s string) string {

@@ -19,6 +19,7 @@ import { getPostgresDashboardSummary, type PostgresDashboardSummary, type Postgr
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { dateTimeInputToSeconds, formatBytes, formatDateInputValue, formatDuration, formatNumber, formatPercent, formatTimeInputValue, getNowSeconds, getStartSeconds, secondsToNanos } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
+import { RefreshCw } from "lucide-react"
 import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
 
 const TIME_RANGES = [
@@ -168,6 +169,12 @@ function TimeRangeSelector({
   )
 }
 
+const C = {
+  blue: "#0ea5e9", green: "#22c55e", amber: "#f59e0b", red: "#ef4444",
+  violet: "#8b5cf6", teal: "#14b8a6", rose: "#f43f5e", cyan: "#06b6d4",
+  indigo: "#6366f1", orange: "#f97316", slate: "#64748b",
+}
+
 const chartStyle = {
   grid: "hsl(var(--border))",
   tick: { fill: "#94a3b8", fontSize: 10 },
@@ -178,6 +185,15 @@ const chartStyle = {
     color: "hsl(var(--foreground))",
     fontSize: "12px",
   },
+}
+
+function SectionHeader({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="mb-1 mt-6">
+      <h2 className="text-base font-semibold">{title}</h2>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+    </div>
+  )
 }
 
 function LinePanel({
@@ -329,6 +345,9 @@ export function PostgresDashboardPage() {
   const seqVsIndex = mapTimeseries(data?.seq_vs_index_timeseries ?? [])
   const bgwriter = mapTimeseries(data?.bgwriter_timeseries ?? [])
   const archiver = mapTimeseries(data?.archiver_timeseries ?? [])
+  const replicationConflicts = mapTimeseries(data?.replication_conflicts_timeseries ?? [])
+  const diskIO = mapTimeseries(data?.disk_io_timeseries ?? [])
+  const activeSession = mapTimeseries(data?.active_session_timeseries ?? [])
   const idleInTx = latest(data?.activity_timeseries, "idle in transaction")
   const sizeFirstLast = totalFirstAndLast(data?.size_timeseries)
   const sizeGrowthPerHour = sizeFirstLast && sizeFirstLast.end.time > sizeFirstLast.start.time
@@ -356,6 +375,14 @@ export function PostgresDashboardPage() {
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
             <LangToggle />
+            <button
+              type="button"
+              onClick={() => dashQuery.refetch()}
+              className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
+              title="Refresh"
+            >
+              <RefreshCw className={cn('h-4 w-4', dashQuery.isRefetching && 'animate-spin')} />
+            </button>
             <Link to={`/integrations/postgres-logs/${id}`} className="rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500">
               {t("shared.viewLogs")}
             </Link>
@@ -377,76 +404,111 @@ export function PostgresDashboardPage() {
         </SectionCard>
       ) : null}
 
+      {/* ═══════════════════════════════ 1. STATUS ═══════════════════════════ */}
+      <SectionHeader title="Status" description="Instance health and replication role at a glance" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label={t("pgDashboard.up")} value={data?.up === 1 ? "Up" : data?.up === 0 ? "Down" : "-"} tone={data?.up === 1 ? "good" : data?.up === 0 ? "bad" : "neutral"} hint={t("pgDashboard.upHint")} />
         <StatCard label={t("pgDashboard.scrape")} value={data?.scrape_error === 1 ? "Error" : data?.scrape_error === 0 ? "Healthy" : "-"} tone={data?.scrape_error === 1 ? "bad" : data?.scrape_error === 0 ? "good" : "neutral"} hint={t("pgDashboard.scrapeHint")} />
-        <StatCard label={t("pgDashboard.connSat")} value={data?.connection_saturation_pct != null ? formatPercent(data.connection_saturation_pct) : "-"} tone={(data?.connection_saturation_pct ?? 0) > 85 ? "bad" : (data?.connection_saturation_pct ?? 0) > 70 ? "warn" : "good"} hint={t("pgDashboard.connSatHint", data?.max_connections ? formatNumber(data.max_connections, 0) : "-")} />
+        <StatCard label="Replica Role" value={data?.replica_role != null ? (data.replica_role === 1 ? "Replica" : "Primary") : "-"} tone={data?.replica_role === 1 ? "warn" : "good"} hint={data?.replica_role === 1 ? "This is a read replica" : "This is the primary server"} />
         <StatCard label={t("pgDashboard.cacheHit")} value={data?.cache_hit_ratio_pct != null ? formatPercent(data.cache_hit_ratio_pct) : "-"} tone={(data?.cache_hit_ratio_pct ?? 100) < 95 ? "warn" : "good"} hint={t("pgDashboard.cacheHitHint")} />
-        <StatCard label={t("pgDashboard.dbSize")} value={data?.database_size_bytes != null ? formatBytes(data.database_size_bytes) : "-"} hint={t("pgDashboard.dbSizeHint")} />
-        <StatCard label={t("pgDashboard.walSize")} value={data?.wal_size_bytes != null ? formatBytes(data.wal_size_bytes) : "-"} tone={(data?.wal_size_bytes ?? 0) > 1024 * 1024 * 1024 ? "warn" : "neutral"} hint={t("pgDashboard.walSizeHint")} />
-        <StatCard label={t("pgDashboard.replLag")} value={data?.replication_lag_seconds != null ? formatDuration(data.replication_lag_seconds) : "-"} tone={(data?.replication_lag_seconds ?? 0) > 30 ? "bad" : "good"} hint={t("pgDashboard.replLagHint")} />
-        <StatCard label={t("pgDashboard.idleTx")} value={idleInTx != null ? formatNumber(idleInTx, 0) : "-"} tone={(idleInTx ?? 0) > 0 ? "warn" : "good"} hint={t("pgDashboard.idleTxHint")} />
-        <StatCard label={t("pgDashboard.rollbackRate")} value={data?.rollback_rate_pct != null ? formatPercent(data.rollback_rate_pct) : "-"} tone={(data?.rollback_rate_pct ?? 0) > 2 ? "bad" : (data?.rollback_rate_pct ?? 0) > 1 ? "warn" : "good"} hint={t("pgDashboard.rollbackRateHint")} />
-        <StatCard label={t("pgDashboard.deadlocks")} value={data?.deadlocks_per_min != null ? formatNumber(data.deadlocks_per_min, 2) : "-"} tone={(data?.deadlocks_per_min ?? 0) > 0 ? "bad" : "good"} hint={t("pgDashboard.deadlocksHint")} />
-        <StatCard label={t("pgDashboard.maxTxDuration")} value={data?.max_tx_duration_seconds != null ? formatDuration(data.max_tx_duration_seconds) : "-"} tone={(data?.max_tx_duration_seconds ?? 0) > 30 ? "warn" : "good"} />
-        <StatCard label={t("pgDashboard.archiveFailed")} value={data?.archive_failed != null ? formatNumber(data.archive_failed, 4) : "-"} tone={(data?.archive_failed ?? 0) > 0 ? "bad" : "good"} />
-        <StatCard label={t("pgDashboard.dbGrowth")} value={sizeGrowthPerHour != null ? `${formatBytes(Math.abs(sizeGrowthPerHour))}/h` : "-"} tone={(sizeGrowthPerHour ?? 0) > 100 * 1024 * 1024 ? "warn" : "neutral"} hint={totalSizeLatest != null ? `${t("pgDashboard.totalInRange", formatBytes(totalSizeLatest))}` : undefined} />
-        <StatCard label={t("pgDashboard.seqScan")} value={seqScanRatio != null ? formatPercent(seqScanRatio) : "-"} tone={(seqScanRatio ?? 0) > 60 ? "bad" : (seqScanRatio ?? 0) > 30 ? "warn" : "good"} hint={t("pgDashboard.seqScanHint")} />
-        <StatCard label={t("pgDashboard.bgwriterPressure")} value={bgwriterPressure != null ? formatPercent(bgwriterPressure) : "-"} tone={(bgwriterPressure ?? 0) > 50 ? "warn" : "good"} hint={t("pgDashboard.bgwriterPressureHint")} />
-        <StatCard label={t("pgDashboard.tempSpill")} value={tempBytesLatest != null ? `${formatBytes(tempBytesLatest)}/s` : "-"} tone={(tempBytesLatest ?? 0) > 0 ? "warn" : "good"} hint={t("pgDashboard.tempSpillHint")} />
       </div>
 
-      <DatabaseHealthTable rows={data?.database_health ?? []} />
-
+      {/* ═══════════════════════════════ 2. CONNECTIONS ═════════════════════ */}
+      <SectionHeader title="Connections" description="Connection pool saturation, per-database breakdown, and idle-in-transaction tracking" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("pgDashboard.connSat")} value={data?.connection_saturation_pct != null ? formatPercent(data.connection_saturation_pct) : "-"} tone={(data?.connection_saturation_pct ?? 0) > 85 ? "bad" : (data?.connection_saturation_pct ?? 0) > 70 ? "warn" : "good"} hint={t("pgDashboard.connSatHint", data?.max_connections ? formatNumber(data.max_connections, 0) : "-")} />
+        <StatCard label={t("pgDashboard.idleTx")} value={idleInTx != null ? formatNumber(idleInTx, 0) : "-"} tone={(idleInTx ?? 0) > 0 ? "warn" : "good"} hint={t("pgDashboard.idleTxHint")} />
+        <StatCard label={t("pgDashboard.maxTxDuration")} value={data?.max_tx_duration_seconds != null ? formatDuration(data.max_tx_duration_seconds) : "-"} tone={(data?.max_tx_duration_seconds ?? 0) > 30 ? "warn" : "good"} hint="Longest active transaction" />
+      </div>
       <div className="grid gap-4 xl:grid-cols-2">
-        <LinePanel title={t("pgDashboard.chartConnections")} data={connections} lines={[{ key: "connections", name: "connections", color: "#0ea5e9" }]} />
+        <LinePanel title={t("pgDashboard.chartConnections")} data={connections} lines={[{ key: "connections", name: "connections", color: C.blue }]} />
         <LinePanel
           title={t("pgDashboard.chartActivity")}
           data={activity}
           lines={[
-            { key: "active", name: "active", color: "#22c55e" },
-            { key: "idle", name: "idle", color: "#64748b" },
-            { key: "idle in transaction", name: "idle in transaction", color: "#f59e0b" },
+            { key: "active", name: "active", color: C.green },
+            { key: "idle", name: "idle", color: C.slate },
+            { key: "idle in transaction", name: "idle in transaction", color: C.amber },
           ]}
         />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <BarPanel title={t("pgDashboard.chartConnsByDb")} data={data?.conn_by_database ?? []} />
+        <BarPanel title="Conn Saturation % by DB" data={data?.conn_saturation_by_db ?? []} valueFormatter={(v) => formatPercent(v)} />
+      </div>
+
+      {/* ═══════════════════════════════ 3. TRANSACTIONS ════════════════════ */}
+      <SectionHeader title="Transactions" description="Commit, rollback, and deadlock rates" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("pgDashboard.rollbackRate")} value={data?.rollback_rate_pct != null ? formatPercent(data.rollback_rate_pct) : "-"} tone={(data?.rollback_rate_pct ?? 0) > 2 ? "bad" : (data?.rollback_rate_pct ?? 0) > 1 ? "warn" : "good"} hint={t("pgDashboard.rollbackRateHint")} />
+        <StatCard label={t("pgDashboard.deadlocks")} value={data?.deadlocks_per_min != null ? formatNumber(data.deadlocks_per_min, 2) : "-"} tone={(data?.deadlocks_per_min ?? 0) > 0 ? "bad" : "good"} hint={t("pgDashboard.deadlocksHint")} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
         <LinePanel
           title={t("pgDashboard.chartTransactions")}
           data={transactions}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
-            { key: "commits", name: "commits/s", color: "#22c55e" },
-            { key: "rollbacks", name: "rollbacks/s", color: "#f59e0b" },
-            { key: "deadlocks", name: "deadlocks/s", color: "#ef4444" },
+            { key: "commits", name: "commits/s", color: C.green },
+            { key: "rollbacks", name: "rollbacks/s", color: C.amber },
+            { key: "deadlocks", name: "deadlocks/s", color: C.red },
           ]}
         />
+      </div>
+
+      {/* ═══════════════════════════════ 4. CACHE ═══════════════════════════ */}
+      <SectionHeader title="Cache" description="Buffer cache hit ratio and disk read/write effectiveness" />
+      <div className="grid gap-4 xl:grid-cols-2">
         <LinePanel
           title={t("pgDashboard.chartCache")}
           data={cache}
           formatter={(value, key) => key === "hit_ratio" ? formatPercent(value) : `${formatNumber(value)} /s`}
           lines={[
-            { key: "hit_ratio", name: "hit ratio %", color: "#14b8a6" },
-            { key: "hits", name: "buffer hits/s", color: "#22c55e" },
-            { key: "reads", name: "disk reads/s", color: "#ef4444" },
+            { key: "hit_ratio", name: "hit ratio %", color: C.teal },
+            { key: "hits", name: "buffer hits/s", color: C.green },
+            { key: "reads", name: "disk reads/s", color: C.red },
           ]}
         />
-        <LinePanel
-          title={t("pgDashboard.chartTemp")}
-          data={temp}
-          formatter={(value, key) => key === "bytes" ? `${formatBytes(value)}/s` : `${formatNumber(value)} /s`}
-          lines={[
-            { key: "files", name: "temp files/s", color: "#f59e0b" },
-            { key: "bytes", name: "temp bytes/s", color: "#ef4444" },
-          ]}
-        />
-        <LinePanel title={t("pgDashboard.chartWAL")} data={wal} formatter={(value) => formatBytes(value)} lines={[{ key: "bytes", name: "WAL bytes", color: "#8b5cf6" }]} />
+      </div>
+
+      {/* ═══════════════════════════════ 5. STORAGE & WAL ═══════════════════ */}
+      <SectionHeader title="Storage & WAL" description="Database size, WAL generation rate, and growth trends" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("pgDashboard.dbSize")} value={data?.database_size_bytes != null ? formatBytes(data.database_size_bytes) : "-"} hint={t("pgDashboard.dbSizeHint")} />
+        <StatCard label={t("pgDashboard.walSize")} value={data?.wal_size_bytes != null ? formatBytes(data.wal_size_bytes) : "-"} tone={(data?.wal_size_bytes ?? 0) > 1024 * 1024 * 1024 ? "warn" : "neutral"} hint={t("pgDashboard.walSizeHint")} />
+        <StatCard label="WAL Rate" value={data?.wal_rate_per_sec != null ? `${formatBytes(data.wal_rate_per_sec)}/s` : "-"} tone={(data?.wal_rate_per_sec ?? 0) > 10 * 1024 * 1024 ? "warn" : "neutral"} hint="WAL generation rate" />
+        <StatCard label={t("pgDashboard.dbGrowth")} value={sizeGrowthPerHour != null ? `${formatBytes(Math.abs(sizeGrowthPerHour))}/h` : "-"} tone={(sizeGrowthPerHour ?? 0) > 100 * 1024 * 1024 ? "warn" : "neutral"} hint={totalSizeLatest != null ? `${t("pgDashboard.totalInRange", formatBytes(totalSizeLatest))}` : undefined} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel title={t("pgDashboard.chartWAL")} data={wal} formatter={(value) => formatBytes(value)} lines={[{ key: "bytes", name: "WAL bytes", color: C.violet }]} />
+        <LinePanel title="Temp Spill" data={temp} formatter={(value, key) => key === "bytes" ? `${formatBytes(value)}/s` : `${formatNumber(value)} /s`} lines={[
+          { key: "files", name: "temp files/s", color: C.amber },
+          { key: "bytes", name: "temp bytes/s", color: C.red },
+        ]} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <BarPanel title={t("pgDashboard.chartDbSizes")} data={data?.database_sizes ?? []} valueFormatter={formatBytes} />
+      </div>
+
+      {/* ═══════════════════════════════ 5b. DATABASE HEALTH ════════════════ */}
+      <SectionHeader title="Database Health" description="Per-database metrics: size, connections, cache, temp spills, rollback rate" />
+      <DatabaseHealthTable rows={data?.database_health ?? []} />
+
+      {/* ═══════════════════════════════ 6. ROW THROUGHPUT ══════════════════ */}
+      <SectionHeader title="Row Throughput" description="Row operations and sequential vs. index scan ratio" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("pgDashboard.seqScan")} value={seqScanRatio != null ? formatPercent(seqScanRatio) : "-"} tone={(seqScanRatio ?? 0) > 60 ? "bad" : (seqScanRatio ?? 0) > 30 ? "warn" : "good"} hint={t("pgDashboard.seqScanHint")} />
+        <StatCard label={t("pgDashboard.tempSpill")} value={tempBytesLatest != null ? `${formatBytes(tempBytesLatest)}/s` : "-"} tone={(tempBytesLatest ?? 0) > 0 ? "warn" : "good"} hint={t("pgDashboard.tempSpillHint")} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
         <LinePanel
           title={t("pgDashboard.chartRowThroughput")}
           data={rowOps}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
-            { key: "inserts", name: "inserts/s", color: "#22c55e" },
-            { key: "updates", name: "updates/s", color: "#0ea5e9" },
-            { key: "deletes", name: "deletes/s", color: "#ef4444" },
+            { key: "inserts", name: "inserts/s", color: C.green },
+            { key: "updates", name: "updates/s", color: C.blue },
+            { key: "deletes", name: "deletes/s", color: C.red },
           ]}
         />
         <LinePanel
@@ -454,18 +516,60 @@ export function PostgresDashboardPage() {
           data={seqVsIndex}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
-            { key: "returned", name: "seq returned/s", color: "#f59e0b" },
-            { key: "fetched", name: "index fetched/s", color: "#22c55e" },
+            { key: "returned", name: "seq returned/s", color: C.amber },
+            { key: "fetched", name: "index fetched/s", color: C.green },
           ]}
         />
+      </div>
+
+      {/* ═══════════════════════════════ 7. REPLICATION & WAL ═══════════════ */}
+      <SectionHeader title="Replication" description="Replication lag, conflicts, and WAL generation" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("pgDashboard.replLag")} value={data?.replication_lag_seconds != null ? formatDuration(data.replication_lag_seconds) : "-"} tone={(data?.replication_lag_seconds ?? 0) > 30 ? "bad" : "good"} hint={t("pgDashboard.replLagHint")} />
+        <StatCard label="Repl Lag (bytes)" value={data?.replication_lag_bytes != null ? formatBytes(data.replication_lag_bytes) : "-"} tone={(data?.replication_lag_bytes ?? 0) > 100 * 1024 * 1024 ? "warn" : "good"} hint="Replication lag in WAL bytes" />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel
+          title="Replication Conflicts"
+          data={replicationConflicts}
+          formatter={(value) => `${formatNumber(value, 2)} /s`}
+          lines={[
+            { key: "conflicts", name: "conflicts/s", color: C.red },
+          ]}
+        />
+      </div>
+
+      {/* ═══════════════════════════════ 8. LOCKS ═════════════════════════ */}
+      <SectionHeader title="Locks & Contention" description="Lock counts by mode and lock-wait events from logs" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel
+          title={t("pgDashboard.chartLocks")}
+          data={locks}
+          lines={[
+            { key: "AccessShareLock", name: "AccessShare", color: C.slate },
+            { key: "RowExclusiveLock", name: "RowExclusive", color: C.blue },
+            { key: "ExclusiveLock", name: "Exclusive", color: C.red },
+            { key: "AccessExclusiveLock", name: "AccessExclusive", color: "#b91c1c" },
+          ]}
+        />
+        <BarPanel title={t("pgDashboard.chartLocksByMode")} data={data?.locks_by_mode ?? []} />
+      </div>
+
+      {/* ═══════════════════════════════ 9. BACKGROUND WRITER & ARCHIVER ════ */}
+      <SectionHeader title="Background Writer & Archiver" description="Buffer management and WAL archiving activity" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label={t("pgDashboard.bgwriterPressure")} value={bgwriterPressure != null ? formatPercent(bgwriterPressure) : "-"} tone={(bgwriterPressure ?? 0) > 50 ? "warn" : "good"} hint={t("pgDashboard.bgwriterPressureHint")} />
+        <StatCard label={t("pgDashboard.archiveFailed")} value={data?.archive_failed != null ? formatNumber(data.archive_failed, 4) : "-"} tone={(data?.archive_failed ?? 0) > 0 ? "bad" : "good"} hint="WAL archive failures/s" />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
         <LinePanel
           title={t("pgDashboard.chartBgwriter")}
           data={bgwriter}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
-            { key: "clean", name: "buffers clean/s", color: "#22c55e" },
-            { key: "alloc", name: "buffers alloc/s", color: "#ef4444" },
-            { key: "maxwritten", name: "maxwritten clean/s", color: "#0ea5e9" },
+            { key: "clean", name: "buffers clean/s", color: C.green },
+            { key: "alloc", name: "buffers alloc/s", color: C.red },
+            { key: "maxwritten", name: "maxwritten clean/s", color: C.blue },
           ]}
         />
         <LinePanel
@@ -473,24 +577,37 @@ export function PostgresDashboardPage() {
           data={archiver}
           formatter={(value) => `${formatNumber(value)} /s`}
           lines={[
-            { key: "archived", name: "archived/s", color: "#22c55e" },
-            { key: "failed", name: "failed/s", color: "#ef4444" },
+            { key: "archived", name: "archived/s", color: C.green },
+            { key: "failed", name: "failed/s", color: C.red },
+          ]}
+        />
+      </div>
+
+      {/* ═══════════════════════════════ 10. DISK I/O ════════════════════════ */}
+      <SectionHeader title="Disk I/O" description="Backend-driven buffer writes and fsyncs indicate I/O pressure from query execution" />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <LinePanel
+          title="Backend I/O"
+          data={diskIO}
+          formatter={(value) => `${formatNumber(value)} /s`}
+          lines={[
+            { key: "backend_writes", name: "backend writes/s", color: C.orange },
+            { key: "backend_fsync", name: "backend fsync/s", color: C.red },
           ]}
         />
         <LinePanel
-          title={t("pgDashboard.chartLocks")}
-          data={locks}
+          title="Active Session Duration"
+          data={activeSession}
+          formatter={(value) => formatDuration(value)}
           lines={[
-            { key: "AccessShareLock", name: "AccessShare", color: "#64748b" },
-            { key: "RowExclusiveLock", name: "RowExclusive", color: "#0ea5e9" },
-            { key: "ExclusiveLock", name: "Exclusive", color: "#ef4444" },
-            { key: "AccessExclusiveLock", name: "AccessExclusive", color: "#b91c1c" },
+            { key: "seconds", name: "max tx duration", color: C.amber },
           ]}
         />
-        <BarPanel title={t("pgDashboard.chartDbSizes")} data={data?.database_sizes ?? []} valueFormatter={formatBytes} />
-        <BarPanel title={t("pgDashboard.chartConnsByDb")} data={data?.conn_by_database ?? []} />
       </div>
-      <SectionCard title={t("pgDashboard.configRef")}>
+
+      {/* ═══════════════════════════════ 11. CONFIG REFERENCE ═══════════════ */}
+      <SectionHeader title="Config Reference" description="Key memory settings from the running configuration" />
+      <SectionCard title="">
         <div className="grid gap-3 md:grid-cols-3">
           <StatCard label="shared_buffers" value={data?.shared_buffers_bytes != null ? formatBytes(data.shared_buffers_bytes) : "-"} />
           <StatCard label="work_mem" value={data?.work_mem_bytes != null ? formatBytes(data.work_mem_bytes) : "-"} />
@@ -498,8 +615,10 @@ export function PostgresDashboardPage() {
         </div>
       </SectionCard>
 
-      <SectionCard title={t("pgDashboard.logSignals")} description={t("pgDashboard.logSignalsDesc")}>
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      {/* ═══════════════════════════════ 12. LOG SIGNALS ════════════════════ */}
+      <SectionHeader title="Log Signals" description="Events parsed from PostgreSQL logs via Loki" />
+      <SectionCard title="">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
           <StatCard label={t("pgDashboard.slowQueries")} value={formatNumber(data?.log_summary.slow_queries ?? 0, 0)} tone={(data?.log_summary.slow_queries ?? 0) > 0 ? "warn" : "good"} />
           <StatCard label={t("pgDashboard.errors")} value={formatNumber(data?.log_summary.errors ?? 0, 0)} tone={(data?.log_summary.errors ?? 0) > 0 ? "bad" : "good"} />
           <StatCard label={t("pgDashboard.authFailures")} value={formatNumber(data?.log_summary.auth_failures ?? 0, 0)} tone={(data?.log_summary.auth_failures ?? 0) > 0 ? "bad" : "good"} />

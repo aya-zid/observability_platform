@@ -73,6 +73,13 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		tenantRepo,
 	)
 
+	phpfpmDashboardService := service.NewPHPFPMDashboardService(cfg, infrastructure.Redis)
+	phpfpmDashboardHandler := NewPHPFPMDashboardHandler(
+		phpfpmDashboardService,
+		discoveryRepo,
+		tenantRepo,
+	)
+
 	redisDashboardService := service.NewRedisDashboardService(cfg, infrastructure.Redis)
 	redisDashboardHandler := NewRedisDashboardHandler(
 		redisDashboardService,
@@ -132,6 +139,11 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/postgres/:id/dashboard", postgresDashboardHandler.Dashboard)
 		api.GET("/postgres/:id/config", postgresDashboardHandler.Config)
 		api.GET("/postgres/:id/logs", postgresDashboardHandler.Logs)
+
+		// PHP-FPM dashboard routes
+		api.GET("/phpfpm/:id/dashboard", phpfpmDashboardHandler.Dashboard)
+		api.GET("/phpfpm/:id/logs", phpfpmDashboardHandler.Logs)
+		api.GET("/phpfpm/:id/logs-meta", phpfpmDashboardHandler.LogsMeta)
 
 		// Redis dashboard routes
 		api.GET("/redis/:id/dashboard", redisDashboardHandler.Dashboard)

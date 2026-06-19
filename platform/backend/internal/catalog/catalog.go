@@ -868,7 +868,6 @@ Follow the complete instructions in the LogsGuide below. Metrics come from:
 BEFORE YOU START — DO NOT
 
 * ❌ Do not skip enabling pm.status_path — without it the exporter cannot collect any pool metrics
-* ❌ Do not expose /status publicly — always restrict it to 127.0.0.1 in your web server config
 * ❌ Do not use the default access.log format — it omits memory and CPU which are the most valuable PHP-specific fields
 * ❌ Do not set request_slowlog_timeout without also setting a slowlog path — it silently does nothing
 * ❌ Do not use root for the exporter — create a dedicated system user with socket read access
@@ -904,6 +903,16 @@ pm.status_path = /status
 ; Optional ping endpoint for uptime checks
 ping.path = /ping
 ping.response = pong
+
+; Suppress health-check requests from the access log (PHP-FPM 8.0+)
+; These are only noise — the exporter and OPcache collector hit /status
+; and /internal/opcache-collector every few seconds.
+; NOTE: /status?json&full (used by php-fpm_exporter) is NOT suppressible here
+; because PHP-FPM ignores suppress_path when query parameters are present.
+; Those lines are filtered at the agent level by the OTel Collector instead.
+access.suppress_path[] = /status
+access.suppress_path[] = /ping
+access.suppress_path[] = /internal/opcache-collector
 ` + "```" + `
 
 Step 3 — Enable the access log with the platform format
@@ -916,9 +925,10 @@ Find the access.log and access.format lines (they are commented out by default) 
 access.log = /var/log/php-fpm/access.log
 
 ; Platform log format — do not change this format
-; Fields: pool | pid | client_ip | method | uri+querystring | status | script | duration_ms | memory_kb | cpu_pct
-; Note: %{milli}d = milliseconds | %{kilo}M = kilobytes | %Q = literal "?" only when query string exists
-access.format = "%n %p %R \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
+; Fields: pool | pid | method | uri+querystring | status | script | duration_ms | memory_kb | cpu_pct
+; %R (remote IP) omitted — shows "-" on Unix sockets, use Nginx access log for client IPs
+; %{milli}d = milliseconds | %{kilo}M = kilobytes | %Q = literal "?" only when query string exists
+access.format = "%n %p \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
 ` + "```" + `
 
 Step 4 — Enable the slow log
@@ -963,38 +973,9 @@ Add it:
 error_log = /var/log/php-fpm/error.log
 ` + "```" + `
 
-After any change to php-fpm.conf, restart PHP-FPM (see Step 7).
+After any change to php-fpm.conf, restart PHP-FPM (see Step 6).
 
-Step 6 — Restrict the status endpoint in your web server
-
-The /status endpoint must not be publicly accessible. Add a location block to your Nginx or Apache config.
-
-For Nginx — add inside the server block that proxies to PHP-FPM:
-
-` + "```nginx" + `
-location ~ ^/(status|ping)$ {
-    access_log off;
-    allow 127.0.0.1;
-    deny all;
-    include fastcgi_params;
-    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-    fastcgi_param SCRIPT_NAME $1;
-    fastcgi_pass unix:/run/php/php8.4-fpm.sock;
-}
-` + "```" + `
-
-For Apache — add inside the VirtualHost block:
-
-` + "```apache" + `
-<LocationMatch "^/(status|ping)$">
-    Require local
-    ProxyPass "unix:/run/php/php8.4-fpm.sock|fcgi://localhost/status"
-</LocationMatch>
-` + "```" + `
-
-Adjust the socket path to match your PHP version (e.g. php8.1-fpm.sock, php8.3-fpm.sock).
-
-Step 7 — Create the log directory and restart
+Step 6 — Create the log directory and restart
 
 ` + "```bash" + `
 sudo mkdir -p /var/log/php-fpm
@@ -1008,49 +989,30 @@ sudo systemctl restart php8.4-fpm
 sudo systemctl restart php-fpm
 ` + "```" + `
 
-Step 8 — Verify all four sources are working
+Step 7 — Verify log files are being created
 
 ` + "```bash" + `
-# 1. Status endpoint (via your web server, which must proxy /status to FPM)
-curl -s http://127.0.0.1/status?json | python3 -m json.tool
-
-# 2. Access log (generate a request first, then check)
+# 1. Access log (generate a request first, then check)
 sudo tail -n 5 /var/log/php-fpm/access.log
 
-# 3. Error log (should exist even if empty)
+# 2. Error log (should exist even if empty)
 sudo ls -la /var/log/php-fpm/error.log
 
-# 4. Slow log (will be empty until a slow request is made)
+# 3. Slow log (will be empty until a slow request is made)
 sudo ls -la /var/log/php-fpm/slow.log
-` + "```" + `
-
-Expected status output:
-
-` + "```json" + `
-{
-    "pool": "www",
-    "process manager": "dynamic",
-    "accepted conn": 42,
-    "listen queue": 0,
-    "idle processes": 4,
-    "active processes": 1,
-    "total processes": 5,
-    "max active processes": 3,
-    "max children reached": 0,
-    "slow requests": 0
-}
 ` + "```" + `
 
 Expected access log line:
 
 ` + "```" + `
-www 12345 192.168.1.10 "GET /index.php?page=1" 200 /var/www/html/index.php 45 2048 1.23
+www 12345 "GET /index.php?page=1" 200 /var/www/html/index.php 45 2048 1.23
 ` + "```" + `
 
-Fields: pool | pid | client_ip | "method uri?querystring" | status | script | duration_ms | memory_kb | cpu_pct
+Fields: pool | pid | "method uri?querystring" | status | script | duration_ms | memory_kb | cpu_pct
 
-If /status returns 404, the web server location block is missing or PHP-FPM has not restarted.
 If the access log is empty, check that access.log is uncommented and the log directory is writable.
+
+Pool metrics are verified in Part 2 Step 5 after the exporter is installed.
 
 PART 2 — Install php-fpm_exporter
 
@@ -1281,7 +1243,11 @@ mkdir -p "$PROM_DIR"
 
 # Call PHP-FPM via FastCGI — cgi-fcgi handles the FastCGI protocol
 # SCRIPT_FILENAME tells PHP-FPM which script to execute
+# SCRIPT_NAME + REQUEST_URI are set to a unique path so you can suppress
+# these collector requests from the access log (see Part 1 Step 2).
 SCRIPT_FILENAME="$PHP_SCRIPT" \
+SCRIPT_NAME="/internal/opcache-collector" \
+REQUEST_URI="/internal/opcache-collector" \
 QUERY_STRING="" \
 REQUEST_METHOD="GET" \
 cgi-fcgi -bind -connect "$SOCKET" 2>/dev/null \
@@ -1303,6 +1269,9 @@ sudo chmod +x /opt/observability/opcache_collector.sh
 ` + "```" + `
 
 Adjust SOCKET on line 10 to match your PHP version if needed.
+
+If you followed Part 1 Step 2, the /internal/opcache-collector path is
+already suppressed from the access log — no extra log noise from this collector.
 
 Step 4 — Create the timer
 
@@ -1420,11 +1389,10 @@ From OPcache collector (if enabled):
 
 PART 7 — Checklist Before Clicking Install Integration
 
-- [ ] curl http://127.0.0.1/status?json returns valid JSON with pool metrics
 - [ ] pm.status_path = /status is set in the pool config
-- [ ] /status is restricted to 127.0.0.1 in the web server config
+- [ ] access.suppress_path[] entries are set for /status, /ping, /internal/opcache-collector (/status?json&full handled by agent filter)
 - [ ] access.log is set and /var/log/php-fpm/access.log has lines after a test request
-- [ ] access.format is exactly "%n %p %R \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
+- [ ] access.format is exactly "%n %p \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
 - [ ] slowlog is set and request_slowlog_timeout is set
 - [ ] curl http://127.0.0.1:9253/metrics | grep phpfpm_up returns phpfpm_up 1
 - [ ] /var/log/php-fpm/error.log exists (may be empty if no errors yet)

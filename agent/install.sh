@@ -763,7 +763,15 @@ discover_phpfpm() {
   local STATUS="no_logs"
   [ -n "$PATHS" ] && STATUS="logs_found"
   local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
+  local LISTEN=""
+  for POOL in /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf; do
+    [ -f "$POOL" ] || continue
+    local L
+    L=$(grep -oP '(?<=^listen\s*=\s*).*' "$POOL" 2>/dev/null | head -1) || true
+    [ -n "$L" ] && LISTEN="$L"
+  done
   local NOTES="php-fpm"
+  [ -n "$LISTEN" ] && NOTES="${NOTES} | listen=${LISTEN}"
   unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
   register_service "phpfpm" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
 }
@@ -2233,6 +2241,13 @@ processors:
         - 'name == "target_info"'
         - 'IsMatch(name, "^scrape_")'
 
+  filter/drop_phpfpm_pollution:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'IsMatch(body, "GET /status")'
+        - 'IsMatch(body, "/internal/opcache-collector")'
+
 exporters:
 
   prometheusremotewrite:
@@ -2267,7 +2282,7 @@ service:
 
     logs:
       receivers: [${LOG_RECEIVERS_LIST}]
-      processors: [resourcedetection, resource, batch]
+      processors: [resourcedetection, resource, filter/drop_phpfpm_pollution, batch]
       exporters: [otlphttp/logs]
 
     traces:

@@ -702,6 +702,22 @@ export default function ServiceConfigPage() {
             </Link>
           </div>
         ) : null}
+        {data.service_name === "phpfpm" && logOn && metricsOn ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Link
+              to={`/integrations/phpfpm-dashboard/${id}`}
+              className="block w-full text-center rounded-xl border border-border bg-card p-4 text-sm font-semibold text-violet-600 dark:text-violet-400 hover:bg-violet-600/5 transition-colors"
+            >
+              Open PHP-FPM Dashboard
+            </Link>
+            <Link
+              to={`/integrations/phpfpm-logs/${id}`}
+              className="block w-full text-center rounded-xl border border-border bg-card p-4 text-sm font-semibold hover:bg-muted transition-colors"
+            >
+              Open PHP-FPM Logs
+            </Link>
+          </div>
+        ) : null}
       </main>
     </div>
   )

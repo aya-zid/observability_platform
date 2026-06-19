@@ -15,6 +15,8 @@ import { ApacheSlowRequestsPage } from "@/pages/integrations/ApacheSlowRequestsP
 import { PostgresDashboardPage } from "@/pages/integrations/PostgresDashboardPage"
 import { PostgresConfigPage } from "@/pages/integrations/PostgresConfigPage"
 import { PostgresLogsPage } from "@/pages/integrations/PostgresLogsPage"
+import { PHPFPMDashboardPage } from "@/pages/integrations/PHPFPMDashboardPage"
+import { PHPFPMLogsPage } from "@/pages/integrations/PHPFPMLogsPage"
 import { RedisDashboardPage } from "@/pages/integrations/RedisDashboardPage"
 import { RedisLogsPage } from "@/pages/integrations/RedisLogsPage"
 import { MariaDBDashboardPage } from "@/pages/integrations/MariaDBDashboardPage"
@@ -60,6 +62,8 @@ export const router = createBrowserRouter([
           { path: "/integrations/postgres-dashboard/:id", element: <PostgresDashboardPage /> },
           { path: "/integrations/postgres-config/:id", element: <PostgresConfigPage /> },
           { path: "/integrations/postgres-logs/:id", element: <PostgresLogsPage /> },
+          { path: "/integrations/phpfpm-dashboard/:id", element: <PHPFPMDashboardPage /> },
+          { path: "/integrations/phpfpm-logs/:id", element: <PHPFPMLogsPage /> },
           { path: "/integrations/redis-dashboard/:id", element: <RedisDashboardPage /> },
           { path: "/integrations/redis-logs/:id", element: <RedisLogsPage /> },
           { path: "/integrations/mariadb-dashboard/:id", element: <MariaDBDashboardPage /> },

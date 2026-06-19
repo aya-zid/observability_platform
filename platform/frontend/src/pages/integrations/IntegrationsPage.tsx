@@ -122,6 +122,22 @@ function ServiceRow({ service }: { service: DiscoveryService }) {
           </Link>
         </div>
       ) : null}
+      {service.service_name === "phpfpm" && service.log_collection_on && service.metric_collection_on ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            to={`/integrations/phpfpm-dashboard/${service.id}`}
+            className="inline-flex items-center rounded-md bg-violet-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-violet-500"
+          >
+            Open PHP-FPM Dashboard
+          </Link>
+          <Link
+            to={`/integrations/phpfpm-logs/${service.id}`}
+            className="inline-flex items-center rounded-md border border-border px-2 py-1.5 text-xs font-semibold hover:bg-muted"
+          >
+            Logs
+          </Link>
+        </div>
+      ) : null}
     </div>
   )
 }

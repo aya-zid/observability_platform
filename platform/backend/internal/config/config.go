@@ -145,7 +145,7 @@ func Load() *Config {
 		// Vulnerability scanning
 		NVDAPIKey:                    getEnv("NVD_API_KEY", ""),
 		VulnerabilityScanEnabled:     getEnvBool("VULNERABILITY_SCAN_ENABLED", true),
-		VulnerabilityScanInterval:    time.Duration(getEnvInt("VULNERABILITY_SCAN_INTERVAL_HOURS", 24)) * time.Hour,
+		VulnerabilityScanInterval:    time.Duration(getEnvInt("VULNERABILITY_SCAN_INTERVAL_HOURS", 2)) * time.Hour,
 		VulnerabilitySeverityMinimum: strings.ToUpper(getEnv("VULNERABILITY_SEVERITY_MINIMUM", "MEDIUM")),
 	}
 

@@ -383,6 +383,36 @@ for i, line in enumerate(lines):
                 arr.append(metrics_key)
         lines[i] = line[: line.index("receivers:")] + "receivers: [" + ", ".join(arr) + "]"
 
+# Inject filter/drop_phpfpm_pollution processor for log pollution suppression
+pollution_filter = (
+    "  filter/drop_phpfpm_pollution:\n"
+    "    error_mode: ignore\n"
+    "    logs:\n"
+    "      log_record:\n"
+    "        - 'IsMatch(body, \"GET /status\")'\n"
+    "        - 'IsMatch(body, \"/internal/opcache-collector\")'\n"
+)
+if "filter/drop_phpfpm_pollution:" not in text:
+    marker = "\nprocessors:\n"
+    if marker in text:
+        text = text.replace(marker, "\n" + pollution_filter + "processors:\n", 1)
+    else:
+        text += "\n" + pollution_filter + "\n"
+    lines = text.splitlines()
+
+# Add filter/drop_phpfpm_pollution to logs pipeline processors list
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped.startswith("processors: [") and i > 0 and lines[i-1].strip() == "logs:":
+        if "filter/drop_phpfpm_pollution" not in stripped:
+            start = stripped.find("[")
+            end = stripped.rfind("]")
+            payload = stripped[start + 1 : end].strip()
+            arr_proc = [x.strip() for x in payload.split(",") if x.strip()]
+            if "filter/drop_phpfpm_pollution" not in arr_proc:
+                arr_proc.append("filter/drop_phpfpm_pollution")
+            lines[i] = line[: line.index("processors:")] + "processors: [" + ", ".join(arr_proc) + "]"
+
 with open(cfg_path, "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + "\n")
 PY

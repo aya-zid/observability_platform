@@ -136,7 +136,6 @@ export type PostgresLogsParams = {
   end: string
   category?: string
   search?: string
-  include_monitoring?: boolean
   page?: number
   page_size?: number
 }
@@ -153,7 +152,6 @@ export async function getPostgresLogs(
       end: params.end,
       category: params.category ?? "all",
       search: params.search ?? "",
-      include_monitoring: params.include_monitoring ?? false,
       page: params.page ?? 1,
       page_size: params.page_size ?? 100,
     },

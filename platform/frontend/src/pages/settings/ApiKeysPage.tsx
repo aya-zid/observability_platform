@@ -30,7 +30,7 @@ export default function ApiKeysPage() {
     <Page>
       <PageHeader
         title="API Keys"
-        description="Manage keys used by agents and integrations."
+        description="Manage keys used by agents and services."
       />
 
       <SectionCard

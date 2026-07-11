@@ -53,9 +53,10 @@ func (s *NginxDashboardService) GetIPInvestigation(
 	startNs, endNs int64,
 	step string,
 	seenStartNs, seenEndNs int64,
+	hostID string,
 ) (*NginxIPInvestigationResult, error) {
 
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 	ipFilter := fmt.Sprintf(`%s %s | ip = "%s"`, base, parseExpr, lokiLabelValue(ip))
 	ipFilterRT := fmt.Sprintf(`%s %s %s | ip = "%s"`, base, parseExpr, rtParseExpr, lokiLabelValue(ip))
 

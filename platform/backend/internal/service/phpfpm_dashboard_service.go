@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strconv"
@@ -25,8 +26,6 @@ type PHPFPMDashboardSummary struct {
 	Up              *float64 `json:"up,omitempty"`
 	ScrapeFailures  *float64 `json:"scrape_failures,omitempty"`
 	UptimeSeconds   *float64 `json:"uptime_seconds,omitempty"`
-	HealthScore     *float64 `json:"health_score,omitempty"`
-
 	ActiveProcesses     *float64 `json:"active_processes,omitempty"`
 	IdleProcesses       *float64 `json:"idle_processes,omitempty"`
 	TotalProcesses      *float64 `json:"total_processes,omitempty"`
@@ -85,6 +84,13 @@ type PHPFPMDashboardSummary struct {
 	OpcacheHitRateTimeseries  []TimePoint `json:"opcache_hit_rate_timeseries"`
 	OpcacheMemoryTimeseries   []TimePoint `json:"opcache_memory_timeseries"`
 	OpcacheScriptsTimeseries  []TimePoint `json:"opcache_scripts_timeseries"`
+	OpcacheWastedTimeseries   []TimePoint `json:"opcache_wasted_timeseries"`
+
+	SlowReqRateTimeseries    []TimePoint `json:"slow_req_rate_timeseries"`
+	ScrapeFailRateTimeseries []TimePoint `json:"scrape_fail_rate_timeseries"`
+	ChildrenRateTimeseries   []TimePoint `json:"children_rate_timeseries"`
+	RunningProcsTimeseries   []TimePoint `json:"running_procs_timeseries"`
+	LatencyPercentilesTimeseries []TimePoint `json:"latency_percentiles_timeseries"`
 
 	StatusTimeseries   []TimePoint `json:"status_timeseries"`
 	ReqRateTimeseries  []TimePoint `json:"req_rate_timeseries"`
@@ -99,7 +105,6 @@ type PHPFPMDashboardSummary struct {
 	DurationHistogram   []LabelCount `json:"duration_histogram"`
 	MemoryHistogram     []LabelCount `json:"memory_histogram"`
 	CPUHistogram        []LabelCount `json:"cpu_histogram"`
-	TopErrorMessages    []LabelCount `json:"top_error_messages"`
 	ErrorTypeBreakdown  []LabelCount `json:"error_type_breakdown"`
 }
 
@@ -146,11 +151,25 @@ type PoolDetail struct {
 	TopURIs        []LabelCount   `json:"top_uris"`
 	RequestCount   *float64       `json:"request_count"`
 
+	AvgDurationMs *float64     `json:"avg_duration_ms"`
+	AvgMemoryKb   *float64     `json:"avg_memory_kb"`
+	AvgCpuPct     *float64     `json:"avg_cpu_pct"`
+	TopMemoryScripts []ScriptStat `json:"top_memory_scripts"`
+	MethodDistribution []LabelCount `json:"method_distribution"`
+	DurationHistogram  []LabelCount `json:"duration_histogram"`
+	MemoryHistogram    []LabelCount `json:"memory_histogram"`
+	TopErrorURIs       []LabelCount `json:"top_error_uris"`
+
+	ReqRateTimeseries            []TimePoint `json:"req_rate_timeseries"`
+	LatencyPercentilesTimeseries []TimePoint `json:"latency_percentiles_timeseries"`
+	MemoryTimeseries             []TimePoint `json:"memory_timeseries"`
+	CpuTimeseries                []TimePoint `json:"cpu_timeseries"`
+	WorkersTimeseries            []TimePoint `json:"workers_timeseries"`
+
 	ErrorCount       *float64     `json:"error_count"`
 	WarningCount     *float64     `json:"warning_count"`
 	NoticeCount      *float64     `json:"notice_count"`
 	SlowRequestCount *float64     `json:"slow_request_count"`
-	TopErrorMessages []LabelCount `json:"top_error_messages"`
 }
 
 type PHPFPMLogEvent struct {
@@ -197,6 +216,7 @@ func (s *PHPFPMDashboardService) GetDashboardSummary(
 	serviceName string,
 	startNs, endNs int64,
 	step string,
+	hostID string,
 ) (*PHPFPMDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -211,7 +231,7 @@ func (s *PHPFPMDashboardService) GetDashboardSummary(
 		}
 	}
 
-	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step)
+	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -225,9 +245,9 @@ func (s *PHPFPMDashboardService) GetDashboardSummary(
 	return summary, nil
 }
 
-const phpfpmAccessLogRegex = `^(?P<pool>\S+) (?P<pid>\S+) "(?P<method>[A-Z]+) (?P<uri>[^"]*)" (?P<status>\d+) (?P<script>\S+) (?P<duration>[\d.]+) (?P<memory>[\d.]+) (?P<cpu>[\d.]+)$`
+const phpfpmAccessLogRegex = `^(?P<pool>\S+) (?P<pid>\S+) "(?P<method>[A-Z]+) (?P<uri>[^"]*)" (?P<status>\d+) (?P<script>\S+) (?P<duration>[\d.]+) (?P<memory>[\d.]+)(?: (?P<cpu>\S+))?$`
 
-var phpfpmAccessLogRE = regexp.MustCompile(`^(\S+)\s+(\S+)\s+"(\S+)\s+(.*?)"\s+(\d+)\s+(\S+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)$`)
+var phpfpmAccessLogRE = regexp.MustCompile(`^(\S+)\s+(\S+)\s+"(\S+)\s+(.*?)"\s+(\d+)\s+(\S+)\s+([\d.]+)\s+([\d.]+)(?:\s+(\S+))?$`)
 
 var phpfpmSlowLogHeaderRE = regexp.MustCompile(`^\[\d{2}-[A-Z][a-z]{2}-\d{4}`)
 var phpfpmSlowLogPoolRE = regexp.MustCompile(`\[pool\s+(\S+)\]`)
@@ -241,6 +261,7 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 	serviceName string,
 	startNs, endNs int64,
 	step string,
+	hostID string,
 ) (*PHPFPMDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -264,7 +285,13 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 	}
 
 	query := func(q string) vR {
-		data, err := s.base.vmQueryRange(ctx, tenantID, q, startSec, endSec, step)
+		data, err := s.base.vmQueryRange(ctx, tenantID, q, startSec, endSec, step, hostID, "phpfpm")
+		if err != nil {
+			log.Printf("[phpfpm] vm query error: %v | query: %s", err, q)
+		}
+		if len(data) == 0 && err == nil {
+			log.Printf("[phpfpm] vm query returned empty data | query: %s", q)
+		}
 		return vR{data: data, err: err}
 	}
 	lokiQuery := func(q string) lR {
@@ -300,11 +327,10 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 		"accepted":            "phpfpm_accepted_connections_total",
 		"accepted_rate":       "rate(phpfpm_accepted_connections_total[" + rateWindow + "])",
 		"slow_requests":       "phpfpm_slow_requests_total",
+		"slow_req_rate":       "rate(phpfpm_slow_requests_total[" + rateWindow + "])",
 		"max_children":        "phpfpm_max_children_reached_total",
 		"children_rate":       "rate(phpfpm_max_children_reached_total[" + rateWindow + "])",
-		"proc_duration":       "avg(phpfpm_process_request_duration)",
-		"proc_memory":         "avg(phpfpm_process_last_request_memory)",
-		"proc_cpu":            "avg(phpfpm_process_last_request_cpu)",
+		"scrape_fail_rate":    "rate(phpfpm_scrape_failures_total[" + rateWindow + "])",
 		"running_procs":       "sum(phpfpm_process_state{state=\"Running\"}) or vector(0)",
 	}
 
@@ -349,6 +375,7 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 		"opcache_ts_hit":   "phpfpm_opcache_hit_rate",
 		"opcache_ts_used":  "phpfpm_opcache_memory_used_ratio",
 		"opcache_ts_cache": "phpfpm_opcache_cached_scripts_total",
+		"opcache_ts_waste": "phpfpm_opcache_wasted_ratio",
 	}
 	for name, q := range opcacheTSQueries {
 		name, q := name, q
@@ -366,7 +393,7 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		d, e := s.base.vmQueryInstant(ctx, tenantID, `topk(10, phpfpm_process_request_duration)`, endSec)
+		d, e := s.base.vmQueryInstant(ctx, tenantID, `topk(10, phpfpm_process_request_duration)`, endSec, hostID, "phpfpm")
 		resultsMu.Lock()
 		topProcDur = vR{data: d, err: e}
 		resultsMu.Unlock()
@@ -374,23 +401,23 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		d, e := s.base.vmQueryInstant(ctx, tenantID, `topk(10, phpfpm_process_last_request_memory)`, endSec)
+		d, e := s.base.vmQueryInstant(ctx, tenantID, `topk(10, phpfpm_process_last_request_memory)`, endSec, hostID, "phpfpm")
 		resultsMu.Lock()
 		topProcMem = vR{data: d, err: e}
 		resultsMu.Unlock()
 	}()
 
-	baseSelector := phpfpmLokiSelector(serviceName)
-	accessBase := baseSelector + ` | log_file_name="access.log"`
+	baseSelector := phpfpmLokiSelector(serviceName, hostID)
+	accessBase := baseSelector + ` | log_file_name=~".*\\.access\\.log$"`
 
 	accessStatusQ := fmt.Sprintf(
-		`sum by (status_class) (rate(%s | regexp \`+"`"+phpfpmAccessLogRegex+"`"+` [%s]))`,
-		accessBase, step,
+		`sum by (status) (rate(%s | regexp %s [%s]))`,
+		accessBase, "`"+phpfpmAccessLogRegex+"`", step,
 	)
 	accessRateQ := fmt.Sprintf(`sum(rate(%s [%s]))`, accessBase, step)
 	topURIQ := fmt.Sprintf(
-		`topk(20, sum by (uri, status) (count_over_time(%s | regexp \`+"`"+phpfpmAccessLogRegex+"`"+` [%ds])))`,
-		accessBase, rangeSeconds,
+		`topk(20, sum by (uri, status) (count_over_time(%s | regexp %s [%ds])))`,
+		accessBase, "`"+phpfpmAccessLogRegex+"`", rangeSeconds,
 	)
 
 	wg.Add(1)
@@ -468,71 +495,60 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 		return nil, ctx.Err()
 	}
 
-	active := latestVMValue(results["active"].data)
-	total := latestVMValue(results["total"].data)
+	active := sumVMValues(results["active"].data)
+	total := sumVMValues(results["total"].data)
 	var saturation *float64
 	if active != nil && total != nil && *total > 0 {
 		v := 100 * (*active) / (*total)
 		saturation = &v
 	}
 
-	queue := latestVMValue(results["listen_queue"].data)
-	queueLen := latestVMValue(results["listen_queue_len"].data)
+	queue := sumVMValues(results["listen_queue"].data)
+	queueLen := sumVMValues(results["listen_queue_len"].data)
 	var queueUtil *float64
 	if queue != nil && queueLen != nil && *queueLen > 0 {
 		v := 100 * (*queue) / (*queueLen)
 		queueUtil = &v
 	}
 
-	procDuration := latestVMValue(results["proc_duration"].data)
-	procMemory := latestVMValue(results["proc_memory"].data)
-	procCpu := latestVMValue(results["proc_cpu"].data)
-	var memKb *float64
-	if procMemory != nil {
-		v := (*procMemory) / 1024
-		memKb = &v
-	}
+	slowReq := sumVMValues(results["slow_requests"].data)
 
-	slowReq := latestVMValue(results["slow_requests"].data)
-	childrenRate := latestVMValue(results["children_rate"].data)
-
-	healthScore := computePHPFPMHealthScore(saturation, queueUtil, slowReq, childrenRate)
-
-	topSlowScripts, topMemScripts, latencyP50, latencyP95, latencyP99 := parsePHPFPMAccessLogs(accessLogResult.entries)
+	topSlowScripts, topMemScripts, latencyP50, latencyP95, latencyP99, logAvgDurationMs, logAvgMemoryKb, logAvgCpuPct := parsePHPFPMAccessLogs(accessLogResult.entries)
+	latencyPercentilesTS := computeLatencyPercentilesTimeseries(accessLogResult.entries, startNs, endNs, step)
+	memoryTimeseries, cpuTimeseries := computeMemoryCpuTimeseries(accessLogResult.entries, startNs, endNs, step)
 	topProcDurStats := parseProcessStats(topProcDur.data, "duration")
 	topProcMemStats := parseProcessStats(topProcMem.data, "memory")
 
-	status2xx := lokiSumLabel(lokiResults["status_codes"].data, "2xx")
-	status4xx := lokiSumLabel(lokiResults["status_codes"].data, "4xx")
-	status5xx := lokiSumLabel(lokiResults["status_codes"].data, "5xx")
+	status2xx := lokiSumLabel(lokiResults["status_codes"].data, "2")
+	status4xx := lokiSumLabel(lokiResults["status_codes"].data, "4")
+	status5xx := lokiSumLabel(lokiResults["status_codes"].data, "5")
 	topURIs, topErrorURIs := parseTopPHPFMURIs(lokiResults["top_uris"].data)
 	pools := detectPHPFPMPools(results["active"].data)
 
 	methodDist, statusDist, durHist, memHist, cpuHist := computeAccessLogAnalytics(accessLogResult.entries)
-	topErrMsgs, errTypeBreakdown := computeErrorLogAnalytics(errorLogAllResult.entries)
+	_, errTypeBreakdown := computeErrorLogAnalytics(errorLogAllResult.entries)
 
 	summary := &PHPFPMDashboardSummary{
-		Up:                  latestVMValue(results["up"].data),
-		ScrapeFailures:      latestVMValue(results["scrape_failures"].data),
-		UptimeSeconds:       latestVMValue(results["start_since"].data),
-		HealthScore:         healthScore,
+		Up:                  allPoolsUp(results["up"].data),
+		ScrapeFailures:      sumVMValues(results["scrape_failures"].data),
+		UptimeSeconds:       minVMValues(results["start_since"].data),
 		ActiveProcesses:     active,
-		IdleProcesses:       latestVMValue(results["idle"].data),
+		IdleProcesses:       sumVMValues(results["idle"].data),
 		TotalProcesses:      total,
-		MaxActiveProcesses:  latestVMValue(results["max_active"].data),
+		MaxActiveProcesses:  sumVMValues(results["max_active"].data),
 		WorkerSaturationPct: saturation,
 		ListenQueue:         queue,
 		ListenQueueLen:      queueLen,
 		QueueUtilizationPct: queueUtil,
-		MaxListenQueue:      latestVMValue(results["max_listen_queue"].data),
-		AcceptedConnections: latestVMValue(results["accepted"].data),
-		AcceptedConnPerSec:  latestVMValue(results["accepted_rate"].data),
+		MaxListenQueue:      sumVMValues(results["max_listen_queue"].data),
+		AcceptedConnections: sumVMValues(results["accepted"].data),
+		AcceptedConnPerSec:  sumVMValues(results["accepted_rate"].data),
 		SlowRequests:       slowReq,
-		MaxChildrenReached: latestVMValue(results["max_children"].data),
-		AvgDurationMs:      procDuration,
-		AvgMemoryBytes:     procMemory,
-		AvgMemoryKb:        memKb,
-		AvgCpuPct:          procCpu,
+		MaxChildrenReached: sumVMValues(results["max_children"].data),
+		AvgDurationMs:      logAvgDurationMs,
+		AvgMemoryBytes:     logAvgMemoryKb,
+		AvgMemoryKb:        logAvgMemoryKb,
+		AvgCpuPct:          logAvgCpuPct,
 		RunningProcesses: latestVMValue(results["running_procs"].data),
 		OpcacheEnabled:    latestVMValue(results["opcache_enabled"].data),
 		OpcacheHitRate:    latestVMValue(results["opcache_hit_rate"].data),
@@ -562,31 +578,32 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 		DurationHistogram:  durHist,
 		MemoryHistogram:    memHist,
 		CPUHistogram:       cpuHist,
-		TopErrorMessages:   topErrMsgs,
 		ErrorTypeBreakdown: errTypeBreakdown,
 	}
 
 	summary.WorkersTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
-		"active": results["active"].data,
-		"idle":   results["idle"].data,
-		"total":  results["total"].data,
+		"active": sumVMSeriesByTimestamp(results["active"].data),
+		"idle":   sumVMSeriesByTimestamp(results["idle"].data),
+		"total":  sumVMSeriesByTimestamp(results["total"].data),
 	})
 	summary.QueueTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
-		"queue": results["listen_queue"].data,
-		"max":   results["listen_queue_len"].data,
+		"queue": sumVMSeriesByTimestamp(results["listen_queue"].data),
+		"max":   sumVMSeriesByTimestamp(results["listen_queue_len"].data),
 	})
 	summary.ThroughputTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
-		"accepted": results["accepted_rate"].data,
+		"accepted": sumVMSeriesByTimestamp(results["accepted_rate"].data),
 	})
-	summary.DurationTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
-		"duration": results["proc_duration"].data,
-	})
-	summary.MemoryTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
-		"memory": results["proc_memory"].data,
-	})
-	summary.CpuTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
-		"cpu": results["proc_cpu"].data,
-	})
+	summary.DurationTimeseries = make([]TimePoint, 0, len(latencyPercentilesTS))
+	for _, pt := range latencyPercentilesTS {
+		if avg, ok := pt["avg"].(float64); ok {
+			summary.DurationTimeseries = append(summary.DurationTimeseries, TimePoint{
+				"time": pt["time"],
+				"duration": avg,
+			})
+		}
+	}
+	summary.MemoryTimeseries = memoryTimeseries
+	summary.CpuTimeseries = cpuTimeseries
 	summary.OpcacheHitRateTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
 		"hit_rate": results["opcache_ts_hit"].data,
 	})
@@ -596,6 +613,22 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 	summary.OpcacheScriptsTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
 		"cached": results["opcache_ts_cache"].data,
 	})
+	summary.OpcacheWastedTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
+		"wasted": results["opcache_ts_waste"].data,
+	})
+	summary.SlowReqRateTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
+		"slow_req_rate": sumVMSeriesByTimestamp(results["slow_req_rate"].data),
+	})
+	summary.ScrapeFailRateTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
+		"scrape_fail_rate": sumVMSeriesByTimestamp(results["scrape_fail_rate"].data),
+	})
+	summary.ChildrenRateTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
+		"children_rate": sumVMSeriesByTimestamp(results["children_rate"].data),
+	})
+	summary.RunningProcsTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
+		"running": results["running_procs"].data,
+	})
+	summary.LatencyPercentilesTimeseries = latencyPercentilesTS
 	summary.StatusTimeseries = mergeNamedLokiSeries(map[string][]LokiMatrixSeries{
 		"2xx": filterStatusClass(lokiResults["status_codes"].data, "2"),
 		"4xx": filterStatusClass(lokiResults["status_codes"].data, "4"),
@@ -613,7 +646,24 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 		results["accepted_rate"].data, results["max_children"].data, results["slow_requests"].data,
 		accessLogResult.entries, errorLogAllResult.entries, pools,
 	)
-	summary.LogSummary = s.countPHPFPMLogCategories(ctx, tenantUUID, serviceName, startNs, endNs)
+
+	// Per-pool timeseries
+	accessByPool := partitionAccessEntriesByPool(accessLogResult.entries)
+	for _, pool := range pools {
+		pd := summary.PoolDetails[pool]
+		if entries, ok := accessByPool[pool]; ok {
+			pd.ReqRateTimeseries = computePoolRequestRateTimeseries(entries, startNs, endNs, step)
+			pd.LatencyPercentilesTimeseries = computeLatencyPercentilesTimeseries(entries, startNs, endNs, step)
+			memTS, cpuTS := computeMemoryCpuTimeseries(entries, startNs, endNs, step)
+			pd.MemoryTimeseries = memTS
+			pd.CpuTimeseries = cpuTS
+		}
+		pd.WorkersTimeseries = extractPoolWorkersTimeseries(
+			results["active"].data, results["idle"].data, results["total"].data, pool,
+		)
+		summary.PoolDetails[pool] = pd
+	}
+	summary.LogSummary = s.countPHPFPMLogCategories(ctx, tenantUUID, serviceName, startNs, endNs, hostID)
 	summary.RecentLogs = mergePHPFPMLogEvents(dashboardPreviewLimit,
 		logResults["warnings"].entries,
 		logResults["errors"].entries,
@@ -627,7 +677,7 @@ func (s *PHPFPMDashboardService) fetchDashboard(
 func filterStatusClass(series []LokiMatrixSeries, prefix string) []LokiMatrixSeries {
 	var out []LokiMatrixSeries
 	for _, s := range series {
-		status := s.Metric["status_class"]
+		status := s.Metric["status"]
 		if strings.HasPrefix(status, prefix) {
 			out = append(out, s)
 		}
@@ -635,17 +685,23 @@ func filterStatusClass(series []LokiMatrixSeries, prefix string) []LokiMatrixSer
 	return out
 }
 
-func lokiSumLabel(series []LokiMatrixSeries, labelValue string) *float64 {
-	var sum float64
+func lokiSumLabel(series []LokiMatrixSeries, classPrefix string) *float64 {
+	var total float64
+	found := false
 	for _, s := range series {
-		for _, v := range s.Values {
-			sum += v[1]
+		status := s.Metric["status"]
+		if !strings.HasPrefix(status, classPrefix) {
+			continue
+		}
+		if len(s.Values) > 0 {
+			total += s.Values[len(s.Values)-1][1]
+			found = true
 		}
 	}
-	if len(series) == 0 {
+	if !found {
 		return nil
 	}
-	return &sum
+	return &total
 }
 
 func detectPHPFPMPools(series []VMSeries) []string {
@@ -700,6 +756,34 @@ func buildPoolDetails(
 			d.Status4xx = &s4
 			d.Status5xx = &s5
 			d.TopURIs = topN(pa.uris, 5)
+
+			// averages
+			if len(pa.durations) > 0 {
+				totalDur := 0.0
+				for _, v := range pa.durations {
+					totalDur += v
+				}
+				avg := totalDur / float64(len(pa.durations))
+				d.AvgDurationMs = &avg
+			}
+			if len(pa.memories) > 0 {
+				totalMem := 0.0
+				for _, v := range pa.memories {
+					totalMem += v
+				}
+				avg := totalMem / float64(len(pa.memories))
+				d.AvgMemoryKb = &avg
+			}
+			if len(pa.cpus) > 0 {
+				totalCPU := 0.0
+				for _, v := range pa.cpus {
+					totalCPU += v
+				}
+				avg := totalCPU / float64(len(pa.cpus))
+				d.AvgCpuPct = &avg
+			}
+
+			// latency percentiles
 			if len(pa.durations) > 0 {
 				sort.Float64s(pa.durations)
 				p50 := pa.durations[int(float64(len(pa.durations))*0.50)]
@@ -709,6 +793,8 @@ func buildPoolDetails(
 				d.LatencyP95 = &p95
 				d.LatencyP99 = &p99
 			}
+
+			// top slow scripts
 			slowList := make([]ScriptStat, 0, len(pa.scripts))
 			for script, acc := range pa.scripts {
 				slowList = append(slowList, ScriptStat{
@@ -723,6 +809,84 @@ func buildPoolDetails(
 				slowList = slowList[:5]
 			}
 			d.TopSlowScripts = slowList
+
+			// top memory scripts
+			memList := make([]ScriptStat, 0, len(pa.scripts))
+			for script, acc := range pa.scripts {
+				memList = append(memList, ScriptStat{
+					Script:      script,
+					AvgDuration: acc.totalDur / acc.count,
+					AvgMemory:   acc.totalMem / acc.count,
+					Count:       acc.count,
+				})
+			}
+			sort.Slice(memList, func(i, j int) bool { return memList[i].AvgMemory > memList[j].AvgMemory })
+			if len(memList) > 5 {
+				memList = memList[:5]
+			}
+			d.TopMemoryScripts = memList
+
+			// method distribution
+			d.MethodDistribution = topN(pa.methods, 10)
+
+			// top error URIs
+			d.TopErrorURIs = topN(pa.errorURIs, 5)
+
+			// duration histogram
+			durLabels := []string{"<10ms", "10-50ms", "50-100ms", "100-500ms", "500ms-1s", "1-2s", "2-5s", ">5s"}
+			durBuckets := make(map[string]float64, len(durLabels))
+			for _, l := range durLabels {
+				durBuckets[l] = 0
+			}
+			for _, v := range pa.durations {
+				switch {
+				case v < 10:
+					durBuckets["<10ms"]++
+				case v < 50:
+					durBuckets["10-50ms"]++
+				case v < 100:
+					durBuckets["50-100ms"]++
+				case v < 500:
+					durBuckets["100-500ms"]++
+				case v < 1000:
+					durBuckets["500ms-1s"]++
+				case v < 2000:
+					durBuckets["1-2s"]++
+				case v < 5000:
+					durBuckets["2-5s"]++
+				default:
+					durBuckets[">5s"]++
+				}
+			}
+			for _, l := range durLabels {
+				d.DurationHistogram = append(d.DurationHistogram, LabelCount{Label: l, Count: durBuckets[l]})
+			}
+
+			// memory histogram
+			memLabels := []string{"<256KB", "256-512KB", "512KB-1MB", "1-2MB", "2-4MB", ">4MB"}
+			memBuckets := make(map[string]float64, len(memLabels))
+			for _, l := range memLabels {
+				memBuckets[l] = 0
+			}
+			for _, v := range pa.memories {
+				switch {
+				case v < 256:
+					memBuckets["<256KB"]++
+				case v < 512:
+					memBuckets["256-512KB"]++
+				case v < 1024:
+					memBuckets["512KB-1MB"]++
+				case v < 2048:
+					memBuckets["1-2MB"]++
+				case v < 4096:
+					memBuckets["2-4MB"]++
+				default:
+					memBuckets[">4MB"]++
+				}
+			}
+			for _, l := range memLabels {
+				d.MemoryHistogram = append(d.MemoryHistogram, LabelCount{Label: l, Count: memBuckets[l]})
+			}
 		}
 
 		if pe, ok := poolErrors[pool]; ok {
@@ -734,9 +898,6 @@ func buildPoolDetails(
 			d.WarningCount = &wc
 			d.NoticeCount = &nc
 			d.SlowRequestCount = &sc
-			if len(pe.errorMessages) > 0 {
-				d.TopErrorMessages = topN(pe.errorMessages, 5)
-			}
 		}
 
 		details[pool] = d
@@ -750,9 +911,12 @@ type poolAccessStats struct {
 	status4xx int
 	status5xx int
 	durations []float64
+	memories  []float64
+	cpus      []float64
 	scripts   map[string]*scriptAccum
 	uris      map[string]float64
 	errorURIs map[string]float64
+	methods   map[string]float64
 }
 
 type scriptAccum struct {
@@ -778,10 +942,16 @@ func parseAccessLogsByPool(entries []LokiLogEntry) map[string]*poolAccessStats {
 				scripts:   map[string]*scriptAccum{},
 				uris:      map[string]float64{},
 				errorURIs: map[string]float64{},
+				methods:   map[string]float64{},
 			}
 		}
 		p := pools[poolName]
 		p.requests++
+
+		method := matches[3]
+		if method != "" {
+			p.methods[method]++
+		}
 
 		status := matches[5]
 		if len(status) > 0 {
@@ -798,6 +968,10 @@ func parseAccessLogsByPool(entries []LokiLogEntry) map[string]*poolAccessStats {
 		dur, _ := strconv.ParseFloat(matches[7], 64)
 		mem, _ := strconv.ParseFloat(matches[8], 64)
 		p.durations = append(p.durations, dur)
+		p.memories = append(p.memories, mem)
+		if cpu, err := strconv.ParseFloat(matches[9], 64); err == nil && cpu >= 0 && cpu <= 100 {
+			p.cpus = append(p.cpus, cpu)
+		}
 
 		uri := matches[4]
 		p.uris[uri]++
@@ -926,7 +1100,7 @@ func computeAccessLogAnalytics(entries []LokiLogEntry) (methodDist, statusDist, 
 				memBuckets[">8192KB"]++
 			}
 		}
-		if c, err := strconv.ParseFloat(matches[9], 64); err == nil {
+		if c, err := strconv.ParseFloat(matches[9], 64); err == nil && c >= 0 && c <= 100 {
 			switch {
 			case c <= 1:
 				cpuBuckets["0-1%"]++
@@ -1016,6 +1190,7 @@ func (s *PHPFPMDashboardService) GetLogs(
 	maxCPU float64, hasMaxCPU bool,
 	page int,
 	pageSize int,
+	hostID string,
 ) (*PHPFPMLogsPage, error) {
 	if page < 1 {
 		page = 1
@@ -1024,10 +1199,11 @@ func (s *PHPFPMDashboardService) GetLogs(
 		pageSize = 100
 	}
 
-	baseSelector := phpfpmLokiSelector(serviceName)
-	fullQuery := phpfpmLogQuery(baseSelector, logFile)
+	baseSelector := phpfpmLokiSelector(serviceName, hostID)
 
-	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, fullQuery, startNs, endNs)
+	logQuery := phpfpmLogQuery(baseSelector, logFile)
+
+	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, logQuery, startNs, endNs)
 	if err != nil {
 		return nil, fmt.Errorf("loki fetch: %w", err)
 	}
@@ -1122,16 +1298,9 @@ func (s *PHPFPMDashboardService) GetLogsMeta(
 	tenantUUID string,
 	serviceName string,
 	startNs, endNs int64,
+	hostID string,
 ) (*PHPFPMLogsTypeMeta, error) {
-	baseSelector := phpfpmLokiSelector(serviceName)
-
-	countEntries := func(q string) (int, error) {
-		entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, q, startNs, endNs)
-		if err != nil {
-			return 0, err
-		}
-		return len(entries), nil
-	}
+	baseSelector := phpfpmLokiSelector(serviceName, hostID)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -1141,57 +1310,112 @@ func (s *PHPFPMDashboardService) GetLogsMeta(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c, err := countEntries(baseSelector + ` | log_file_name="access.log"`)
+		entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID,
+			baseSelector+` | log_file_name=~".*\\.access\\.log$"`, startNs, endNs)
 		mu.Lock()
-		accessCount, accessErr = c, err
+		if err == nil {
+			accessCount = len(entries)
+		} else {
+			accessErr = err
+		}
 		mu.Unlock()
 	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c, err := countEntries(baseSelector + ` | log_file_name="error.log"`)
+		entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID,
+			baseSelector+` | log_file_name="error.log"`, startNs, endNs)
 		mu.Lock()
-		errorCount, errorErr = c, err
+		if err == nil {
+			errorCount = len(entries)
+		} else {
+			errorErr = err
+		}
 		mu.Unlock()
 	}()
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, baseSelector+` | log_file_name="slow.log"`, startNs, endNs)
+		entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID,
+			baseSelector+` | log_file_name=~".*\\.slow\\.log$"`, startNs, endNs)
 		if err == nil {
 			entries = consolidatePHPFPMSlowLogEntries(entries)
-		}
-		mu.Lock()
-		if err != nil {
-			slowErr = err
-		} else {
 			slowCount = len(entries)
+		} else {
+			mu.Lock()
+			slowErr = err
+			mu.Unlock()
 		}
-		mu.Unlock()
 	}()
+
 	wg.Wait()
 
-	meta := &PHPFPMLogsTypeMeta{}
-	if accessErr == nil {
-		meta.AccessCount = accessCount
+	meta := &PHPFPMLogsTypeMeta{
+		AccessCount: accessCount,
+		ErrorCount:  errorCount,
+		SlowCount:   slowCount,
 	}
-	if errorErr == nil {
-		meta.ErrorCount = errorCount
+	if accessErr != nil {
+		return nil, accessErr
 	}
-	if slowErr == nil {
-		meta.SlowCount = slowCount
+	if errorErr != nil {
+		return nil, errorErr
+	}
+	if slowErr != nil {
+		return nil, slowErr
 	}
 	return meta, nil
+}
+
+func countByLogFileNameSuffix(entries []LokiLogEntry, suffix string) int {
+	var count int
+	for _, e := range entries {
+		fileName := e.Metadata["log_file_name"]
+		if strings.HasSuffix(fileName, suffix) {
+			count++
+		}
+	}
+	return count
+}
+
+func filterPHPFPMByLogFileName(entries []LokiLogEntry, logFile string) []LokiLogEntry {
+	if logFile == "" {
+		return entries
+	}
+	var out []LokiLogEntry
+	for _, e := range entries {
+		fileName := e.Metadata["log_file_name"]
+		if fileName == "" {
+			continue
+		}
+		switch logFile {
+		case "access":
+			if strings.HasSuffix(fileName, "access.log") {
+				out = append(out, e)
+			}
+		case "error":
+			if fileName == "error.log" {
+				out = append(out, e)
+			}
+		case "slow":
+			if strings.HasSuffix(fileName, "slow.log") {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
 }
 
 func phpfpmLogQuery(baseSelector, logFile string) string {
 	switch logFile {
 	case "access":
-		return baseSelector + ` | log_file_name="access.log"`
+		return baseSelector + ` | log_file_name=~".*\\.access\\.log$"`
 	case "error":
 		return baseSelector + ` | log_file_name="error.log"`
 	case "slow":
-		return baseSelector + ` | log_file_name="slow.log"`
+		return baseSelector + ` | log_file_name=~".*\\.slow\\.log$"`
 	default:
 		return baseSelector
 	}
@@ -1310,8 +1534,9 @@ func (s *PHPFPMDashboardService) countPHPFPMLogCategories(
 	tenantUUID string,
 	serviceName string,
 	startNs, endNs int64,
+	hostID string,
 ) PHPFPMLogSummary {
-	baseSelector := phpfpmLokiSelector(serviceName)
+	baseSelector := phpfpmLokiSelector(serviceName, hostID)
 	errorBase := baseSelector + ` | log_file_name="error.log"`
 	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, errorBase, startNs, endNs)
 	if err != nil {
@@ -1337,12 +1562,20 @@ func (s *PHPFPMDashboardService) countPHPFPMLogCategories(
 	return summary
 }
 
-func phpfpmLokiSelector(serviceName string) string {
+func phpfpmLokiSelector(serviceName, hostID string) string {
 	serviceName = strings.TrimSpace(serviceName)
+	// service_name is an indexed label (must be in {}).
+	// host_id is structured metadata set by OTel - use pipeline filter.
+	selector := ""
 	if serviceName == "" {
-		return `{service_name=~"phpfpm.*"}`
+		selector = `{service_name=~"phpfpm.*"}`
+	} else {
+		selector = fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
 	}
-	return fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
+	if hostID != "" {
+		selector += fmt.Sprintf(` | host_id="%s"`, lokiLabelValue(hostID))
+	}
+	return selector
 }
 
 var phpfpmErrorLogRE = regexp.MustCompile(`^\[(.+?)\]\s+(WARNING|ERROR|NOTICE|ALERT):(?:\s*\[pool\s+(\S+)\])?\s*(.*)$`)
@@ -1363,7 +1596,7 @@ func parsePHPFPMLogEvent(entry LokiLogEntry) PHPFPMLogEvent {
 	}
 
 	if ts, err := strconv.ParseInt(entry.TimestampNs, 10, 64); err == nil {
-		event.Timestamp = time.Unix(0, ts).Format(time.RFC3339)
+		event.Timestamp = time.Unix(0, ts).Add(time.Hour).Format(time.RFC3339)
 	}
 
 	line := strings.TrimSpace(entry.Line)
@@ -1421,9 +1654,13 @@ func parsePHPFPMLogEvent(entry LokiLogEntry) PHPFPMLogEvent {
 		if c, err := strconv.ParseFloat(matches[9], 64); err == nil {
 			event.CPU = c
 		}
+		cpuStr := matches[9]
+		if cpuStr == "" {
+			cpuStr = "-"
+		}
 		event.Message = fmt.Sprintf("%s %s → %d (%sms, %sKB, %s%%)",
 			matches[3], matches[4], safeAtoi(matches[5]),
-			matches[7], matches[8], matches[9])
+			matches[7], matches[8], cpuStr)
 	}
 
 	if len(event.Labels) == 0 {
@@ -1462,41 +1699,165 @@ func phpfpmLogMatchesSearch(ev PHPFPMLogEvent, needle string) bool {
 	return false
 }
 
-func computePHPFPMHealthScore(saturation, queueUtil, slowReqs, childrenRate *float64) *float64 {
-	score := 100.0
-	if saturation != nil {
-		switch {
-		case *saturation > 85:
-			score -= 30
-		case *saturation > 70:
-			score -= 15
-		case *saturation > 50:
-			score -= 5
-		}
+func parseStepToNS(step string) int64 {
+	step = strings.TrimSpace(step)
+	if len(step) < 2 {
+		return 60 * 1e9
 	}
-	if queueUtil != nil && *queueUtil > 0 {
-		switch {
-		case *queueUtil > 50:
-			score -= 25
-		case *queueUtil > 10:
-			score -= 10
-		default:
-			score -= 5
-		}
+	unit := step[len(step)-1]
+	numStr := step[:len(step)-1]
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 60 * 1e9
 	}
-	if slowReqs != nil && *slowReqs > 0 {
-		score -= 20
+	switch unit {
+	case 's':
+		return int64(num) * 1e9
+	case 'm':
+		return int64(num) * 60 * 1e9
+	case 'h':
+		return int64(num) * 3600 * 1e9
+	default:
+		return 60 * 1e9
 	}
-	if childrenRate != nil && *childrenRate > 0 {
-		score -= 25
-	}
-	if score < 0 {
-		score = 0
-	}
-	return &score
 }
 
-func parsePHPFPMAccessLogs(entries []LokiLogEntry) (topSlow, topMem []ScriptStat, p50, p95, p99 *float64) {
+func computeLatencyPercentilesTimeseries(entries []LokiLogEntry, startNs, endNs int64, step string) []TimePoint {
+	bucketNs := parseStepToNS(step)
+	if bucketNs <= 0 {
+		return nil
+	}
+
+	type bucket struct {
+		durations []float64
+		totalDur  float64
+	}
+	buckets := make(map[int64]*bucket)
+
+	for _, entry := range entries {
+		line := strings.TrimSpace(entry.Line)
+		matches := phpfpmAccessLogRE.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		dur, _ := strconv.ParseFloat(matches[7], 64)
+		if dur <= 0 {
+			continue
+		}
+
+		ts, err := strconv.ParseInt(entry.TimestampNs, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		bucketKey := (ts / bucketNs) * bucketNs
+		if _, ok := buckets[bucketKey]; !ok {
+			buckets[bucketKey] = &bucket{}
+		}
+		buckets[bucketKey].durations = append(buckets[bucketKey].durations, dur)
+		buckets[bucketKey].totalDur += dur
+	}
+
+	var result []TimePoint
+	for ts, b := range buckets {
+		if len(b.durations) < 2 {
+			continue
+		}
+		sort.Float64s(b.durations)
+		p50 := b.durations[int(float64(len(b.durations))*0.50)]
+		p95 := b.durations[int(float64(len(b.durations))*0.95)]
+		p99 := b.durations[int(float64(len(b.durations))*0.99)]
+		avg := b.totalDur / float64(len(b.durations))
+
+		result = append(result, TimePoint{
+			"time": float64(ts) / 1e9,
+			"p50":  p50,
+			"p95":  p95,
+			"p99":  p99,
+			"avg":  avg,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i]["time"].(float64) < result[j]["time"].(float64)
+	})
+
+	return result
+}
+
+func computeMemoryCpuTimeseries(entries []LokiLogEntry, startNs, endNs int64, step string) (memoryTS, cpuTS []TimePoint) {
+	bucketNs := parseStepToNS(step)
+	if bucketNs <= 0 {
+		return nil, nil
+	}
+
+	type bucket struct {
+		memValues []float64
+		cpuValues []float64
+		totalMem  float64
+		totalCpu  float64
+	}
+	buckets := make(map[int64]*bucket)
+
+	for _, entry := range entries {
+		line := strings.TrimSpace(entry.Line)
+		matches := phpfpmAccessLogRE.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		mem, _ := strconv.ParseFloat(matches[8], 64)
+		var cpu float64
+		if matches[9] != "" {
+			cpu, _ = strconv.ParseFloat(matches[9], 64)
+		}
+		ts, err := strconv.ParseInt(entry.TimestampNs, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		bucketKey := (ts / bucketNs) * bucketNs
+		if _, ok := buckets[bucketKey]; !ok {
+			buckets[bucketKey] = &bucket{}
+		}
+		buckets[bucketKey].memValues = append(buckets[bucketKey].memValues, mem)
+		buckets[bucketKey].totalMem += mem
+		if cpu >= 0 && cpu <= 100 {
+			buckets[bucketKey].cpuValues = append(buckets[bucketKey].cpuValues, cpu)
+			buckets[bucketKey].totalCpu += cpu
+		}
+	}
+
+	for ts, b := range buckets {
+		tsSec := float64(ts) / 1e9
+
+		if len(b.memValues) >= 2 {
+			avgMem := b.totalMem / float64(len(b.memValues))
+			memoryTS = append(memoryTS, TimePoint{
+				"time":   tsSec,
+				"memory": avgMem * 1024,
+			})
+		}
+
+		if len(b.cpuValues) >= 2 {
+			avgCpu := b.totalCpu / float64(len(b.cpuValues))
+			cpuTS = append(cpuTS, TimePoint{
+				"time": tsSec,
+				"cpu":  avgCpu,
+			})
+		}
+	}
+
+	sort.Slice(memoryTS, func(i, j int) bool {
+		return memoryTS[i]["time"].(float64) < memoryTS[j]["time"].(float64)
+	})
+	sort.Slice(cpuTS, func(i, j int) bool {
+		return cpuTS[i]["time"].(float64) < cpuTS[j]["time"].(float64)
+	})
+
+	return memoryTS, cpuTS
+}
+
+func parsePHPFPMAccessLogs(entries []LokiLogEntry) (topSlow, topMem []ScriptStat, p50, p95, p99, avgDurationMs, avgMemoryKb, avgCpuPct *float64) {
 	type scriptAccum struct {
 		totalDur float64
 		totalMem float64
@@ -1504,6 +1865,9 @@ func parsePHPFPMAccessLogs(entries []LokiLogEntry) (topSlow, topMem []ScriptStat
 	}
 	scripts := map[string]*scriptAccum{}
 	durations := []float64{}
+
+	var totalDur, totalMem, totalCpu float64
+	var totalCount, cpuCount float64
 
 	for _, entry := range entries {
 		line := strings.TrimSpace(entry.Line)
@@ -1514,6 +1878,10 @@ func parsePHPFPMAccessLogs(entries []LokiLogEntry) (topSlow, topMem []ScriptStat
 		script := matches[6]
 		dur, _ := strconv.ParseFloat(matches[7], 64)
 		mem, _ := strconv.ParseFloat(matches[8], 64)
+		var cpu float64
+		if matches[9] != "" {
+			cpu, _ = strconv.ParseFloat(matches[9], 64)
+		}
 
 		if dur > 0 && script != "" && !strings.HasPrefix(script, "-") {
 			if _, ok := scripts[script]; !ok {
@@ -1523,6 +1891,14 @@ func parsePHPFPMAccessLogs(entries []LokiLogEntry) (topSlow, topMem []ScriptStat
 			scripts[script].totalMem += mem
 			scripts[script].count++
 			durations = append(durations, dur)
+
+			totalDur += dur
+			totalMem += mem
+			totalCount++
+			if cpu >= 0 && cpu <= 100 {
+				totalCpu += cpu
+				cpuCount++
+			}
 		}
 	}
 
@@ -1559,9 +1935,18 @@ func parsePHPFPMAccessLogs(entries []LokiLogEntry) (topSlow, topMem []ScriptStat
 		p50 = &p50v
 		p95 = &p95v
 		p99 = &p99v
+
+		avgDur := totalDur / totalCount
+		avgDurationMs = &avgDur
+		avgMem := totalMem / totalCount
+		avgMemoryKb = &avgMem
+		if cpuCount > 0 {
+			avgCpu := totalCpu / cpuCount
+			avgCpuPct = &avgCpu
+		}
 	}
 
-	return slowList, memList, p50, p95, p99
+	return slowList, memList, p50, p95, p99, avgDurationMs, avgMemoryKb, avgCpuPct
 }
 
 func parseProcessStats(series []VMSeries, statType string) []ProcessStat {
@@ -1598,6 +1983,72 @@ func parseProcessStats(series []VMSeries, statType string) []ProcessStat {
 	return stats
 }
 
+func sumVMValues(series []VMSeries) *float64 {
+	var total float64
+	for _, s := range series {
+		if len(s.Values) > 0 {
+			total += s.Values[len(s.Values)-1][1]
+		}
+	}
+	if len(series) == 0 {
+		return nil
+	}
+	return &total
+}
+
+func minVMValues(series []VMSeries) *float64 {
+	var minVal *float64
+	for _, s := range series {
+		if len(s.Values) > 0 {
+			v := s.Values[len(s.Values)-1][1]
+			if minVal == nil || v < *minVal {
+				minVal = &v
+			}
+		}
+	}
+	return minVal
+}
+
+func allPoolsUp(series []VMSeries) *float64 {
+	if len(series) == 0 {
+		return nil
+	}
+	for _, s := range series {
+		if len(s.Values) > 0 {
+			v := s.Values[len(s.Values)-1][1]
+			if v == 0 {
+				zero := 0.0
+				return &zero
+			}
+		}
+	}
+	one := 1.0
+	return &one
+}
+
+func sumVMSeriesByTimestamp(series []VMSeries) []VMSeries {
+	timeMap := map[float64]float64{}
+	for _, s := range series {
+		for _, v := range s.Values {
+			timeMap[v[0]] += v[1]
+		}
+	}
+	if len(timeMap) == 0 {
+		return nil
+	}
+	result := VMSeries{
+		Metric: map[string]string{},
+		Values: make([][2]float64, 0, len(timeMap)),
+	}
+	for ts, val := range timeMap {
+		result.Values = append(result.Values, [2]float64{ts, val})
+	}
+	sort.Slice(result.Values, func(i, j int) bool {
+		return result.Values[i][0] < result.Values[j][0]
+	})
+	return []VMSeries{result}
+}
+
 func mergePHPFPMLogEvents(limit int, groups ...[]LokiLogEntry) []PHPFPMLogEvent {
 	seen := map[string]struct{}{}
 	entries := []LokiLogEntry{}
@@ -1620,4 +2071,104 @@ func mergePHPFPMLogEvents(limit int, groups ...[]LokiLogEntry) []PHPFPMLogEvent 
 		events = append(events, parsePHPFPMLogEvent(entry))
 	}
 	return events
+}
+
+func partitionAccessEntriesByPool(entries []LokiLogEntry) map[string][]LokiLogEntry {
+	byPool := map[string][]LokiLogEntry{}
+	for _, entry := range entries {
+		line := strings.TrimSpace(entry.Line)
+		matches := phpfpmAccessLogRE.FindStringSubmatch(line)
+		if matches == nil {
+			continue
+		}
+		pool := matches[1]
+		if pool == "" {
+			continue
+		}
+		byPool[pool] = append(byPool[pool], entry)
+	}
+	return byPool
+}
+
+func computePoolRequestRateTimeseries(entries []LokiLogEntry, startNs, endNs int64, step string) []TimePoint {
+	bucketNs := parseStepToNS(step)
+	if bucketNs <= 0 {
+		return nil
+	}
+	buckets := make(map[int64]float64)
+	for _, entry := range entries {
+		ts, err := strconv.ParseInt(entry.TimestampNs, 10, 64)
+		if err != nil {
+			continue
+		}
+		bucketKey := (ts / bucketNs) * bucketNs
+		buckets[bucketKey]++
+	}
+	var result []TimePoint
+	for ts, count := range buckets {
+		result = append(result, TimePoint{"time": float64(ts) / 1e9, "req": count})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i]["time"].(float64) < result[j]["time"].(float64)
+	})
+	return result
+}
+
+func extractPoolWorkersTimeseries(activeSeries, idleSeries, totalSeries []VMSeries, pool string) []TimePoint {
+	type point struct {
+		ts     float64
+		active float64
+		idle   float64
+		total  float64
+	}
+	merged := map[float64]*point{}
+	for _, series := range activeSeries {
+		if series.Metric["pool"] != pool {
+			continue
+		}
+		for _, v := range series.Values {
+			ts := v[0]
+			if _, ok := merged[ts]; !ok {
+				merged[ts] = &point{ts: ts}
+			}
+			merged[ts].active = v[1]
+		}
+	}
+	for _, series := range idleSeries {
+		if series.Metric["pool"] != pool {
+			continue
+		}
+		for _, v := range series.Values {
+			ts := v[0]
+			if _, ok := merged[ts]; !ok {
+				merged[ts] = &point{ts: ts}
+			}
+			merged[ts].idle = v[1]
+		}
+	}
+	for _, series := range totalSeries {
+		if series.Metric["pool"] != pool {
+			continue
+		}
+		for _, v := range series.Values {
+			ts := v[0]
+			if _, ok := merged[ts]; !ok {
+				merged[ts] = &point{ts: ts}
+			}
+			merged[ts].total = v[1]
+		}
+	}
+	var result []TimePoint
+	for _, p := range merged {
+		result = append(result, TimePoint{
+			"time":   p.ts,
+			"active": p.active,
+			"idle":   p.idle,
+			"total":  p.total,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i]["time"].(float64) < result[j]["time"].(float64)
+	})
+	return result
 }

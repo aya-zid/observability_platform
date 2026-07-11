@@ -11,7 +11,7 @@ export default function Sidebar() {
       <div className="p-4 md:p-6">
         <div className="font-semibold tracking-tight">Observability Platform</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Dashboard, logs, metrics, traces
+          Overview, alerts, hosts, services
         </div>
       </div>
 
@@ -23,34 +23,22 @@ export default function Sidebar() {
           Overview
         </NavLink>
         <NavLink
-          to="/metrics"
-          className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
-        >
-          Metrics
-        </NavLink>
-        <NavLink
-          to="/logs"
-          className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
-        >
-          Logs
-        </NavLink>
-        <NavLink
-          to="/traces"
-          className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
-        >
-          Traces
-        </NavLink>
-        <NavLink
           to="/alerts"
           className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
         >
           Alerts
         </NavLink>
         <NavLink
-          to="/integrations"
+          to="/hosts"
           className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
         >
-          Integrations
+          Hosts
+        </NavLink>
+        <NavLink
+          to="/services"
+          className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
+        >
+          Services
         </NavLink>
         <NavLink
           to="/settings/api-keys"

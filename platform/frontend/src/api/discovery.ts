@@ -22,6 +22,7 @@ export type DiscoveryHost = {
   arch: string
   agent_version: string
   last_seen_at: string
+  status: "online" | "warning" | "offline"
 }
 
 export type DiscoveryService = {
@@ -37,7 +38,6 @@ export type DiscoveryService = {
   metrics_mode: string
   log_collection_on: boolean
   metric_collection_on: boolean
-  integration_status: string
   logging_mode: string
   vuln_scan_supported: boolean
   vuln_scan_status: string
@@ -67,7 +67,6 @@ export type DiscoveryServiceDetail = {
   detected_log_paths: string[]
   log_collection_on: boolean
   metric_collection_on: boolean
-  integration_status: string
   vuln_scan_supported: boolean
   vuln_scan_status: string
   last_vuln_scan_at?: string
@@ -91,8 +90,6 @@ export type VirtualHostEntry = {
   access_log?: string
   error_log?: string
   enabled: boolean
-  is_shared_log: boolean
-  is_default: boolean
 }
 
 export async function getCatalog(): Promise<CatalogService[]> {

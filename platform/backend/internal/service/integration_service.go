@@ -79,19 +79,41 @@ func (s *IntegrationService) CreateInstallCommand(
 	if err != nil {
 		return nil, err
 	}
-	nginxVHosts, err := s.listEnabledNginxVirtualHosts(ctx, tenantID, svc.ID)
-	if err != nil {
-		return nil, err
-	}
-	apacheVHosts, err := s.listEnabledApacheVirtualHosts(ctx, tenantID, svc.ID)
-	if err != nil {
-		return nil, err
-	}
-
+	var nginxVHosts []domain.NginxVirtualHost
+	var apacheVHosts []domain.ApacheVirtualHost
 	var logPathsJoined string
+
 	if svc.LogCollectionOn {
-		logPaths := effectiveLogPathsForIntegration(svc, detectedLogPaths)
-		logPathsJoined = strings.Join(logPaths, ",")
+		var err error
+		nginxVHosts, err = s.listEnabledNginxVirtualHosts(ctx, tenantID, svc.ID)
+		if err != nil {
+			return nil, err
+		}
+		apacheVHosts, err = s.listEnabledApacheVirtualHosts(ctx, tenantID, svc.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		if svc.ServiceName == "nginx" || svc.ServiceName == "apache" {
+			var paths []string
+			if svc.ServiceName == "nginx" {
+				for _, vh := range nginxVHosts {
+					if p := strings.TrimSpace(vh.LogPath); p != "" {
+						paths = append(paths, p)
+					}
+				}
+			} else {
+				for _, vh := range apacheVHosts {
+					if p := strings.TrimSpace(vh.LogPath); p != "" {
+						paths = append(paths, p)
+					}
+				}
+			}
+			logPathsJoined = strings.Join(dedupeStrings(paths), ",")
+		} else {
+			logPaths := effectiveLogPathsForIntegration(svc, detectedLogPaths)
+			logPathsJoined = strings.Join(logPaths, ",")
+		}
 	}
 
 	var def *catalog.ServiceDef
@@ -103,12 +125,6 @@ func (s *IntegrationService) CreateInstallCommand(
 	var metricsEndpoint string
 	if svc.MetricCollectionOn {
 		metricsEndpoint = metricsEndpointForIntegration(svc, def)
-	}
-
-	// For web servers with virtual hosts, the per-domain vhost paths
-	// replace the generic log paths entirely.
-	if len(nginxVHosts) > 0 || len(apacheVHosts) > 0 {
-		logPathsJoined = ""
 	}
 
 	if logPathsJoined == "" && metricsEndpoint == "" && len(nginxVHosts) == 0 && len(apacheVHosts) == 0 {
@@ -135,7 +151,6 @@ func (s *IntegrationService) CreateInstallCommand(
 		svc.ID,
 		svc.LogCollectionOn,
 		svc.MetricCollectionOn,
-		domain.IntegrationStatusPending,
 	); err != nil {
 		return nil, err
 	}
@@ -214,16 +229,14 @@ AUTH_B64=$(echo -n "${API_KEY}:${API_KEY}" | base64 -w 0)
 STATUS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/integrations/status"
 
 notify_status() {
-  local STATUS="$1"
-  local LOG_ON="$2"
-  local METRICS_ON="$3"
+  local LOG_ON="$1"
+  local METRICS_ON="$2"
   PAYLOAD=$(cat <<JSON
 {
   "machine_id": "${MACHINE_ID}",
   "service_name": "${SERVICE_NAME}",
   "log_collection_on": ${LOG_ON},
-  "metric_collection_on": ${METRICS_ON},
-  "integration_status": "${STATUS}"
+  "metric_collection_on": ${METRICS_ON}
 }
 JSON
 )
@@ -260,14 +273,20 @@ with open(cfg_path, "r", encoding="utf-8") as f:
 
 if log_paths:
     is_mysql = service_name.lower() in ("mysql", "mariadb", "mysqld", "mariadbd")
-    if is_mysql and f"  {filelog_key}:\n" not in text:
-        err_paths = [p for p in log_paths if "error" in p.lower()]
-        slow_paths = [p for p in log_paths if "error" not in p.lower()]
+    is_postgres = service_name.lower().startswith("postgres")
+    err_paths = [p for p in log_paths if "error" in p.lower()]
+    slow_paths = [p for p in log_paths if "error" not in p.lower()]
+    err_key = f"filelog/{service_slug}_error_integration"
+    slow_key = f"filelog/{service_slug}_slow_integration"
+    already_integrated = (
+        (err_paths and f"  {err_key}:\n" in text)
+        or (slow_paths and f"  {slow_key}:\n" in text)
+    )
+    if is_mysql and not already_integrated:
         inserted_block = []
 
         if err_paths:
             err_lines = "\n".join([f"      - {p}" for p in err_paths])
-            err_key = f"filelog/{service_slug}_error_integration"
             inserted_block.append(
                 f"  {err_key}:\n"
                 "    include:\n"
@@ -286,13 +305,39 @@ if log_paths:
 
         if slow_paths:
             slow_lines = "\n".join([f"      - {p}" for p in slow_paths])
-            slow_key = f"filelog/{service_slug}_slow_integration"
             inserted_block.append(
                 f"  {slow_key}:\n"
                 "    include:\n"
                 f"{slow_lines}\n"
                 "    include_file_path: true\n"
                 "    start_at: end\n"
+                "    operators:\n"
+                "      # Drop lines containing \"# Time:\" — these are standalone metadata\n"
+                "      # lines that appear between queries and carry no query data.\n"
+                "      # They can appear as \"# Time: ...\" or with a timestamp prefix.\n"
+                "      - type: filter\n"
+                "        expr: 'body matches \"#\\\\s*Time:\\\\s*\\\\d+\"'\n"
+                "        on_error: send_quiet\n"
+                "      # Join every physical line of one slow-query entry into a single\n"
+                "      # record, using \"# User@Host:\" as the boundary — it appears exactly\n"
+                "      # once per query, unlike \"# Time:\" which only appears when the\n"
+                "      # second rolls over. This also prevents Loki from reordering lines\n"
+                "      # that share an identical timestamp.\n"
+                "      - type: recombine\n"
+                "        is_first_entry: 'body matches \"^# User@Host:\"'\n"
+                "        combine_field: body\n"
+                "        combine_with: \"\\n\"\n"
+                "        source_identifier: attributes[\"log.file.path\"]\n"
+                "        max_batch_size: 200\n"
+"        force_flush_period: 5s\n"
+"        max_log_size: 65536\n"
+                "        on_error: send_quiet\n"
+                "      # Drop the monitoring agent's own queries entirely, now that each\n"
+                "      # entry is a complete record. \"monitor\" is the DB user created for\n"
+                "      # the observability agent's connection, not real app traffic.\n"
+                "      - type: filter\n"
+                "        expr: 'body matches \"User@Host:\\\\s*monitor\\\\[monitor\\\\]\"'\n"
+                "        on_error: send_quiet\n"
                 "    resource:\n"
                 f"      service.name: {service_name}\n"
                 f"      job: {service_name}\n"
@@ -305,7 +350,48 @@ if log_paths:
             text = text.replace(marker, "\n" + block + "\nprocessors:\n", 1)
         else:
             text += "\n" + block + "\n"
-    elif not is_mysql and f"  {filelog_key}:\n" not in text:
+    elif is_postgres and f"  {filelog_key}:\n" not in text:
+        include_lines = "\n".join([f"      - {p}" for p in log_paths])
+        filelog_block = (
+            f"  {filelog_key}:\n"
+            "    include:\n"
+            f"{include_lines}\n"
+            "    include_file_path: true\n"
+            "    start_at: end\n"
+            "    operators:\n"
+            "      # Join continuation lines (no leading timestamp) into the\n"
+            "      # preceding entry that started with one.\n"
+            "      - type: recombine\n"
+            "        is_first_entry: 'body matches \"^\\\\d{4}-\\\\d{2}-\\\\d{2}[T ]\\\\d{2}:\\\\d{2}:\\\\d{2}\"'\n"
+            "        combine_field: body\n"
+            "        combine_with: \"\\n\"\n"
+            "        source_identifier: attributes[\"log.file.path\"]\n"
+            "        max_batch_size: 200\n"
+            "        force_flush_period: 5s\n"
+            "        max_log_size: 65536\n"
+            "        on_error: send_quiet\n"
+            "      - type: regex_parser\n"
+            "        regex: '^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}[^\\[]*\\[\\d+\\]\\s*(?:(?P<pg_user>\\S+)@(?P<pg_database>\\S+)\\s+)?\\S+\\(\\d+\\)\\s+\\S+\\s+(?P<log_level>LOG|ERROR|FATAL|PANIC|WARNING|NOTICE|INFO|DETAIL|HINT|DEBUG\\d*):\\s+(?P<pg_message>.{0,600})'\n"
+            "        on_error: send_quiet\n"
+            "      # Drop \"connection received\" lines — pre-auth, no user info.\n"
+            "      - type: filter\n"
+            "        expr: 'body matches \"connection received:\"'\n"
+            "        on_error: send_quiet\n"
+            "      # Drop the monitoring agent's own queries — not real app traffic.\n"
+            "      - type: filter\n"
+            "        expr: 'attributes.pg_user == \"monitoring\" or attributes.pg_user == \"postgres_exporter\" or attributes.pg_user == \"pgexporter\"'\n"
+            "        on_error: send_quiet\n"
+            "    resource:\n"
+            f"      service.name: {service_name}\n"
+            f"      job: {service_name}\n"
+            "      log.format: pg_csv\n"
+        )
+        marker = "\nprocessors:\n"
+        if marker in text:
+            text = text.replace(marker, "\n" + filelog_block + "\nprocessors:\n", 1)
+        else:
+            text += "\n" + filelog_block + "\n"
+    elif not is_mysql and not is_postgres and f"  {filelog_key}:\n" not in text:
         include_lines = "\n".join([f"      - {p}" for p in log_paths])
         filelog_block = (
             f"  {filelog_key}:\n"
@@ -413,20 +499,48 @@ for i, line in enumerate(lines):
                 arr_proc.append("filter/drop_phpfpm_pollution")
             lines[i] = line[: line.index("processors:")] + "processors: [" + ", ".join(arr_proc) + "]"
 
+# Inject memory_limiter processor as defense-in-depth against unbounded memory
+memory_limiter_def = (
+    "  memory_limiter:\n"
+    "    check_interval: 1s\n"
+    "    limit_mib: 512\n"
+    "    spike_limit_mib: 128\n"
+)
+if "memory_limiter:" not in text:
+    marker = "\nprocessors:\n"
+    if marker in text:
+        text = text.replace(marker, "\n" + memory_limiter_def + "processors:\n", 1)
+    else:
+        text += "\n" + memory_limiter_def + "\n"
+    lines = text.splitlines()
+
+# Add memory_limiter as first processor in every pipeline
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    if stripped.startswith("processors: [") and i > 0:
+        pipeline_name = lines[i-1].strip().rstrip(":")
+        if pipeline_name in ("logs", "metrics", "traces") and "memory_limiter" not in stripped:
+            start = stripped.find("[")
+            end = stripped.rfind("]")
+            cur = [x.strip() for x in stripped[start + 1 : end].split(",") if x.strip()]
+            if "memory_limiter" not in cur:
+                cur.insert(0, "memory_limiter")
+            lines[i] = line[: line.index("processors:")] + "processors: [" + ", ".join(cur) + "]"
+
 with open(cfg_path, "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + "\n")
 PY
 then
   echo "[x] Failed to patch collector config"
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   exit 1
 fi
 
 if ! /usr/local/bin/otelcol validate --config "file:${CONFIG_FILE}" >/dev/null 2>&1; then
   echo "[x] Collector config validation failed, rolling back"
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   exit 1
 fi
 
@@ -437,7 +551,7 @@ else
     echo "[x] Failed to reload/restart otelcol"
     cp "$BACKUP_FILE" "$CONFIG_FILE" || true
     systemctl restart otelcol >/dev/null 2>&1 || true
-    notify_status "error" false false
+    notify_status ${LOG_ON} ${METRICS_ON}
     exit 1
   }
 fi
@@ -448,12 +562,12 @@ METRICS_ON=false
 [ -n "$METRICS_ENDPOINT" ] && METRICS_ON=true
 
 if systemctl is-active --quiet otelcol; then
-  notify_status "active" ${LOG_ON} ${METRICS_ON}
+  notify_status ${LOG_ON} ${METRICS_ON}
   echo "[✓] Integration applied for ${SERVICE_NAME}"
 else
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
   systemctl restart otelcol >/dev/null 2>&1 || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   echo "[x] otelcol is not active after update"
   exit 1
 fi
@@ -480,7 +594,7 @@ func (s *IntegrationService) listEnabledNginxVirtualHosts(ctx context.Context, t
 
 	filtered := make([]domain.NginxVirtualHost, 0, len(rows))
 	for _, row := range rows {
-		if !row.Enabled || row.IsSharedLog || strings.TrimSpace(row.LogPath) == "" {
+		if !row.Enabled || strings.TrimSpace(row.LogPath) == "" {
 			continue
 		}
 		filtered = append(filtered, row)
@@ -509,6 +623,9 @@ func (s *IntegrationService) loadNginxVirtualHostsForScript(params IntegrationSc
 	if svc == nil || svc.ServiceName != "nginx" {
 		return nil, nil
 	}
+	if !svc.LogCollectionOn {
+		return nil, nil
+	}
 
 	return s.listEnabledNginxVirtualHosts(context.Background(), tenant.ID, svc.ID)
 }
@@ -521,7 +638,7 @@ func (s *IntegrationService) listEnabledApacheVirtualHosts(ctx context.Context, 
 
 	filtered := make([]domain.ApacheVirtualHost, 0, len(rows))
 	for _, row := range rows {
-		if !row.Enabled || row.IsSharedLog || strings.TrimSpace(row.LogPath) == "" {
+		if !row.Enabled || strings.TrimSpace(row.LogPath) == "" {
 			continue
 		}
 		filtered = append(filtered, row)
@@ -548,6 +665,9 @@ func (s *IntegrationService) loadApacheVirtualHostsForScript(params IntegrationS
 		return nil, err
 	}
 	if svc == nil || svc.ServiceName != "apache" {
+		return nil, nil
+	}
+	if !svc.LogCollectionOn {
 		return nil, nil
 	}
 
@@ -683,16 +803,14 @@ AUTH_B64=$(echo -n "${API_KEY}:${API_KEY}" | base64 -w 0)
 STATUS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/integrations/status"
 
 notify_status() {
-  local STATUS="$1"
-  local LOG_ON="$2"
-  local METRICS_ON="$3"
+  local LOG_ON="$1"
+  local METRICS_ON="$2"
   PAYLOAD=$(cat <<JSON
 {
   "machine_id": "${MACHINE_ID}",
   "service_name": "${SERVICE_NAME}",
   "log_collection_on": ${LOG_ON},
-  "metric_collection_on": ${METRICS_ON},
-  "integration_status": "${STATUS}"
+  "metric_collection_on": ${METRICS_ON}
 }
 JSON
 )
@@ -893,14 +1011,14 @@ PY
 then
   echo "[x] Failed to patch collector config"
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   exit 1
 fi
 
 if ! /usr/local/bin/otelcol validate --config "file:${CONFIG_FILE}" >/dev/null 2>&1; then
   echo "[x] Collector config validation failed, rolling back"
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   exit 1
 fi
 
@@ -911,7 +1029,7 @@ else
     echo "[x] Failed to reload/restart otelcol"
     cp "$BACKUP_FILE" "$CONFIG_FILE" || true
     systemctl restart otelcol >/dev/null 2>&1 || true
-    notify_status "error" false false
+    notify_status ${LOG_ON} ${METRICS_ON}
     exit 1
   }
 fi
@@ -922,12 +1040,12 @@ METRICS_ON=false
 [ -n "$METRICS_ENDPOINT" ] && METRICS_ON=true
 
 if systemctl is-active --quiet otelcol; then
-  notify_status "active" ${LOG_ON} ${METRICS_ON}
+  notify_status ${LOG_ON} ${METRICS_ON}
   echo "[✓] Integration applied for ${SERVICE_NAME}"
 else
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
   systemctl restart otelcol >/dev/null 2>&1 || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   echo "[x] otelcol is not active after update"
   exit 1
 fi
@@ -1067,16 +1185,14 @@ AUTH_B64=$(echo -n "${API_KEY}:${API_KEY}" | base64 -w 0)
 STATUS_ENDPOINT="http://${PLATFORM_HOST}:${PLATFORM_PORT}/ingest/integrations/status"
 
 notify_status() {
-  local STATUS="$1"
-  local LOG_ON="$2"
-  local METRICS_ON="$3"
+  local LOG_ON="$1"
+  local METRICS_ON="$2"
   PAYLOAD=$(cat <<JSON
 {
   "machine_id": "${MACHINE_ID}",
   "service_name": "${SERVICE_NAME}",
   "log_collection_on": ${LOG_ON},
-  "metric_collection_on": ${METRICS_ON},
-  "integration_status": "${STATUS}"
+  "metric_collection_on": ${METRICS_ON}
 }
 JSON
 )
@@ -1262,14 +1378,14 @@ PY
 then
   echo "[x] Failed to patch collector config"
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   exit 1
 fi
 
 if ! /usr/local/bin/otelcol validate --config "file:${CONFIG_FILE}" >/dev/null 2>&1; then
   echo "[x] Collector config validation failed, rolling back"
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   exit 1
 fi
 
@@ -1280,7 +1396,7 @@ else
     echo "[x] Failed to reload/restart otelcol"
     cp "$BACKUP_FILE" "$CONFIG_FILE" || true
     systemctl restart otelcol >/dev/null 2>&1 || true
-    notify_status "error" false false
+    notify_status ${LOG_ON} ${METRICS_ON}
     exit 1
   }
 fi
@@ -1291,12 +1407,12 @@ METRICS_ON=false
 [ -n "$METRICS_ENDPOINT" ] && METRICS_ON=true
 
 if systemctl is-active --quiet otelcol; then
-  notify_status "active" ${LOG_ON} ${METRICS_ON}
+  notify_status ${LOG_ON} ${METRICS_ON}
   echo "[✓] Integration applied for ${SERVICE_NAME}"
 else
   cp "$BACKUP_FILE" "$CONFIG_FILE" || true
   systemctl restart otelcol >/dev/null 2>&1 || true
-  notify_status "error" false false
+  notify_status ${LOG_ON} ${METRICS_ON}
   echo "[x] otelcol is not active after update"
   exit 1
 fi
@@ -1316,11 +1432,6 @@ fi
 }
 
 func (s *IntegrationService) IngestStatus(ctx context.Context, tenantID uint, req dto.IntegrationStatusIngestRequest) error {
-	status := domain.IntegrationStatusActive
-	if req.IntegrationStatus != "" {
-		status = domain.IntegrationStatus(req.IntegrationStatus)
-	}
-
 	return s.discoveryRepo.UpdateServiceCollectionByMachineNameCtx(
 		ctx,
 		tenantID,
@@ -1328,7 +1439,6 @@ func (s *IntegrationService) IngestStatus(ctx context.Context, tenantID uint, re
 		req.ServiceName,
 		req.LogCollectionOn,
 		req.MetricCollectionOn,
-		status,
 	)
 }
 

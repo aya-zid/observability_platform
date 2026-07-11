@@ -102,7 +102,6 @@ export const translations: Translations = {
   "pgLogs.filters": { en: "Filters", fr: "Filtres" },
   "pgLogs.allCategories": { en: "All categories", fr: "Toutes les catégories" },
   "pgLogs.searchPlaceholder": { en: "Search user, database, client, message… (Enter to apply)", fr: "Rechercher utilisateur, base, client, message… (Entrée pour appliquer)" },
-  "pgLogs.showMonitoring": { en: "Show monitoring connections", fr: "Afficher les connexions monitoring" },
   "pgLogs.eventsTitle": { en: "Events", fr: "Événements" },
   "pgLogs.totalEvents": { en: (n: string) => `${n} total events in this window`, fr: (n: string) => `${n} événements dans cette fenêtre` },
   "pgLogs.loadError": { en: "Failed to load logs. Check that the logs endpoint is available.", fr: "Échec du chargement des logs. Vérifiez que le endpoint logs est disponible." },

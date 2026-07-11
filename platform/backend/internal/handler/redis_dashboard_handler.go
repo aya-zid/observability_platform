@@ -66,6 +66,7 @@ func (h *RedisDashboardHandler) Dashboard(c echo.Context) error {
 		startNs,
 		endNs,
 		step,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[redis-dashboard] summary failed: %v", err)
@@ -134,6 +135,7 @@ func (h *RedisDashboardHandler) Logs(c echo.Context) error {
 		search,
 		page,
 		pageSize,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[redis-logs] fetch failed: %v", err)

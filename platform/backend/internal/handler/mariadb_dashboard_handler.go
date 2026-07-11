@@ -74,6 +74,7 @@ func (h *MariaDBDashboardHandler) Dashboard(c echo.Context) error {
 		endNs,
 		step,
 		minDurationSec,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[mariadb-dashboard] summary failed: %v", err)
@@ -102,7 +103,7 @@ func (h *MariaDBDashboardHandler) Config(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "service is not MariaDB/MySQL"})
 	}
 
-	snapshot, err := h.svc.GetConfigSnapshot(c.Request().Context(), claims.TenantID)
+	snapshot, err := h.svc.GetConfigSnapshot(c.Request().Context(), claims.TenantID, svc.MachineID)
 	if err != nil {
 		c.Logger().Errorf("[mariadb-config] fetch failed: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch config"})
@@ -152,6 +153,52 @@ func (h *MariaDBDashboardHandler) Logs(c echo.Context) error {
 			minDurationMs = v
 		}
 	}
+	maxDurationMs := 0.0
+	if m := c.QueryParam("max_duration_ms"); m != "" {
+		if v, err2 := strconv.ParseFloat(m, 64); err2 == nil && v >= 0 {
+			maxDurationMs = v
+		}
+	}
+	userFilter := c.QueryParam("user")
+	hostFilter := c.QueryParam("host")
+	schemaFilter := c.QueryParam("schema")
+	qcHitFilter := c.QueryParam("qc_hit")
+
+	var minRowsSent, maxRowsSent int64
+	if v := c.QueryParam("min_rows_sent"); v != "" {
+		minRowsSent, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if v := c.QueryParam("max_rows_sent"); v != "" {
+		maxRowsSent, _ = strconv.ParseInt(v, 10, 64)
+	}
+	var minRowsExamined, maxRowsExamined int64
+	if v := c.QueryParam("min_rows_examined"); v != "" {
+		minRowsExamined, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if v := c.QueryParam("max_rows_examined"); v != "" {
+		maxRowsExamined, _ = strconv.ParseInt(v, 10, 64)
+	}
+	var minLockTimeS, maxLockTimeS float64
+	if v := c.QueryParam("min_lock_time_s"); v != "" {
+		minLockTimeS, _ = strconv.ParseFloat(v, 64)
+	}
+	if v := c.QueryParam("max_lock_time_s"); v != "" {
+		maxLockTimeS, _ = strconv.ParseFloat(v, 64)
+	}
+	var minRowsAffected, maxRowsAffected int64
+	if v := c.QueryParam("min_rows_affected"); v != "" {
+		minRowsAffected, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if v := c.QueryParam("max_rows_affected"); v != "" {
+		maxRowsAffected, _ = strconv.ParseInt(v, 10, 64)
+	}
+	var minBytesSent, maxBytesSent int64
+	if v := c.QueryParam("min_bytes_sent"); v != "" {
+		minBytesSent, _ = strconv.ParseInt(v, 10, 64)
+	}
+	if v := c.QueryParam("max_bytes_sent"); v != "" {
+		maxBytesSent, _ = strconv.ParseInt(v, 10, 64)
+	}
 
 	page := 1
 	if p := c.QueryParam("page"); p != "" {
@@ -177,6 +224,22 @@ func (h *MariaDBDashboardHandler) Logs(c echo.Context) error {
 		page,
 		pageSize,
 		minDurationMs,
+		maxDurationMs,
+		svc.MachineID,
+		userFilter,
+		hostFilter,
+		schemaFilter,
+		qcHitFilter,
+		minRowsSent,
+		maxRowsSent,
+		minRowsExamined,
+		maxRowsExamined,
+		minLockTimeS,
+		maxLockTimeS,
+		minRowsAffected,
+		maxRowsAffected,
+		minBytesSent,
+		maxBytesSent,
 	)
 	if err != nil {
 		c.Logger().Errorf("[mariadb-logs] fetch failed: %v", err)
@@ -239,6 +302,62 @@ func (h *MariaDBDashboardHandler) SlowQueryLogs(c echo.Context) error {
 		}
 	}
 
+	search := strings.TrimSpace(c.QueryParam("search"))
+	userFilter := strings.TrimSpace(c.QueryParam("user"))
+	hostFilter := strings.TrimSpace(c.QueryParam("host"))
+	schemaFilter := strings.TrimSpace(c.QueryParam("schema"))
+	dbFilter := strings.TrimSpace(c.QueryParam("db"))
+	threadFilter := strings.TrimSpace(c.QueryParam("thread_id"))
+	qcHitFilter := strings.TrimSpace(c.QueryParam("qc_hit"))
+	minQueryTime := 0.0
+	if m := c.QueryParam("min_query_time"); m != "" {
+		if v, err2 := strconv.ParseFloat(m, 64); err2 == nil && v >= 0 {
+			minQueryTime = v
+		}
+	}
+	maxQueryTime := 0.0
+	if m := c.QueryParam("max_query_time"); m != "" {
+		if v, err2 := strconv.ParseFloat(m, 64); err2 == nil && v >= 0 {
+			maxQueryTime = v
+		}
+	}
+	minLockTime := 0.0
+	if m := c.QueryParam("min_lock_time"); m != "" {
+		if v, err2 := strconv.ParseFloat(m, 64); err2 == nil && v >= 0 {
+			minLockTime = v
+		}
+	}
+	maxLockTime := 0.0
+	if m := c.QueryParam("max_lock_time"); m != "" {
+		if v, err2 := strconv.ParseFloat(m, 64); err2 == nil && v >= 0 {
+			maxLockTime = v
+		}
+	}
+	minRowsSent := int64(0)
+	if m := c.QueryParam("min_rows_sent"); m != "" {
+		if v, err2 := strconv.ParseInt(m, 10, 64); err2 == nil && v >= 0 {
+			minRowsSent = v
+		}
+	}
+	maxRowsSent := int64(0)
+	if m := c.QueryParam("max_rows_sent"); m != "" {
+		if v, err2 := strconv.ParseInt(m, 10, 64); err2 == nil && v >= 0 {
+			maxRowsSent = v
+		}
+	}
+	minRowsExamined := int64(0)
+	if m := c.QueryParam("min_rows_examined"); m != "" {
+		if v, err2 := strconv.ParseInt(m, 10, 64); err2 == nil && v >= 0 {
+			minRowsExamined = v
+		}
+	}
+	maxRowsExamined := int64(0)
+	if m := c.QueryParam("max_rows_examined"); m != "" {
+		if v, err2 := strconv.ParseInt(m, 10, 64); err2 == nil && v >= 0 {
+			maxRowsExamined = v
+		}
+	}
+
 	result, err := h.svc.GetSlowQueryLogs(
 		c.Request().Context(),
 		tenant.UUID,
@@ -248,6 +367,22 @@ func (h *MariaDBDashboardHandler) SlowQueryLogs(c echo.Context) error {
 		page,
 		pageSize,
 		minDurationMs,
+		svc.MachineID,
+		search,
+		userFilter,
+		hostFilter,
+		schemaFilter,
+		dbFilter,
+		threadFilter,
+		qcHitFilter,
+		minQueryTime,
+		maxQueryTime,
+		minLockTime,
+		maxLockTime,
+		minRowsSent,
+		maxRowsSent,
+		minRowsExamined,
+		maxRowsExamined,
 	)
 	if err != nil {
 		c.Logger().Errorf("[mariadb-slow-query-logs] fetch failed: %v", err)
@@ -300,6 +435,7 @@ func (h *MariaDBDashboardHandler) ErrorLogs(c echo.Context) error {
 		startNs,
 		endNs,
 		limit,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[mariadb-error-logs] query failed: %v", err)

@@ -109,8 +109,6 @@ export type ApacheExplorerParams = {
 export type ApacheDomainItem = {
   domain: string
   enabled: boolean
-  is_default: boolean
-  is_shared_log: boolean
 }
 
 export type ApacheSlowRequestsListResult = {

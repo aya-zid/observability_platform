@@ -32,13 +32,6 @@ type NginxVirtualHost struct {
 	// Enabled controls whether this row is included in the OTel collector config.
 	Enabled bool `gorm:"type:boolean;not null"`
 
-	// IsSharedLog is true when multiple domains write to the same log file.
-	// The platform will parse the host= field to split traffic by domain.
-	IsSharedLog bool `gorm:"type:boolean;not null;default:false"`
-
-	// IsDefault is true for the catch-all / default_server block.
-	IsDefault bool `gorm:"type:boolean;not null;default:false"`
-
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`
 }

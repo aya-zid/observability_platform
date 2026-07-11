@@ -875,22 +875,24 @@ BEFORE YOU START — DO NOT
 
 PART 1 — Configure PHP-FPM Pool
 
-PHP-FPM configuration is split between a main config file (php-fpm.conf) and per-pool files (www.conf).
+PHP-FPM configuration is split between a main config file (php-fpm.conf) and per-pool files (e.g. www.conf).
 Almost everything you need to change is in the pool file.
 
 Step 1 — Find your pool config file
 
 ` + "```bash" + `
-# Debian/Ubuntu
-sudo find /etc/php -name "www.conf" 2>/dev/null
+# Debian/Ubuntu — list all pool configs (pool name may differ from "www")
+sudo ls /etc/php/*/fpm/pool.d/*.conf 2>/dev/null
 
 # RHEL/CentOS/Fedora
-sudo find /etc/php-fpm.d -name "www.conf" 2>/dev/null
+sudo ls /etc/php-fpm.d/*.conf 2>/dev/null
 ` + "```" + `
 
-Common paths:
+Common pool file paths (your pool name may differ):
 - /etc/php/8.x/fpm/pool.d/www.conf   (Debian/Ubuntu)
 - /etc/php-fpm.d/www.conf             (RHEL/CentOS)
+
+**Important**: If you have multiple pools, repeat Steps 2–4 for each pool config file. Each pool gets its own status endpoint, socket, and log files.
 
 Step 2 — Enable the status endpoint
 
@@ -904,12 +906,11 @@ pm.status_path = /status
 ping.path = /ping
 ping.response = pong
 
-; Suppress health-check requests from the access log (PHP-FPM 8.0+)
-; These are only noise — the exporter and OPcache collector hit /status
-; and /internal/opcache-collector every few seconds.
-; NOTE: /status?json&full (used by php-fpm_exporter) is NOT suppressible here
-; because PHP-FPM ignores suppress_path when query parameters are present.
-; Those lines are filtered at the agent level by the OTel Collector instead.
+; Suppress health-check noise from the access log (PHP-FPM 8.0+ only)
+; Check version first: php-fpm --version | head -1
+; On PHP 7.4 these lines crash PHP-FPM on startup — skip this block entirely.
+; Note: /status?json&full (with query string) cannot be suppressed here.
+; The platform agent filters those lines automatically.
 access.suppress_path[] = /status
 access.suppress_path[] = /ping
 access.suppress_path[] = /internal/opcache-collector
@@ -917,57 +918,39 @@ access.suppress_path[] = /internal/opcache-collector
 
 Step 3 — Enable the access log with the platform format
 
-Find the access.log and access.format lines (they are commented out by default) and set them:
+Find the access.log and access.format lines (they are commented out by default) and set them.
+Use the $pool variable so each pool gets its own log file automatically:
 
 ` + "```ini" + `
-; PHP-FPM access log — independent of Nginx/Apache access logs
-; Provides script-level memory and CPU data unavailable in web server logs
-access.log = /var/log/php-fpm/access.log
+; $pool expands to pool name (e.g. www.access.log, api.access.log)
+access.log = /var/log/php-fpm/$pool.access.log
 
-; Platform log format — do not change this format
-; Fields: pool | pid | method | uri+querystring | status | script | duration_ms | memory_kb | cpu_pct
-; %R (remote IP) omitted — shows "-" on Unix sockets, use Nginx access log for client IPs
-; %{milli}d = milliseconds | %{kilo}M = kilobytes | %Q = literal "?" only when query string exists
+; Platform format — fields: pool | pid | method+uri | status | script | ms | KB | CPU%
 access.format = "%n %p \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
 ` + "```" + `
 
 Step 4 — Enable the slow log
 
 ` + "```ini" + `
-; Log requests that exceed this threshold (in seconds)
-; Includes a full PHP backtrace showing which function was slow
+; $pool expands to pool name (e.g. www.slow.log, api.slow.log)
 request_slowlog_timeout = 5
-slowlog = /var/log/php-fpm/slow.log
+slowlog = /var/log/php-fpm/$pool.slow.log
 ` + "```" + `
 
 Step 5 — Check and configure the error log path
 
-First check where PHP-FPM is currently writing errors. Do not skip this step — on Debian/Ubuntu the
-default is a versioned path like /var/log/php8.4-fpm.log (not a subdirectory), so blindly adding a
-new path would create a second log file while errors keep going to the original one.
+The error log is set in php-fpm.conf (the main config), not in pool files. Check where it is currently:
 
 ` + "```bash" + `
-# Debian/Ubuntu — check the main php-fpm.conf for the current error_log
-grep "^error_log" /etc/php/*/fpm/php-fpm.conf
-
-# RHEL/CentOS
-grep "^error_log" /etc/php-fpm.conf
+grep "^error_log" /etc/php/*/fpm/php-fpm.conf     # Debian/Ubuntu
+grep "^error_log" /etc/php-fpm.conf                # RHEL/CentOS
 ` + "```" + `
 
-You will see one of three situations:
+Three possible results and what to do:
 
-Situation A — Already set to a file path (e.g. /var/log/php8.4-fpm.log):
-Update it to the unified platform path so all versions log to the same place:
-
-` + "```ini" + `
-error_log = /var/log/php-fpm/error.log
-` + "```" + `
-
-Situation B — Set to /dev/stderr (logs go to journald):
-Change it to the file path above and follow the JournaledLogGuide note at the bottom.
-
-Situation C — Line is commented out or missing:
-Add it:
+- Set to a file path (e.g. /var/log/php-fpm.log): change it to the unified path below.
+- Set to /dev/stderr (journald): change it to the path below (see JournaledLogGuide if you prefer journald).
+- Missing or commented out: add the line below.
 
 ` + "```ini" + `
 error_log = /var/log/php-fpm/error.log
@@ -977,35 +960,49 @@ After any change to php-fpm.conf, restart PHP-FPM (see Step 6).
 
 Step 6 — Create the log directory and restart
 
+Always test the config before restarting — a typo can take your site down.
+
 ` + "```bash" + `
 sudo mkdir -p /var/log/php-fpm
 sudo chown www-data:www-data /var/log/php-fpm
 sudo chmod 755 /var/log/php-fpm
 
-# Debian/Ubuntu
-sudo systemctl restart php8.4-fpm
+# Test config before restarting (prevents downtime from config errors)
+# Replace X.Y with your PHP version (e.g. php-fpm8.2 --test)
+sudo php-fpmX.Y --test   # Debian/Ubuntu
+# OR
+sudo php-fpm --test      # RHEL/CentOS
 
-# RHEL/CentOS
-sudo systemctl restart php-fpm
+# Restart only if the test passes
+sudo systemctl restart phpX.Y-fpm   # Debian/Ubuntu — replace X.Y
+# OR
+sudo systemctl restart php-fpm      # RHEL/CentOS
 ` + "```" + `
 
 Step 7 — Verify log files are being created
 
-` + "```bash" + `
-# 1. Access log (generate a request first, then check)
-sudo tail -n 5 /var/log/php-fpm/access.log
+Replace [pool] with your actual pool name (e.g. www, api, etc.).
 
-# 2. Error log (should exist even if empty)
+` + "```bash" + `
+# 1. List all PHP-FPM log files
+sudo ls -la /var/log/php-fpm/
+
+# 2. Access log (generate a request first, then check)
+sudo tail -n 5 /var/log/php-fpm/[pool].access.log
+
+# 3. Error log (should exist even if empty)
 sudo ls -la /var/log/php-fpm/error.log
 
-# 3. Slow log (will be empty until a slow request is made)
-sudo ls -la /var/log/php-fpm/slow.log
+# 4. Slow log (will be empty until a slow request is made)
+sudo ls -la /var/log/php-fpm/[pool].slow.log
 ` + "```" + `
+
+If you have multiple pools, repeat for each pool: ` + "`[pool1].access.log`" + `, ` + "`[pool2].access.log`" + `, etc.
 
 Expected access log line:
 
 ` + "```" + `
-www 12345 "GET /index.php?page=1" 200 /var/www/html/index.php 45 2048 1.23
+[pool-name] 12345 "GET /index.php?page=1" 200 /var/www/html/index.php 45 2048 1.23
 ` + "```" + `
 
 Fields: pool | pid | "method uri?querystring" | status | script | duration_ms | memory_kb | cpu_pct
@@ -1022,13 +1019,13 @@ Step 1 — Find your PHP-FPM socket path
 
 ` + "```bash" + `
 # Check what socket PHP-FPM is using
-sudo grep "listen\s*=" /etc/php/*/fpm/pool.d/www.conf 2>/dev/null || \
-sudo grep "listen\s*=" /etc/php-fpm.d/www.conf 2>/dev/null
+# Check all pool configs (replace *.conf with your actual pool file)
+sudo grep "listen\s*=" /etc/php/*/fpm/pool.d/*.conf 2>/dev/null || \
+sudo grep "listen\s*=" /etc/php-fpm.d/*.conf 2>/dev/null
 ` + "```" + `
 
-Common paths:
-- /run/php/php8.4-fpm.sock
-- /run/php/php8.1-fpm.sock
+Common paths (these are examples — your actual paths will differ):
+- /run/php/php-fpm.sock or /run/php/phpX.Y-fpm.sock
 - /var/run/php-fpm/www.sock
 
 Note your socket path — you will need it in Step 3.
@@ -1054,20 +1051,21 @@ sudo usermod -aG www-data phpfpm-exporter
 
 Step 4 — Create the systemd service
 
-Replace /run/php/php8.4-fpm.sock with the socket path you found in Step 1.
+Create one --phpfpm.scrape-uri flag per pool, using the socket paths you found in Step 1.
 
 ` + "```bash" + `
 sudo tee /etc/systemd/system/phpfpm-exporter.service <<EOF
 [Unit]
 Description=PHP-FPM Exporter
-After=network.target php8.4-fpm.service
+After=network.target
 
 [Service]
 Type=simple
 User=phpfpm-exporter
 Group=phpfpm-exporter
 ExecStart=/usr/local/bin/php-fpm_exporter server \\
-  --phpfpm.scrape-uri "unix:///run/php/php8.4-fpm.sock;/status" \\
+  --phpfpm.scrape-uri "unix:///SOCKET_PATH_1;/status" \\
+  --phpfpm.scrape-uri "unix:///SOCKET_PATH_2;/status" \\
   --web.listen-address "127.0.0.1:9253"
 Restart=always
 RestartSec=5s
@@ -1076,6 +1074,9 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 ` + "```" + `
+
+Replace SOCKET_PATH_1, SOCKET_PATH_2 etc. with the actual socket paths from Step 1.
+If you have only one pool, just use a single --phpfpm.scrape-uri flag.
 
 Step 5 — Start and verify
 
@@ -1089,40 +1090,38 @@ curl -s http://127.0.0.1:9253/metrics | grep phpfpm_up
 Expected output:
 
 ` + "```" + `
-phpfpm_up 1
+phpfpm_up{pool="www"} 1
+phpfpm_up{pool="laravel"} 1
 ` + "```" + `
 
-If phpfpm_up is 0, the exporter cannot reach the socket. Check the socket path and that the phpfpm-exporter user is in the www-data group.
-
-If you have multiple pools (e.g. www and laravel), add them as additional --phpfpm.scrape-uri flags:
-
-` + "```bash" + `
-ExecStart=/usr/local/bin/php-fpm_exporter server \
-  --phpfpm.scrape-uri "unix:///run/php/php8.4-fpm.sock;/status" \
-  --phpfpm.scrape-uri "unix:///run/php/php8.4-fpm-laravel.sock;/status" \
-  --web.listen-address "127.0.0.1:9253"
-` + "```" + `
+If phpfpm_up is 0 for a pool, the exporter cannot reach that pool's socket. Check the socket path and that the phpfpm-exporter user is in the web server group.
 
 PART 3 — Configure Log Collection
 
 Your platform agent already monitors the log paths set in Part 1. No additional software is needed — just verify the paths are correct.
 
-Log path defaults:
+If you used the ` + "`$pool`" + ` variable as recommended, each pool gets its own access and slow log file:
 
-| Log | Default Path | What It Contains |
+| Log | Path Pattern | What It Contains |
 |-----|-------------|-----------------|
-| Error log | /var/log/php-fpm/error.log | Worker crashes, max children events, startup errors |
-| Access log | /var/log/php-fpm/access.log | Per-request: URI, status, script, duration, memory, CPU |
-| Slow log | /var/log/php-fpm/slow.log | Requests exceeding slowlog timeout with PHP backtrace |
+| Error log | /var/log/php-fpm/error.log | Worker crashes, max children events, startup errors (one per FPM master) |
+| Access log | /var/log/php-fpm/[pool].access.log | Per-request: URI, status, script, duration, memory, CPU (one per pool) |
+| Slow log | /var/log/php-fpm/[pool].slow.log | Requests exceeding slowlog timeout with PHP backtrace (one per pool) |
+
+Example with two pools (www and api):
+- /var/log/php-fpm/www.access.log
+- /var/log/php-fpm/www.slow.log
+- /var/log/php-fpm/api.access.log
+- /var/log/php-fpm/api.slow.log
+- /var/log/php-fpm/error.log
 
 If your distro uses different paths, update them in the platform config page:
 
 ` + "```bash" + `
-# Check actual log paths
-sudo php-fpm8.4 --test 2>&1 | grep -i log
-
-# Or check the running process config
-sudo cat /proc/$(pgrep -f php-fpm | head -1)/cmdline | tr '\0' ' '
+# Check actual log paths (replace X.Y with your PHP version)
+sudo php-fpmX.Y --test 2>&1 | grep -i log   # Debian/Ubuntu
+# OR
+sudo php-fpm --test 2>&1 | grep -i log      # RHEL/CentOS
 ` + "```" + `
 
 PART 4 — OPcache Collector (Optional — Bonus Dashboard)
@@ -1233,7 +1232,7 @@ sudo tee /opt/observability/opcache_collector.sh <<'EOF'
 
 set -euo pipefail
 
-SOCKET="/run/php/php8.4-fpm.sock"
+SOCKET="YOUR_POOL_SOCKET"   # Replace with any pool socket path from Step 1
 PHP_SCRIPT="/opt/observability/opcache_status.php"
 PROM_DIR="/var/lib/agent-prom"
 PROM_FILE="${PROM_DIR}/phpfpm_opcache.prom"
@@ -1268,7 +1267,7 @@ EOF
 sudo chmod +x /opt/observability/opcache_collector.sh
 ` + "```" + `
 
-Adjust SOCKET on line 10 to match your PHP version if needed.
+Replace YOUR_POOL_SOCKET with any pool socket path from Part 2 Step 1.
 
 If you followed Part 1 Step 2, the /internal/opcache-collector path is
 already suppressed from the access log — no extra log noise from this collector.
@@ -1279,7 +1278,7 @@ Step 4 — Create the timer
 sudo tee /etc/systemd/system/opcache-collector.service <<EOF
 [Unit]
 Description=OPcache Metrics Collector (runs once per trigger)
-After=php8.4-fpm.service
+After=php-fpm.service
 
 [Service]
 Type=oneshot
@@ -1326,13 +1325,10 @@ phpfpm_opcache_hit_rate 0.971200
 
 PART 5 — Configure in the Platform
 
-After completing Parts 1, 2, and 3 (and optionally Part 4):
+After completing Parts 1-3 (and optionally Part 4):
 
 1. Go to the service config page for PHP-FPM
-2. Set Log Paths to:
-   /var/log/php-fpm/error.log
-   /var/log/php-fpm/access.log
-   /var/log/php-fpm/slow.log
+2. Set Log Paths to all paths from Part 3 — error log plus one access and slow log per pool
 3. Set Metrics Endpoint to http://127.0.0.1:9253/metrics
 4. Set Metrics Mode to prometheus
 5. Click Install Integration
@@ -1391,22 +1387,26 @@ PART 7 — Checklist Before Clicking Install Integration
 
 - [ ] pm.status_path = /status is set in the pool config
 - [ ] access.suppress_path[] entries are set for /status, /ping, /internal/opcache-collector (/status?json&full handled by agent filter)
-- [ ] access.log is set and /var/log/php-fpm/access.log has lines after a test request
+- [ ] pm.status_path = /status is set in every pool config
+- [ ] access.suppress_path[] entries are set (PHP 8.0+ only) or you know they are absent on 7.4
+- [ ] access.log is set and /var/log/php-fpm/[pool].access.log has lines after a test request (repeat per pool)
 - [ ] access.format is exactly "%n %p \"%m %r%Q%q\" %s %f %{milli}d %{kilo}M %C"
-- [ ] slowlog is set and request_slowlog_timeout is set
-- [ ] curl http://127.0.0.1:9253/metrics | grep phpfpm_up returns phpfpm_up 1
-- [ ] /var/log/php-fpm/error.log exists (may be empty if no errors yet)
-- [ ] You have entered all three log paths and the metrics endpoint in the platform config page
+- [ ] slowlog and request_slowlog_timeout are both set in every pool config
+- [ ] curl http://127.0.0.1:9253/metrics | grep phpfpm_up returns phpfpm_up{pool="..."} 1 for every pool
+- [ ] /var/log/php-fpm/error.log exists
+- [ ] All log paths and the metrics endpoint are entered in the platform config page
 - [ ] (Optional) /var/lib/agent-prom/phpfpm_opcache.prom exists if OPcache collector is enabled`,
 		JournaledLogGuide: `PHP-FPM may be logging to journald if error_log is not set or points to /dev/stderr.
 
-Check:
+Check (replace the unit name with your PHP-FPM service name):
 
 ` + "```bash" + `
-sudo journalctl -u php8.4-fpm --no-pager | head -10
+sudo journalctl -u php-fpm --no-pager | head -10    # RHEL/CentOS
+# OR
+sudo journalctl -u phpX.Y-fpm --no-pager | head -10  # Debian/Ubuntu — replace X.Y
 ` + "```" + `
 
-If you see PHP-FPM output there, follow PART 1 Step 5 in the LogsGuide above to set error_log to a static file path.`,
+If you see PHP-FPM output there, follow PART 1 Step 5 to set error_log to a file path.`,
 		DetectionHints: []string{"php-fpm", "php8", "php7", "php-fpm8", "php-fpm7"},
 		NVD:            &NVDProduct{Vendor: "php", Product: "php"},
 	},

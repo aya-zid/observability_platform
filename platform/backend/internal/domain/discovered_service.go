@@ -2,15 +2,6 @@ package domain
 
 import "time"
 
-type IntegrationStatus string
-
-const (
-	IntegrationStatusNotInstalled IntegrationStatus = "not_installed"
-	IntegrationStatusPending      IntegrationStatus = "pending"
-	IntegrationStatusActive       IntegrationStatus = "active"
-	IntegrationStatusError        IntegrationStatus = "error"
-)
-
 type VulnScanStatus string
 
 const (
@@ -41,9 +32,8 @@ type DiscoveredService struct {
 	UsesJournald bool   `gorm:"type:boolean;not null;default:false"`
 	UsesSyslog   bool   `gorm:"type:boolean;not null;default:false"`
 
-	LogCollectionOn    bool              `gorm:"type:boolean;not null;default:false"`
-	MetricCollectionOn bool              `gorm:"type:boolean;not null;default:false"`
-	IntegrationStatus  IntegrationStatus `gorm:"type:varchar(30);not null;default:'not_installed'"`
+	LogCollectionOn    bool   `gorm:"type:boolean;not null;default:false"`
+	MetricCollectionOn bool   `gorm:"type:boolean;not null;default:false"`
 
 	VulnerabilityScanSupported bool           `gorm:"type:boolean;not null;default:false"`
 	VulnerabilityScanStatus    VulnScanStatus `gorm:"type:varchar(20);not null;default:'not_scanned'"`

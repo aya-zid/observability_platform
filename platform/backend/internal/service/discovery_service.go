@@ -63,8 +63,18 @@ func (s *DiscoveryService) ListHosts(ctx context.Context, tenantID uint) ([]dto.
 		return nil, err
 	}
 
+	now := time.Now()
 	out := make([]dto.DiscoveryHostListItem, 0, len(hosts))
 	for _, host := range hosts {
+		elapsed := now.Sub(host.LastSeenAt)
+		status := "offline"
+		switch {
+		case elapsed <= 7*time.Minute:
+			status = "online"
+		case elapsed <= 15*time.Minute:
+			status = "warning"
+		}
+
 		out = append(out, dto.DiscoveryHostListItem{
 			MachineID:    host.MachineID,
 			Hostname:     host.Hostname,
@@ -72,6 +82,7 @@ func (s *DiscoveryService) ListHosts(ctx context.Context, tenantID uint) ([]dto.
 			Arch:         host.Arch,
 			AgentVersion: host.AgentVersion,
 			LastSeenAt:   host.LastSeenAt.UTC().Format(time.RFC3339),
+			Status:       status,
 		})
 	}
 	return out, nil
@@ -113,7 +124,6 @@ func (s *DiscoveryService) ListServices(ctx context.Context, tenantID uint, mach
 			LogPathSource:      logPathSource,
 			LogCollectionOn:    row.LogCollectionOn,
 			MetricCollectionOn: row.MetricCollectionOn,
-			IntegrationStatus:  string(row.IntegrationStatus),
 			LoggingMode:        row.LoggingMode,
 			VulnScanSupported:  scannable,
 			VulnScanStatus:     string(row.VulnerabilityScanStatus),
@@ -217,7 +227,6 @@ func (s *DiscoveryService) GetServiceDetail(ctx context.Context, tenantID uint, 
 		DetectedLogPaths:         paths,
 		LogCollectionOn:          service.LogCollectionOn,
 		MetricCollectionOn:       service.MetricCollectionOn,
-		IntegrationStatus:        string(service.IntegrationStatus),
 		VulnScanSupported:        scannable,
 		VulnScanStatus:           string(service.VulnerabilityScanStatus),
 		LastVulnScanAt:           formatTimePtr(service.LastVulnerabilityScanAt),
@@ -243,20 +252,16 @@ type webServerVirtualHostRow struct {
 	LogPath     string
 	Source      string
 	Enabled     bool
-	IsSharedLog bool
-	IsDefault   bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
 
 // groupWebServerVirtualHosts merges DB rows (one per log_kind) into one response
-// object per domain. The key is (domain, is_default, is_shared_log).
+// object per domain. The key is domain.
 // We use the earliest row's ID and timestamps for the merged entry.
 func groupWebServerVirtualHosts(rows []webServerVirtualHostRow) []dto.WebServerVirtualHostResponse {
 	type groupKey struct {
 		domain      string
-		isDefault   bool
-		isSharedLog bool
 	}
 
 	// Preserve insertion order using a slice of keys
@@ -266,8 +271,6 @@ func groupWebServerVirtualHosts(rows []webServerVirtualHostRow) []dto.WebServerV
 	for _, vh := range rows {
 		key := groupKey{
 			domain:      vh.Domain,
-			isDefault:   vh.IsDefault,
-			isSharedLog: vh.IsSharedLog,
 		}
 
 		entry, exists := groups[key]
@@ -276,8 +279,6 @@ func groupWebServerVirtualHosts(rows []webServerVirtualHostRow) []dto.WebServerV
 				ID:          vh.ID,
 				Domain:      vh.Domain,
 				Enabled:     vh.Enabled,
-				IsSharedLog: vh.IsSharedLog,
-				IsDefault:   vh.IsDefault,
 				Source:      vh.Source,
 				CreatedAt:   vh.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:   vh.UpdatedAt.Format(time.RFC3339),
@@ -318,8 +319,6 @@ func groupNginxVirtualHosts(rows []domain.NginxVirtualHost) []dto.WebServerVirtu
 			LogPath:     row.LogPath,
 			Source:      row.Source,
 			Enabled:     row.Enabled,
-			IsSharedLog: row.IsSharedLog,
-			IsDefault:   row.IsDefault,
 			CreatedAt:   row.CreatedAt,
 			UpdatedAt:   row.UpdatedAt,
 		})
@@ -337,8 +336,6 @@ func groupApacheVirtualHosts(rows []domain.ApacheVirtualHost) []dto.WebServerVir
 			LogPath:     row.LogPath,
 			Source:      row.Source,
 			Enabled:     row.Enabled,
-			IsSharedLog: row.IsSharedLog,
-			IsDefault:   row.IsDefault,
 			CreatedAt:   row.CreatedAt,
 			UpdatedAt:   row.UpdatedAt,
 		})
@@ -347,18 +344,12 @@ func groupApacheVirtualHosts(rows []domain.ApacheVirtualHost) []dto.WebServerVir
 }
 
 func (s *DiscoveryService) UpdateCollection(ctx context.Context, tenantID uint, serviceID uint, req dto.UpdateCollectionRequest) error {
-	status := domain.IntegrationStatusNotInstalled
-	if req.LogCollectionOn || req.MetricCollectionOn {
-		status = domain.IntegrationStatusPending
-	}
-
 	return s.discoveryRepo.UpdateServiceCollectionCtx(
 		ctx,
 		tenantID,
 		serviceID,
 		req.LogCollectionOn,
 		req.MetricCollectionOn,
-		status,
 	)
 }
 
@@ -392,25 +383,21 @@ func (s *DiscoveryService) UpdateServiceConfig(ctx context.Context, tenantID uin
 
 				if vhReq.AccessLog != "" {
 					vhosts = append(vhosts, domain.NginxVirtualHost{
-						Domain:      domainName,
-						LogKind:     "access",
-						LogPath:     strings.TrimSpace(vhReq.AccessLog),
-						Source:      "user",
-						Enabled:     vhReq.Enabled,
-						IsSharedLog: vhReq.IsSharedLog,
-						IsDefault:   vhReq.IsDefault,
+						Domain:  domainName,
+						LogKind: "access",
+						LogPath: strings.TrimSpace(vhReq.AccessLog),
+						Source:  "user",
+						Enabled: vhReq.Enabled,
 					})
 				}
 
 				if vhReq.ErrorLog != "" {
 					vhosts = append(vhosts, domain.NginxVirtualHost{
-						Domain:      domainName,
-						LogKind:     "error",
-						LogPath:     strings.TrimSpace(vhReq.ErrorLog),
-						Source:      "user",
-						Enabled:     vhReq.Enabled,
-						IsSharedLog: vhReq.IsSharedLog,
-						IsDefault:   vhReq.IsDefault,
+						Domain:  domainName,
+						LogKind: "error",
+						LogPath: strings.TrimSpace(vhReq.ErrorLog),
+						Source:  "user",
+						Enabled: vhReq.Enabled,
 					})
 				}
 			}
@@ -429,25 +416,21 @@ func (s *DiscoveryService) UpdateServiceConfig(ctx context.Context, tenantID uin
 
 				if vhReq.AccessLog != "" {
 					vhosts = append(vhosts, domain.ApacheVirtualHost{
-						Domain:      domainName,
-						LogKind:     "access",
-						LogPath:     strings.TrimSpace(vhReq.AccessLog),
-						Source:      "user",
-						Enabled:     vhReq.Enabled,
-						IsSharedLog: vhReq.IsSharedLog,
-						IsDefault:   vhReq.IsDefault,
+						Domain:  domainName,
+						LogKind: "access",
+						LogPath: strings.TrimSpace(vhReq.AccessLog),
+						Source:  "user",
+						Enabled: vhReq.Enabled,
 					})
 				}
 
 				if vhReq.ErrorLog != "" {
 					vhosts = append(vhosts, domain.ApacheVirtualHost{
-						Domain:      domainName,
-						LogKind:     "error",
-						LogPath:     strings.TrimSpace(vhReq.ErrorLog),
-						Source:      "user",
-						Enabled:     vhReq.Enabled,
-						IsSharedLog: vhReq.IsSharedLog,
-						IsDefault:   vhReq.IsDefault,
+						Domain:  domainName,
+						LogKind: "error",
+						LogPath: strings.TrimSpace(vhReq.ErrorLog),
+						Source:  "user",
+						Enabled: vhReq.Enabled,
 					})
 				}
 			}
@@ -485,7 +468,16 @@ func normalizedLogPathSource(source string) string {
 func effectiveLogPaths(service *domain.DiscoveredService, paths []string) []string {
 	out := make([]string, 0, len(paths))
 	if service.ConfirmedLogPath != "" {
-		return []string{service.ConfirmedLogPath}
+		var parts []string
+		for _, part := range strings.Split(service.ConfirmedLogPath, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+		if len(parts) > 0 {
+			return parts
+		}
 	}
 
 	out = append(out, paths...)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strconv"
@@ -157,6 +158,7 @@ func NewPostgresDashboardService(cfg *config.Config, redisClient *redis.Client) 
 func (s *PostgresDashboardService) GetConfigSnapshot(
 	ctx context.Context,
 	tenantID uint,
+	hostID string,
 ) (*PostgresConfigSnapshot, error) {
 	now := time.Now()
 	result := &PostgresConfigSnapshot{
@@ -167,7 +169,7 @@ func (s *PostgresDashboardService) GetConfigSnapshot(
 	for groupIndex := range result.Groups {
 		for settingIndex := range result.Groups[groupIndex].Settings {
 			setting := &result.Groups[groupIndex].Settings[settingIndex]
-			series, err := s.base.vmQueryInstant(ctx, tenantID, setting.Name, now.Unix())
+			series, err := s.base.vmQueryInstant(ctx, tenantID, setting.Name, now.Unix(), hostID, "postgres")
 			if err != nil {
 				continue
 			}
@@ -189,6 +191,7 @@ func (s *PostgresDashboardService) GetDashboardSummary(
 	serviceName string,
 	startNs, endNs int64,
 	step string,
+	hostID string,
 ) (*PostgresDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -203,7 +206,7 @@ func (s *PostgresDashboardService) GetDashboardSummary(
 		}
 	}
 
-	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step)
+	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +227,7 @@ func (s *PostgresDashboardService) fetchDashboard(
 	serviceName string,
 	startNs, endNs int64,
 	step string,
+	hostID string,
 ) (*PostgresDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -242,7 +246,13 @@ func (s *PostgresDashboardService) fetchDashboard(
 	}
 
 	query := func(q string) vR {
-		data, err := s.base.vmQueryRange(ctx, tenantID, q, startSec, endSec, step)
+		data, err := s.base.vmQueryRange(ctx, tenantID, q, startSec, endSec, step, hostID, "postgres")
+		if err != nil {
+			log.Printf("[postgres] vm query error: %v | query: %s", err, q)
+		}
+		if len(data) == 0 && err == nil {
+			log.Printf("[postgres] vm query returned empty data | query: %s", q)
+		}
 		return vR{data: data, err: err}
 	}
 	logQuery := func(q string, limit int) logR {
@@ -319,7 +329,7 @@ func (s *PostgresDashboardService) fetchDashboard(
 		}()
 	}
 
-	baseSelector := postgresLokiSelector(serviceName)
+	baseSelector := postgresLokiSelector(serviceName, hostID)
 	logQueries := buildPostgresLogQueries(baseSelector)
 
 	const dashboardPreviewLimit = 20
@@ -443,7 +453,7 @@ func (s *PostgresDashboardService) fetchDashboard(
 		15,
 	)
 
-	summary.LogSummary = s.countParsedLogCategories(ctx, tenantUUID, serviceName, startNs, endNs)
+	summary.LogSummary = s.countParsedLogCategories(ctx, tenantUUID, serviceName, startNs, endNs, hostID)
 
 	summary.RecentLogs = mergePostgresLogEvents(dashboardPreviewLimit,
 		logResults["errors"].entries,
@@ -458,14 +468,6 @@ func (s *PostgresDashboardService) fetchDashboard(
 	return summary, nil
 }
 
-var monitoringUsers = map[string]struct{}{
-	"postgres_exporter": {},
-	"pgexporter":        {},
-	"monitoring":        {},
-}
-
-// ── Dedicated Logs Endpoint ──────────────────────────────────────────────────
-
 func (s *PostgresDashboardService) GetLogs(
 	ctx context.Context,
 	tenantUUID string,
@@ -473,9 +475,9 @@ func (s *PostgresDashboardService) GetLogs(
 	startNs, endNs int64,
 	category string,
 	search string,
-	includeMonitoring bool,
 	page int,
 	pageSize int,
+	hostID string,
 ) (*PostgresLogsPage, error) {
 	if page < 1 {
 		page = 1
@@ -484,7 +486,7 @@ func (s *PostgresDashboardService) GetLogs(
 		pageSize = 100
 	}
 
-	baseSelector := postgresLokiSelector(serviceName)
+	baseSelector := postgresLokiSelector(serviceName, hostID)
 	lokiQuery := postgresLogsLokiQuery(baseSelector, category)
 
 	// Fetch all matching logs using our helper
@@ -520,44 +522,6 @@ func (s *PostgresDashboardService) GetLogs(
 		events = filtered
 	}
 
-	// Hide monitoring user connection/disconnection events by default
-	if !includeMonitoring {
-		// Build port-to-user map so we can correlate connection received
-		// lines (which have no user) to the full session. All connection
-		// and disconnection events carry the client host:port in the
-		// Client field (e.g. "::1(58254)"), even when the message body
-		// does not contain "port=XXXXX".
-		portToUser := make(map[string]string)
-		for _, ev := range events {
-			if ev.Category == "connection" || ev.Category == "disconnection" {
-				if ev.User != "" && ev.User != "-" {
-					if matches := clientPortRE.FindStringSubmatch(ev.Client); len(matches) == 2 {
-						portToUser[matches[1]] = ev.User
-					}
-				}
-			}
-		}
-
-		filtered := events[:0]
-		for _, ev := range events {
-			if ev.Category == "connection" || ev.Category == "disconnection" {
-				effectiveUser := ev.User
-				if effectiveUser == "" || effectiveUser == "-" {
-					if matches := clientPortRE.FindStringSubmatch(ev.Client); len(matches) == 2 {
-						if u, ok := portToUser[matches[1]]; ok {
-							effectiveUser = u
-						}
-					}
-				}
-				if isMonitoringUser(effectiveUser) {
-					continue
-				}
-			}
-			filtered = append(filtered, ev)
-		}
-		events = filtered
-	}
-
 	total := len(events)
 	offset := (page - 1) * pageSize
 	if offset >= total {
@@ -589,8 +553,9 @@ func (s *PostgresDashboardService) countParsedLogCategories(
 	tenantUUID string,
 	serviceName string,
 	startNs, endNs int64,
+	hostID string,
 ) PostgresLogSummary {
-	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, postgresLokiSelector(serviceName), startNs, endNs)
+	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, postgresLokiSelector(serviceName, hostID), startNs, endNs)
 	if err != nil {
 		return PostgresLogSummary{}
 	}
@@ -783,12 +748,20 @@ func parsePostgresHeader(line string) (postgresLogHeader, bool) {
 	return postgresLogHeader{}, false
 }
 
-func postgresLokiSelector(serviceName string) string {
+func postgresLokiSelector(serviceName, hostID string) string {
 	serviceName = strings.TrimSpace(serviceName)
+	// service_name is an indexed label (must be in {}).
+	// host_id is structured metadata set by OTel - use pipeline filter.
+	selector := ""
 	if serviceName == "" {
-		return `{service_name=~"postgres.*|postgresql.*"}`
+		selector = `{service_name=~"postgres.*|postgresql.*"}`
+	} else {
+		selector = fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
 	}
-	return fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
+	if hostID != "" {
+		selector += fmt.Sprintf(` | host_id="%s"`, lokiLabelValue(hostID))
+	}
+	return selector
 }
 
 func postgresLogsLokiQuery(baseSelector, category string) string {
@@ -817,11 +790,6 @@ func postgresLogCategoryNeedsRawLines(category string) bool {
 	// PostgreSQL continuation lines and server-process headers make Loki-only
 	// prefilters too easy to under-fetch, so the logs page filters after parsing.
 	return strings.TrimSpace(strings.ToLower(category)) != ""
-}
-
-func isMonitoringUser(user string) bool {
-	_, ok := monitoringUsers[user]
-	return ok
 }
 
 func postgresLogMatchesSearch(ev PostgresLogEvent, needle string) bool {
@@ -863,7 +831,17 @@ func singleVMSeries(series []VMSeries, key string) []TimePoint {
 func mergeNamedVMSeries(seriesByName map[string][]VMSeries) []TimePoint {
 	timeMap := map[float64]TimePoint{}
 	for name, series := range seriesByName {
+		hasLabeled := false
 		for _, item := range series {
+			if len(item.Metric) > 0 {
+				hasLabeled = true
+				break
+			}
+		}
+		for _, item := range series {
+			if hasLabeled && len(item.Metric) == 0 {
+				continue
+			}
 			for _, sample := range item.Values {
 				if _, ok := timeMap[sample[0]]; !ok {
 					timeMap[sample[0]] = TimePoint{"time": sample[0]}
@@ -972,7 +950,6 @@ var (
 	// Matches a bare OTel/Loki collection-timestamp prefix on continuation lines,
 	// e.g. "2026-05-12 17:36:50.201 " — stripped before appending to the primary entry.
 	continuationLeadingTsRE = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} [0-9:.]+ `)
-	clientPortRE            = regexp.MustCompile(`\((\d+)\)`)
 )
 
 func mergePostgresLogEvents(limit int, groups ...[]LokiLogEntry) []PostgresLogEvent {

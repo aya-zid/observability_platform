@@ -4,29 +4,29 @@ import AppLayout from "@/components/layout/AppLayout"
 import LoginPage from "@/pages/auth/LoginPage"
 import SignupPage from "@/pages/auth/SignupPage"
 import AlertsPage from "@/pages/alerts/AlertsPage"
-import IntegrationsPage from "@/pages/integrations/IntegrationsPage"
-import ServiceConfigPage from "@/pages/services/ServiceConfigPage"
-import { NginxDashboardPage } from "@/pages/integrations/NginxDashboardPage"
-import { NginxLogsPage } from "@/pages/integrations/NginxLogsPage"
-import { NginxSlowRequestsPage } from "@/pages/integrations/NginxSlowRequestsPage"
-import { ApacheDashboardPage } from "@/pages/integrations/ApacheDashboardPage"
-import { ApacheLogsPage } from "@/pages/integrations/ApacheLogsPage"
-import { ApacheSlowRequestsPage } from "@/pages/integrations/ApacheSlowRequestsPage"
-import { PostgresDashboardPage } from "@/pages/integrations/PostgresDashboardPage"
-import { PostgresConfigPage } from "@/pages/integrations/PostgresConfigPage"
-import { PostgresLogsPage } from "@/pages/integrations/PostgresLogsPage"
-import { PHPFPMDashboardPage } from "@/pages/integrations/PHPFPMDashboardPage"
-import { PHPFPMLogsPage } from "@/pages/integrations/PHPFPMLogsPage"
-import { RedisDashboardPage } from "@/pages/integrations/RedisDashboardPage"
-import { RedisLogsPage } from "@/pages/integrations/RedisLogsPage"
-import { MariaDBDashboardPage } from "@/pages/integrations/MariaDBDashboardPage"
-import { MariaDBLogsPage } from "@/pages/integrations/MariaDBLogsPage"
-import LogsPage from "@/pages/logs/LogsPage"
-import MetricsPage from "@/pages/metrics/MetricsPage"
+import ServicesPage from "@/pages/service/ServicesPage"
+import ServiceConfigPage from "@/pages/service/ServiceConfigPage"
+import { NginxDashboardPage } from "@/pages/service/nginx/NginxDashboardPage"
+import { NginxLogsPage } from "@/pages/service/nginx/NginxLogsPage"
+import { NginxSlowRequestsPage } from "@/pages/service/nginx/NginxSlowRequestsPage"
+import { ApacheDashboardPage } from "@/pages/service/apache/ApacheDashboardPage"
+import { ApacheLogsPage } from "@/pages/service/apache/ApacheLogsPage"
+import { ApacheSlowRequestsPage } from "@/pages/service/apache/ApacheSlowRequestsPage"
+import { PostgresDashboardPage } from "@/pages/service/postgresql/PostgresDashboardPage"
+import { PostgresConfigPage } from "@/pages/service/postgresql/PostgresConfigPage"
+import { PostgresLogsPage } from "@/pages/service/postgresql/PostgresLogsPage"
+import { PHPFPMDashboardPage } from "@/pages/service/phpfpm/PHPFPMDashboardPage"
+import { PHPFPMLogsPage } from "@/pages/service/phpfpm/PHPFPMLogsPage"
+import { RedisDashboardPage } from "@/pages/service/redis/RedisDashboardPage"
+import { RedisLogsPage } from "@/pages/service/redis/RedisLogsPage"
+import { MariaDBDashboardPage } from "@/pages/service/mariadb/MariaDBDashboardPage"
+import { MariaDBLogsPage } from "@/pages/service/mariadb/MariaDBLogsPage"
+import HostsPage from "@/pages/hosts/HostsPage"
+import HostDetailPage from "@/pages/hosts/HostDetailPage"
+import { HostLogsPage } from "@/pages/hosts/HostLogsPage"
 import OverviewPage from "@/pages/overview/OverviewPage"
 import ProfilePage from "@/pages/profile/ProfilePage"
 import ApiKeysPage from "@/pages/settings/ApiKeysPage"
-import TracesPage from "@/pages/traces/TracesPage"
 import WelcomePage from "@/pages/welcome/WelcomePage"
 import { ProtectedRoute, PublicRoute } from "@/router/guards"
 
@@ -47,27 +47,27 @@ export const router = createBrowserRouter([
         children: [
           { path: "/", element: <Navigate to="/overview" replace /> },
           { path: "/overview", element: <OverviewPage /> },
-          { path: "/metrics", element: <MetricsPage /> },
-          { path: "/logs", element: <LogsPage /> },
-          { path: "/traces", element: <TracesPage /> },
           { path: "/alerts", element: <AlertsPage /> },
-          { path: "/integrations", element: <IntegrationsPage /> },
+          { path: "/hosts", element: <HostsPage /> },
+          { path: "/hosts/:machineId", element: <HostDetailPage /> },
+          { path: "/hosts/:machineId/logs", element: <HostLogsPage /> },
+          { path: "/services", element: <ServicesPage /> },
           { path: "/services/:id", element: <ServiceConfigPage /> },
-          { path: "/integrations/nginx-dashboard/:id", element: <NginxDashboardPage /> },
-          { path: "/integrations/nginx-dashboard/:id/slow-requests", element: <NginxSlowRequestsPage /> },
-          { path: "/integrations/nginx-logs/:id", element: <NginxLogsPage /> },
-          { path: "/integrations/apache-dashboard/:id", element: <ApacheDashboardPage /> },
-          { path: "/integrations/apache-dashboard/:id/slow-requests", element: <ApacheSlowRequestsPage /> },
-          { path: "/integrations/apache-logs/:id", element: <ApacheLogsPage /> },
-          { path: "/integrations/postgres-dashboard/:id", element: <PostgresDashboardPage /> },
-          { path: "/integrations/postgres-config/:id", element: <PostgresConfigPage /> },
-          { path: "/integrations/postgres-logs/:id", element: <PostgresLogsPage /> },
-          { path: "/integrations/phpfpm-dashboard/:id", element: <PHPFPMDashboardPage /> },
-          { path: "/integrations/phpfpm-logs/:id", element: <PHPFPMLogsPage /> },
-          { path: "/integrations/redis-dashboard/:id", element: <RedisDashboardPage /> },
-          { path: "/integrations/redis-logs/:id", element: <RedisLogsPage /> },
-          { path: "/integrations/mariadb-dashboard/:id", element: <MariaDBDashboardPage /> },
-          { path: "/integrations/mariadb-logs/:id", element: <MariaDBLogsPage /> },
+          { path: "/services/nginx-dashboard/:id", element: <NginxDashboardPage /> },
+          { path: "/services/nginx-dashboard/:id/slow-requests", element: <NginxSlowRequestsPage /> },
+          { path: "/services/nginx-logs/:id", element: <NginxLogsPage /> },
+          { path: "/services/apache-dashboard/:id", element: <ApacheDashboardPage /> },
+          { path: "/services/apache-dashboard/:id/slow-requests", element: <ApacheSlowRequestsPage /> },
+          { path: "/services/apache-logs/:id", element: <ApacheLogsPage /> },
+          { path: "/services/postgres-dashboard/:id", element: <PostgresDashboardPage /> },
+          { path: "/services/postgres-config/:id", element: <PostgresConfigPage /> },
+          { path: "/services/postgres-logs/:id", element: <PostgresLogsPage /> },
+          { path: "/services/phpfpm-dashboard/:id", element: <PHPFPMDashboardPage /> },
+          { path: "/services/phpfpm-logs/:id", element: <PHPFPMLogsPage /> },
+          { path: "/services/redis-dashboard/:id", element: <RedisDashboardPage /> },
+          { path: "/services/redis-logs/:id", element: <RedisLogsPage /> },
+          { path: "/services/mariadb-dashboard/:id", element: <MariaDBDashboardPage /> },
+          { path: "/services/mariadb-logs/:id", element: <MariaDBLogsPage /> },
           { path: "/settings/api-keys", element: <ApiKeysPage /> },
           { path: "/profile", element: <ProfilePage /> },
         ],

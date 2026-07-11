@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strconv"
@@ -125,6 +126,7 @@ func (s *RedisDashboardService) GetDashboardSummary(
 	serviceName string,
 	startNs, endNs int64,
 	step string,
+	hostID string,
 ) (*RedisDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -139,7 +141,7 @@ func (s *RedisDashboardService) GetDashboardSummary(
 		}
 	}
 
-	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step)
+	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +162,7 @@ func (s *RedisDashboardService) fetchDashboard(
 	serviceName string,
 	startNs, endNs int64,
 	step string,
+	hostID string,
 ) (*RedisDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -175,7 +178,13 @@ func (s *RedisDashboardService) fetchDashboard(
 	}
 
 	query := func(q string) vR {
-		data, err := s.base.vmQueryRange(ctx, tenantID, q, startSec, endSec, step)
+		data, err := s.base.vmQueryRange(ctx, tenantID, q, startSec, endSec, step, hostID, "redis")
+		if err != nil {
+			log.Printf("[redis] vm query error: %v | query: %s", err, q)
+		}
+		if len(data) == 0 && err == nil {
+			log.Printf("[redis] vm query returned empty data | query: %s", q)
+		}
 		return vR{data: data, err: err}
 	}
 	logQuery := func(q string, limit int) logR {
@@ -247,7 +256,7 @@ func (s *RedisDashboardService) fetchDashboard(
 		}()
 	}
 
-	baseSelector := redisLokiSelector(serviceName)
+	baseSelector := redisLokiSelector(serviceName, hostID)
 	const dashboardPreviewLimit = 20
 
 	logQueries := map[string]string{
@@ -308,6 +317,49 @@ func (s *RedisDashboardService) fetchDashboard(
 	if hits+misses > 0 {
 		v := 100 * hits / (hits + misses)
 		hitRatio = &v
+	}
+
+	{
+		cr := results["commands_rate"].data
+		log.Printf("[redis] commands_rate series=%d", len(cr))
+		for i, s := range cr {
+			lv := latestVMValue([]VMSeries{s})
+			if lv != nil {
+				log.Printf("[redis] commands_rate[%d] metric=%v values=%d lastVal=%f", i, s.Metric, len(s.Values), *lv)
+			} else {
+				log.Printf("[redis] commands_rate[%d] metric=%v values=%d lastVal=nil", i, s.Metric, len(s.Values))
+			}
+		}
+		ct := results["commands_total"].data
+		log.Printf("[redis] commands_total series=%d", len(ct))
+		for i, s := range ct {
+			lv := latestVMValue([]VMSeries{s})
+			if lv != nil {
+				log.Printf("[redis] commands_total[%d] metric=%v lastVal=%f", i, s.Metric, *lv)
+			} else {
+				log.Printf("[redis] commands_total[%d] metric=%v lastVal=nil", i, s.Metric)
+			}
+		}
+		ht := results["hits_total"].data
+		log.Printf("[redis] hits_total series=%d", len(ht))
+		for i, s := range ht {
+			lv := latestVMValue([]VMSeries{s})
+			if lv != nil {
+				log.Printf("[redis] hits_total[%d] metric=%v lastVal=%f", i, s.Metric, *lv)
+			} else {
+				log.Printf("[redis] hits_total[%d] metric=%v lastVal=nil", i, s.Metric)
+			}
+		}
+		mt := results["misses_total"].data
+		log.Printf("[redis] misses_total series=%d", len(mt))
+		for i, s := range mt {
+			lv := latestVMValue([]VMSeries{s})
+			if lv != nil {
+				log.Printf("[redis] misses_total[%d] metric=%v lastVal=%f", i, s.Metric, *lv)
+			} else {
+				log.Printf("[redis] misses_total[%d] metric=%v lastVal=nil", i, s.Metric)
+			}
+		}
 	}
 
 	summary := &RedisDashboardSummary{
@@ -373,10 +425,56 @@ func (s *RedisDashboardService) fetchDashboard(
 		"failed":     results["cmd_failures"].data,
 		"rejected":   results["cmd_rejects"].data,
 	})
-	summary.NetTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
-		"input":  results["net_input"].data,
-		"output": results["net_output"].data,
-	})
+	{
+		ni := results["net_input"].data
+		no := results["net_output"].data
+		log.Printf("[redis] net_input series=%d", len(ni))
+		if len(ni) > 0 {
+			log.Printf("[redis] net_input[0] values=%d lastVal=%v", len(ni[0].Values), latestVMValue(ni))
+			for i, s := range ni {
+				log.Printf("[redis] net_input[%d] metric=%v values=%d", i, s.Metric, len(s.Values))
+			}
+		}
+		if len(no) > 0 {
+			log.Printf("[redis] net_output[0] values=%d lastVal=%v", len(no[0].Values), latestVMValue(no))
+			for i, s := range no {
+				log.Printf("[redis] net_output[%d] metric=%v values=%d", i, s.Metric, len(s.Values))
+			}
+		}
+		netMerged := mergeNamedVMSeries(map[string][]VMSeries{"input": ni, "output": no})
+		log.Printf("[redis] NetTimeseries points=%d", len(netMerged))
+		if len(netMerged) > 0 {
+			log.Printf("[redis] NetTimeseries[0]=%v", netMerged[0])
+			log.Printf("[redis] NetTimeseries[last]=%v", netMerged[len(netMerged)-1])
+		}
+		summary.NetTimeseries = netMerged
+	}
+	{
+		cu := results["cpu_user"].data
+		cs := results["cpu_sys"].data
+		log.Printf("[redis] cpu_user series=%d", len(cu))
+		for i, s := range cu {
+			v := latestVMValue(cu)
+			if v != nil {
+				log.Printf("[redis] cpu_user[%d] metric=%v values=%d lastVal=%f", i, s.Metric, len(s.Values), *v)
+			} else {
+				log.Printf("[redis] cpu_user[%d] metric=%v values=%d lastVal=nil", i, s.Metric, len(s.Values))
+			}
+		}
+		log.Printf("[redis] cpu_sys series=%d", len(cs))
+		for i, s := range cs {
+			v := latestVMValue(cs)
+			if v != nil {
+				log.Printf("[redis] cpu_sys[%d] metric=%v values=%d lastVal=%f", i, s.Metric, len(s.Values), *v)
+			} else {
+				log.Printf("[redis] cpu_sys[%d] metric=%v values=%d lastVal=nil", i, s.Metric, len(s.Values))
+			}
+		}
+		summary.CpuTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
+			"user": cu,
+			"sys":  cs,
+		})
+	}
 	summary.CpuTimeseries = mergeNamedVMSeries(map[string][]VMSeries{
 		"user": results["cpu_user"].data,
 		"sys":  results["cpu_sys"].data,
@@ -400,7 +498,7 @@ func (s *RedisDashboardService) fetchDashboard(
 	summary.CommandsTop = topNCommands(results["commands_duration"].data, 10)
 	summary.CommandRates = latestLabelCounts(results["cmd_rate_by_cmd"].data, "cmd", 10)
 
-	summary.LogSummary = s.countRedisLogCategories(ctx, tenantUUID, serviceName, startNs, endNs)
+	summary.LogSummary = s.countRedisLogCategories(ctx, tenantUUID, serviceName, startNs, endNs, hostID)
 
 	summary.RecentLogs = mergeRedisLogEvents(dashboardPreviewLimit,
 		logResults["warnings"].entries,
@@ -423,6 +521,7 @@ func (s *RedisDashboardService) GetLogs(
 	search string,
 	page int,
 	pageSize int,
+	hostID string,
 ) (*RedisLogsPage, error) {
 	if page < 1 {
 		page = 1
@@ -431,7 +530,7 @@ func (s *RedisDashboardService) GetLogs(
 		pageSize = 100
 	}
 
-	baseSelector := redisLokiSelector(serviceName)
+	baseSelector := redisLokiSelector(serviceName, hostID)
 	lokiQuery := redisLogsLokiQuery(baseSelector, category)
 
 	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, lokiQuery, startNs, endNs)
@@ -547,8 +646,9 @@ func (s *RedisDashboardService) countRedisLogCategories(
 	tenantUUID string,
 	serviceName string,
 	startNs, endNs int64,
+	hostID string,
 ) RedisLogSummary {
-	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, redisLokiSelector(serviceName), startNs, endNs)
+	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, redisLokiSelector(serviceName, hostID), startNs, endNs)
 	if err != nil {
 		return RedisLogSummary{}
 	}
@@ -576,12 +676,20 @@ func (s *RedisDashboardService) countRedisLogCategories(
 	return summary
 }
 
-func redisLokiSelector(serviceName string) string {
+func redisLokiSelector(serviceName, hostID string) string {
 	serviceName = strings.TrimSpace(serviceName)
+	// service_name is an indexed label (must be in {}).
+	// host_id is structured metadata set by OTel - use pipeline filter.
+	selector := ""
 	if serviceName == "" {
-		return `{service_name=~"redis.*"}`
+		selector = `{service_name=~"redis.*"}`
+	} else {
+		selector = fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
 	}
-	return fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
+	if hostID != "" {
+		selector += fmt.Sprintf(` | host_id="%s"`, lokiLabelValue(hostID))
+	}
+	return selector
 }
 
 func redisLogsLokiQuery(baseSelector, category string) string {

@@ -14,6 +14,7 @@ type DiscoveryHostListItem struct {
 	Arch         string `json:"arch"`
 	AgentVersion string `json:"agent_version"`
 	LastSeenAt   string `json:"last_seen_at"`
+	Status       string `json:"status"`
 }
 
 type DiscoveryServiceListItem struct {
@@ -28,7 +29,6 @@ type DiscoveryServiceListItem struct {
 	LogPathSource      string `json:"log_path_source"`
 	LogCollectionOn    bool   `json:"log_collection_on"`
 	MetricCollectionOn bool   `json:"metric_collection_on"`
-	IntegrationStatus  string `json:"integration_status"`
 	LoggingMode        string `json:"logging_mode"`
 	VulnScanSupported  bool   `json:"vuln_scan_supported"`
 	VulnScanStatus     string `json:"vuln_scan_status"`
@@ -58,7 +58,6 @@ type DiscoveryServiceDetailResponse struct {
 	DetectedLogPaths         []string                       `json:"detected_log_paths"`
 	LogCollectionOn          bool                           `json:"log_collection_on"`
 	MetricCollectionOn       bool                           `json:"metric_collection_on"`
-	IntegrationStatus        string                         `json:"integration_status"`
 	VulnScanSupported        bool                           `json:"vuln_scan_supported"`
 	VulnScanStatus           string                         `json:"vuln_scan_status"`
 	LastVulnScanAt           string                         `json:"last_vuln_scan_at,omitempty"`
@@ -78,8 +77,6 @@ type WebServerVirtualHostResponse struct {
 	AccessLog   string `json:"access_log,omitempty"`
 	ErrorLog    string `json:"error_log,omitempty"`
 	Enabled     bool   `json:"enabled"`
-	IsSharedLog bool   `json:"is_shared_log"`
-	IsDefault   bool   `json:"is_default"`
 	Source      string `json:"source"` // "detected" or "user"
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
@@ -117,6 +114,4 @@ type WebServerVirtualHostRequest struct {
 	AccessLog   string `json:"access_log"`
 	ErrorLog    string `json:"error_log"`
 	Enabled     bool   `json:"enabled"`
-	IsSharedLog bool   `json:"is_shared_log"`
-	IsDefault   bool   `json:"is_default"`
 }

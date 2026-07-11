@@ -184,7 +184,6 @@ func (r *DiscoveryRepository) UpdateServiceCollectionCtx(
 	serviceID uint,
 	logCollectionOn bool,
 	metricCollectionOn bool,
-	status domain.IntegrationStatus,
 ) error {
 	tx := r.db.WithContext(ctx).
 		Model(&domain.DiscoveredService{}).
@@ -192,7 +191,6 @@ func (r *DiscoveryRepository) UpdateServiceCollectionCtx(
 		Updates(map[string]interface{}{
 			"log_collection_on":    logCollectionOn,
 			"metric_collection_on": metricCollectionOn,
-			"integration_status":   status,
 			"updated_at":           time.Now(),
 		})
 	if tx.Error != nil {
@@ -211,7 +209,6 @@ func (r *DiscoveryRepository) UpdateServiceCollectionByMachineNameCtx(
 	serviceName string,
 	logCollectionOn bool,
 	metricCollectionOn bool,
-	status domain.IntegrationStatus,
 ) error {
 	tx := r.db.WithContext(ctx).
 		Model(&domain.DiscoveredService{}).
@@ -219,7 +216,6 @@ func (r *DiscoveryRepository) UpdateServiceCollectionByMachineNameCtx(
 		Updates(map[string]interface{}{
 			"log_collection_on":    logCollectionOn,
 			"metric_collection_on": metricCollectionOn,
-			"integration_status":   status,
 			"updated_at":           time.Now(),
 		})
 	if tx.Error != nil {

@@ -38,6 +38,13 @@ export type MariaDBLogEvent = {
   thread_id?: string
   subsystem?: string
   duration_ms?: number
+  lock_time_s?: number
+  rows_sent?: number
+  rows_examined?: number
+  schema?: string
+  qc_hit?: string
+  rows_affected?: number
+  bytes_sent?: number
   message: string
   labels?: Record<string, string>
 }
@@ -186,9 +193,24 @@ export type MariaDBLogsParams = {
   end: string
   category?: string
   search?: string
+  user?: string
+  host?: string
+  schema?: string
+  qc_hit?: string
   page?: number
   page_size?: number
   min_duration_ms?: number
+  max_duration_ms?: number
+  min_rows_sent?: number
+  max_rows_sent?: number
+  min_rows_examined?: number
+  max_rows_examined?: number
+  min_lock_time_s?: number
+  max_lock_time_s?: number
+  min_rows_affected?: number
+  max_rows_affected?: number
+  min_bytes_sent?: number
+  max_bytes_sent?: number
 }
 
 export type MariaDBErrorLogsResponse = {
@@ -210,10 +232,14 @@ export type SlowQueryEntry = {
   user: string
   host: string
   thread_id: string
+  schema: string
+  qc_hit: string
   query_time_s: number
   lock_time_s: number
   rows_sent: number
   rows_examined: number
+  rows_affected: number
+  bytes_sent: number
   db: string
   sql: string
   lines?: string[]
@@ -233,6 +259,21 @@ export type SlowQueryLogsParams = {
   page?: number
   page_size?: number
   min_duration_ms?: number
+  search?: string
+  user?: string
+  host?: string
+  schema?: string
+  db?: string
+  thread_id?: string
+  qc_hit?: string
+  min_query_time?: number
+  max_query_time?: number
+  min_lock_time?: number
+  max_lock_time?: number
+  min_rows_sent?: number
+  max_rows_sent?: number
+  min_rows_examined?: number
+  max_rows_examined?: number
 }
 
 export async function getMariaDBLogs(
@@ -245,9 +286,21 @@ export async function getMariaDBLogs(
       end: params.end,
       category: params.category ?? "all",
       search: params.search ?? "",
+      qc_hit: params.qc_hit ?? "",
       page: params.page ?? 1,
       page_size: params.page_size ?? 100,
       min_duration_ms: params.min_duration_ms,
+      max_duration_ms: params.max_duration_ms,
+      min_rows_sent: params.min_rows_sent,
+      max_rows_sent: params.max_rows_sent,
+      min_rows_examined: params.min_rows_examined,
+      max_rows_examined: params.max_rows_examined,
+      min_lock_time_s: params.min_lock_time_s,
+      max_lock_time_s: params.max_lock_time_s,
+      min_rows_affected: params.min_rows_affected,
+      max_rows_affected: params.max_rows_affected,
+      min_bytes_sent: params.min_bytes_sent,
+      max_bytes_sent: params.max_bytes_sent,
     },
   })
   return data
@@ -264,6 +317,21 @@ export async function getMariaDBSlowQueryLogs(
       page: params.page ?? 1,
       page_size: params.page_size ?? 50,
       min_duration_ms: params.min_duration_ms,
+      search: params.search ?? "",
+      user: params.user ?? "",
+      host: params.host ?? "",
+      schema: params.schema ?? "",
+      db: params.db ?? "",
+      thread_id: params.thread_id ?? "",
+      qc_hit: params.qc_hit ?? "",
+      min_query_time: params.min_query_time,
+      max_query_time: params.max_query_time,
+      min_lock_time: params.min_lock_time,
+      max_lock_time: params.max_lock_time,
+      min_rows_sent: params.min_rows_sent,
+      max_rows_sent: params.max_rows_sent,
+      min_rows_examined: params.min_rows_examined,
+      max_rows_examined: params.max_rows_examined,
     },
   })
   return data

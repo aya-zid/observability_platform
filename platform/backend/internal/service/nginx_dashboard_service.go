@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -150,8 +152,6 @@ type NginxExplorerResult struct {
 type NginxDomainItem struct {
 	Domain      string `json:"domain"`
 	Enabled     bool   `json:"enabled"`
-	IsDefault   bool   `json:"is_default"`
-	IsSharedLog bool   `json:"is_shared_log"`
 }
 
 type NginxExplorerFilter struct {
@@ -190,6 +190,7 @@ func (s *NginxDashboardService) GetDashboardSummary(
 	step string,
 	minRT float64, // slow-request threshold in seconds; 0 means use default (1.0)
 	extraPercentiles []float64,
+	hostID string,
 ) (*NginxDashboardSummary, error) {
 	if minRT <= 0 {
 		minRT = 1.0
@@ -211,7 +212,7 @@ func (s *NginxDashboardService) GetDashboardSummary(
 		}
 	}
 
-	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, domain, startNs, endNs, step, minRT, extraPercentiles)
+	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, domain, startNs, endNs, step, minRT, extraPercentiles, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -247,9 +248,10 @@ func (s *NginxDashboardService) fetchDashboard(
 	step string,
 	minRT float64,
 	extraPercentiles []float64,
+	hostID string,
 ) (*NginxDashboardSummary, error) {
 	// "access" is the default — dashboard metrics must never touch error logs.
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 	rangeSeconds := (endNs - startNs) / int64(1e9) // integer division — keeps exact seconds
 
 	// ── Loki queries ──────────────────────────────────────────────────────────
@@ -377,7 +379,13 @@ func (s *NginxDashboardService) fetchDashboard(
 		return lR{d, e}
 	}
 	vq := func(q string) vR {
-		d, e := s.vmQueryRange(ctx, tenantID, q, startNs/int64(1e9), endNs/int64(1e9), step)
+		d, e := s.vmQueryRange(ctx, tenantID, q, startNs/int64(1e9), endNs/int64(1e9), step, hostID, "nginx")
+		if e != nil {
+			log.Printf("[nginx] vm query error: %v | query: %s", e, q)
+		}
+		if len(d) == 0 && e == nil {
+			log.Printf("[nginx] vm query returned empty data | query: %s", q)
+		}
 		return vR{d, e}
 	}
 
@@ -682,6 +690,7 @@ func (s *NginxDashboardService) GetSlowRequestsList(
 	startNs, endNs int64,
 	minRT float64,
 	page, perPage int,
+	hostID string,
 ) (*SlowRequestsListResult, error) {
 	if minRT <= 0 {
 		minRT = 1.0
@@ -692,7 +701,7 @@ func (s *NginxDashboardService) GetSlowRequestsList(
 	if page <= 0 {
 		page = 1
 	}
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 
 	rangeSeconds := (endNs - startNs) / int64(1e9)
 	if rangeSeconds < 1 {
@@ -759,10 +768,11 @@ func (s *NginxDashboardService) GetExplorerResult(
 	startNs, endNs int64,
 	step string,
 	filter NginxExplorerFilter,
+	hostID string,
 ) (*NginxExplorerResult, error) {
 	// Explorer always operates on access logs — error logs have no parseable fields
 	// for status/path/method/ip filtering.
-	base := lokiSelector(serviceName, filter.Domain, "access")
+	base := lokiSelector(serviceName, filter.Domain, "access", hostID)
 	filterChain := base + " " + parseExpr
 
 	if filter.IP != "" {
@@ -877,27 +887,121 @@ func (s *NginxDashboardService) GetErrorLogs(
 	domain string,
 	startNs, endNs int64,
 	limit int,
+	hostID string,
 ) ([]string, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	sel := lokiSelector(serviceName, domain, "error")
+	sel := lokiSelector(serviceName, domain, "error", hostID)
 	return s.lokiQueryLogLines(ctx, tenantUUID, sel, startNs, endNs, limit)
 }
 
 // By default it targets access logs only (log_kind="access") — error logs have
 // a completely different format and would corrupt all metric calculations.
 // Pass logKind="error" explicitly to query error logs instead.
-func lokiSelector(serviceName, domain, logKind string) string {
+var metricRe = regexp.MustCompile(`[a-zA-Z_:][a-zA-Z0-9_:]*`)
+
+var metricFuncs = map[string]bool{
+	"sum": true, "max": true, "min": true, "avg": true, "count": true,
+	"rate": true, "irate": true, "increase": true,
+	"topk": true, "bottomk": true, "clamp_min": true, "clamp_max": true,
+	"quantile_over_time": true, "count_over_time": true, "max_over_time": true,
+	"min_over_time": true, "avg_over_time": true, "sum_over_time": true,
+	"absent": true, "ceil": true, "floor": true, "round": true,
+	"abs": true, "ln": true, "log2": true, "log10": true, "exp": true, "sqrt": true,
+	"deriv": true, "delta": true, "idelta": true, "changes": true, "resets": true,
+	"predict_linear": true, "holt_winters": true,
+	"label_replace": true, "label_join": true,
+	"vector": true, "bool": true, "on": true, "ignoring": true,
+	"group_left": true, "group_right": true,
+	// PromQL keywords
+	"by": true, "or": true, "and": true, "unless": true, "without": true, "offset": true,
+}
+
+// injectHostFilter adds {host_id="<hostID>"} to every metric name found in a PromQL query.
+// It handles all patterns: metric, metric{...}, func(metric), rate(metric[5m]),
+// multi-metric expressions like sum(a) / sum(b), and complex nested queries.
+// Labels inside by(...) / without(...) are correctly skipped.
+func injectHostFilter(promQL, hostID string) string {
+	if hostID == "" {
+		return promQL
+	}
+	var buf strings.Builder
+	buf.Grow(len(promQL) + 64)
+	last := 0
+	for {
+		loc := metricRe.FindStringIndex(promQL[last:])
+		if loc == nil {
+			break
+		}
+		start := last + loc[0]
+		end := last + loc[1]
+		name := promQL[start:end]
+
+		// Write everything up to this match
+		buf.WriteString(promQL[last:start])
+
+		if metricFuncs[name] {
+			buf.WriteString(name)
+			last = end
+			continue
+		}
+
+		// Skip duration units (5m, 30s, 1h, 1d, 1w, 1y) — they look like metric names
+		// but are preceded by a digit inside range vectors like [5m].
+		if start > 0 && promQL[start-1] >= '0' && promQL[start-1] <= '9' {
+			buf.WriteString(name)
+			last = end
+			continue
+		}
+
+		before := promQL[:start]
+		trimmed := strings.TrimRightFunc(before, func(r rune) bool { return r == ' ' || r == '\t' })
+		trimmed = strings.TrimSuffix(trimmed, "(")
+		trimmed = strings.TrimRightFunc(trimmed, func(r rune) bool { return r == ' ' || r == '\t' })
+		if strings.HasSuffix(trimmed, "by") || strings.HasSuffix(trimmed, "without") {
+			buf.WriteString(name)
+			last = end
+			continue
+		}
+
+		// Real metric name — inject host_id filter after it
+		buf.WriteString(name)
+
+		// Check what follows the metric name
+		rest := promQL[end:]
+		if len(rest) > 0 && rest[0] == '{' {
+			// Has existing label matchers: inject into braces
+			if brace := strings.IndexByte(rest, '}'); brace >= 0 {
+				buf.WriteString(rest[:brace])
+				fmt.Fprintf(&buf, `, host_id="%s"`, hostID)
+				buf.WriteByte('}')
+				last = end + brace + 1
+				continue
+			}
+		}
+		// No existing matchers: append {host_id="xxx"}
+		fmt.Fprintf(&buf, `{host_id="%s"}`, hostID)
+		last = end
+	}
+	buf.WriteString(promQL[last:])
+	return buf.String()
+}
+
+func lokiSelector(serviceName, domain, logKind, hostID string) string {
 	if logKind == "" {
 		logKind = "access"
 	}
-	// log_kind and vhost are structured metadata labels set by the OTel agent.
+	// service_name is an indexed label (must be in {}).
+	// host_id, log_kind, and vhost are structured metadata labels set by OTel.
 	// They must be filtered with | label="value" (pipeline filter), NOT inside
 	// the stream selector {} — Loki only indexes labels declared at stream
 	// ingestion time inside {}, and structured metadata isn't one of them.
 	selector := fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
 	selector += fmt.Sprintf(` | log_kind="%s"`, lokiLabelValue(logKind))
+	if hostID != "" {
+		selector += fmt.Sprintf(` | host_id="%s"`, lokiLabelValue(hostID))
+	}
 	if domain = strings.TrimSpace(domain); domain != "" {
 		selector += fmt.Sprintf(` | vhost="%s"`, lokiLabelValue(domain))
 	}
@@ -1120,7 +1224,10 @@ func (s *NginxDashboardService) vmQueryRange(
 	query string,
 	startSec, endSec int64,
 	step string,
+	hostID string,
+	serviceName string,
 ) ([]VMSeries, error) {
+	query = injectHostFilter(query, hostID)
 	upstream := fmt.Sprintf("http://%s:%s/select/%d/prometheus/api/v1/query_range",
 		s.cfg.VMSelectHost, s.cfg.VMSelectPort, tenantID)
 	params := url.Values{}
@@ -1128,8 +1235,10 @@ func (s *NginxDashboardService) vmQueryRange(
 	params.Set("start", strconv.FormatInt(startSec, 10))
 	params.Set("end", strconv.FormatInt(endSec, 10))
 	params.Set("step", step)
+	fullURL := upstream + "?" + params.Encode()
+	log.Printf("[%s] vm query URL: %s", serviceName, fullURL)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream+"?"+params.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1142,7 +1251,13 @@ func (s *NginxDashboardService) vmQueryRange(
 	if err != nil {
 		return nil, err
 	}
-	return parseVMMatrixResponse(body)
+	parsed, err := parseVMMatrixResponse(body)
+	if err != nil {
+		log.Printf("[%s] vm query parse error: %v | body: %s", serviceName, err, string(body))
+		return nil, err
+	}
+	log.Printf("[%s] vm query result: %d series", serviceName, len(parsed))
+	return parsed, nil
 }
 
 func (s *NginxDashboardService) vmQueryInstant(
@@ -1150,14 +1265,19 @@ func (s *NginxDashboardService) vmQueryInstant(
 	tenantID uint,
 	query string,
 	timeSec int64,
+	hostID string,
+	serviceName string,
 ) ([]VMSeries, error) {
+	query = injectHostFilter(query, hostID)
 	upstream := fmt.Sprintf("http://%s:%s/select/%d/prometheus/api/v1/query",
 		s.cfg.VMSelectHost, s.cfg.VMSelectPort, tenantID)
 	params := url.Values{}
 	params.Set("query", query)
 	params.Set("time", strconv.FormatInt(timeSec, 10))
+	fullURL := upstream + "?" + params.Encode()
+	log.Printf("[%s] vm query URL: %s", serviceName, fullURL)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream+"?"+params.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1170,7 +1290,13 @@ func (s *NginxDashboardService) vmQueryInstant(
 	if err != nil {
 		return nil, err
 	}
-	return parseVMInstantResponse(body)
+	parsed, err := parseVMInstantResponse(body)
+	if err != nil {
+		log.Printf("[%s] vm query parse error: %v | body: %s", serviceName, err, string(body))
+		return nil, err
+	}
+	log.Printf("[%s] vm query result: %d series", serviceName, len(parsed))
+	return parsed, nil
 }
 
 // ─── Response parsers ─────────────────────────────────────────────────────────
@@ -1216,7 +1342,8 @@ func parseLokiStreamEntries(body []byte) []LokiLogEntry {
 	var raw struct {
 		Data struct {
 			Result []struct {
-				Values [][]interface{} `json:"values"`
+				Stream map[string]string `json:"stream"`
+				Values [][]interface{}   `json:"values"`
 			} `json:"result"`
 		} `json:"data"`
 	}
@@ -1227,10 +1354,14 @@ func parseLokiStreamEntries(body []byte) []LokiLogEntry {
 	for _, stream := range raw.Data.Result {
 		for _, v := range stream.Values {
 			if len(v) >= 2 {
+				metadata := map[string]string{}
+				for key, value := range stream.Stream {
+					metadata[key] = value
+				}
 				entry := LokiLogEntry{
 					TimestampNs: fmt.Sprint(v[0]),
 					Line:        fmt.Sprint(v[1]),
-					Metadata:    map[string]string{},
+					Metadata:    metadata,
 				}
 				if len(v) >= 3 {
 					if rawMeta, ok := v[2].(map[string]interface{}); ok {
@@ -1810,11 +1941,17 @@ func lokiSingleValue(series []LokiMatrixSeries) float64 {
 }
 
 func latestVMValue(series []VMSeries) *float64 {
-	if len(series) == 0 || len(series[0].Values) == 0 {
-		return nil
+	for _, s := range series {
+		if len(s.Metric) > 0 && len(s.Values) > 0 {
+			v := s.Values[len(s.Values)-1][1]
+			return &v
+		}
 	}
-	v := series[0].Values[len(series[0].Values)-1][1]
-	return &v
+	if len(series) > 0 && len(series[0].Values) > 0 {
+		v := series[0].Values[len(series[0].Values)-1][1]
+		return &v
+	}
+	return nil
 }
 
 func topN(counts map[string]float64, n int) []LabelCount {

@@ -265,17 +265,14 @@ func persistHostServices(ctx context.Context, tenantID uint, machineID string, s
 				pair := pairs[stem]
 				// Build a human-readable domain name from the stem
 				domainName := stem
-				isDefault := false
 				if stem == "default" {
 					domainName = "(default)"
-					isDefault = true
 				}
 
 				detectedVhosts = append(detectedVhosts, dto.WebServerVirtualHostDiscovered{
 					Domain:    domainName,
 					AccessLog: pair.access,
 					ErrorLog:  pair.errorPath,
-					IsDefault: isDefault,
 				})
 			}
 
@@ -312,7 +309,6 @@ func persistDetectedVirtualHosts(
 					LogPath:   strings.TrimSpace(vh.AccessLog),
 					Source:    "detected",
 					Enabled:   true,
-					IsDefault: vh.IsDefault,
 				})
 			}
 			if vh.ErrorLog != "" {
@@ -322,7 +318,6 @@ func persistDetectedVirtualHosts(
 					LogPath:   strings.TrimSpace(vh.ErrorLog),
 					Source:    "detected",
 					Enabled:   true,
-					IsDefault: vh.IsDefault,
 				})
 			}
 		}
@@ -344,7 +339,6 @@ func persistDetectedVirtualHosts(
 					LogPath:   strings.TrimSpace(vh.AccessLog),
 					Source:    "detected",
 					Enabled:   true,
-					IsDefault: vh.IsDefault,
 				})
 			}
 			if vh.ErrorLog != "" {
@@ -354,7 +348,6 @@ func persistDetectedVirtualHosts(
 					LogPath:   strings.TrimSpace(vh.ErrorLog),
 					Source:    "detected",
 					Enabled:   true,
-					IsDefault: vh.IsDefault,
 				})
 			}
 		}

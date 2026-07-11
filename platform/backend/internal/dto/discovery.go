@@ -6,7 +6,6 @@ type WebServerVirtualHostDiscovered struct {
 	Domain    string `json:"domain"`               // e.g., "shop.example.com" or "(default)"
 	AccessLog string `json:"access_log,omitempty"` // e.g., "/var/log/nginx/shop.access.log"
 	ErrorLog  string `json:"error_log,omitempty"`  // e.g., "/var/log/nginx/shop.error.log"
-	IsDefault bool   `json:"is_default"`           // true if this is the default/catch-all server block
 }
 
 type InstallDiscoveryService struct {

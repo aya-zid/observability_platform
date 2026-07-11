@@ -37,7 +37,7 @@ func NewNginxPerformanceHandler(
 // resolvePerformanceParams is shared param parsing for all three endpoints.
 // Returns (tenantUUID, serviceName, domain, startNs, endNs, error).
 func (h *NginxPerformanceHandler) resolvePerformanceParams(c echo.Context) (
-	tenantUUID, serviceName, domain string,
+	tenantUUID, serviceName, domain, machineID string,
 	startNs, endNs int64,
 	err error,
 ) {
@@ -59,6 +59,7 @@ func (h *NginxPerformanceHandler) resolvePerformanceParams(c echo.Context) (
 		return
 	}
 	serviceName = svc.ServiceName
+	machineID = svc.MachineID
 
 	tenant, tenantErr := h.tenantRepo.FindByIDCtx(c.Request().Context(), claims.TenantID)
 	if tenantErr != nil || tenant == nil {
@@ -84,7 +85,7 @@ func (h *NginxPerformanceHandler) resolvePerformanceParams(c echo.Context) (
 
 // Heatmap handles GET /api/nginx/:id/performance/heatmap
 func (h *NginxPerformanceHandler) Heatmap(c echo.Context) error {
-	tenantUUID, serviceName, domain, startNs, endNs, err := h.resolvePerformanceParams(c)
+	tenantUUID, serviceName, domain, machineID, startNs, endNs, err := h.resolvePerformanceParams(c)
 	if err != nil {
 		return err
 	}
@@ -93,6 +94,7 @@ func (h *NginxPerformanceHandler) Heatmap(c echo.Context) error {
 		c.Request().Context(),
 		tenantUUID, serviceName, domain,
 		startNs, endNs,
+		machineID,
 	)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -102,7 +104,7 @@ func (h *NginxPerformanceHandler) Heatmap(c echo.Context) error {
 
 // Scatter handles GET /api/nginx/:id/performance/scatter
 func (h *NginxPerformanceHandler) Scatter(c echo.Context) error {
-	tenantUUID, serviceName, domain, startNs, endNs, err := h.resolvePerformanceParams(c)
+	tenantUUID, serviceName, domain, machineID, startNs, endNs, err := h.resolvePerformanceParams(c)
 	if err != nil {
 		return err
 	}
@@ -111,6 +113,7 @@ func (h *NginxPerformanceHandler) Scatter(c echo.Context) error {
 		c.Request().Context(),
 		tenantUUID, serviceName, domain,
 		startNs, endNs,
+		machineID,
 	)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -120,7 +123,7 @@ func (h *NginxPerformanceHandler) Scatter(c echo.Context) error {
 
 // Distribution handles GET /api/nginx/:id/performance/dist
 func (h *NginxPerformanceHandler) Distribution(c echo.Context) error {
-	tenantUUID, serviceName, domain, startNs, endNs, err := h.resolvePerformanceParams(c)
+	tenantUUID, serviceName, domain, machineID, startNs, endNs, err := h.resolvePerformanceParams(c)
 	if err != nil {
 		return err
 	}
@@ -129,6 +132,7 @@ func (h *NginxPerformanceHandler) Distribution(c echo.Context) error {
 		c.Request().Context(),
 		tenantUUID, serviceName, domain,
 		startNs, endNs,
+		machineID,
 	)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

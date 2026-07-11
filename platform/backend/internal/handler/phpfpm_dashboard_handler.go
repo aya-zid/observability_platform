@@ -66,6 +66,7 @@ func (h *PHPFPMDashboardHandler) Dashboard(c echo.Context) error {
 		startNs,
 		endNs,
 		step,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[phpfpm-dashboard] summary failed: %v", err)
@@ -160,6 +161,7 @@ func (h *PHPFPMDashboardHandler) Logs(c echo.Context) error {
 		maxCPU, hasMaxCPU,
 		page,
 		pageSize,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[phpfpm-logs] fetch failed: %v", err)
@@ -202,7 +204,7 @@ func (h *PHPFPMDashboardHandler) LogsMeta(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid end param"})
 	}
 
-	meta, err := h.svc.GetLogsMeta(c.Request().Context(), tenant.UUID, svc.ServiceName, startNs, endNs)
+	meta, err := h.svc.GetLogsMeta(c.Request().Context(), tenant.UUID, svc.ServiceName, startNs, endNs, svc.MachineID)
 	if err != nil {
 		c.Logger().Errorf("[phpfpm-logs-meta] failed: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch log counts"})

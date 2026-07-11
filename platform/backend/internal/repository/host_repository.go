@@ -99,6 +99,16 @@ func (r *HostRepository) FindByTenantMachineCtx(ctx context.Context, tenantID ui
 	return &host, err
 }
 
+func (r *HostRepository) TouchHostsByTenant(ctx context.Context, tenantID uint) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.Host{}).
+		Where("tenant_id = ?", tenantID).
+		Updates(map[string]interface{}{
+			"last_seen_at": time.Now(),
+			"updated_at":   time.Now(),
+		}).Error
+}
+
 func (r *HostRepository) ListByTenantCtx(ctx context.Context, tenantID uint) ([]domain.Host, error) {
 	var rows []domain.Host
 	err := r.db.WithContext(ctx).

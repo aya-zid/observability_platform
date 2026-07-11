@@ -109,8 +109,6 @@ export type NginxExplorerParams = {
 export type NginxDomainItem = {
   domain: string
   enabled: boolean
-  is_default: boolean
-  is_shared_log: boolean
 }
 
 export type NginxSlowRequestsListResult = {

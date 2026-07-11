@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"sync"
@@ -111,8 +112,6 @@ type ApacheExplorerResult struct {
 type ApacheDomainItem struct {
 	Domain      string `json:"domain"`
 	Enabled     bool   `json:"enabled"`
-	IsDefault   bool   `json:"is_default"`
-	IsSharedLog bool   `json:"is_shared_log"`
 }
 
 type ApacheExplorerFilter struct {
@@ -149,6 +148,7 @@ func (s *ApacheDashboardService) GetDashboardSummary(
 	step string,
 	minRT float64,
 	extraPercentiles []float64,
+	hostID string,
 ) (*ApacheDashboardSummary, error) {
 	if minRT <= 0 {
 		minRT = 1000.0
@@ -167,7 +167,7 @@ func (s *ApacheDashboardService) GetDashboardSummary(
 		}
 	}
 
-	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, domain, startNs, endNs, step, minRT, extraPercentiles)
+	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, domain, startNs, endNs, step, minRT, extraPercentiles, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +193,9 @@ func (s *ApacheDashboardService) fetchDashboard(
 	step string,
 	minRT float64,
 	extraPercentiles []float64,
+	hostID string,
 ) (*ApacheDashboardSummary, error) {
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 	rangeSeconds := (endNs - startNs) / int64(1e9)
 
 	// ── Loki queries ──────────────────────────────────────────────────────────
@@ -310,7 +311,13 @@ func (s *ApacheDashboardService) fetchDashboard(
 		return lR{d, e}
 	}
 	vq := func(q string) vR {
-		d, e := s.base.vmQueryRange(ctx, tenantID, q, startNs/int64(1e9), endNs/int64(1e9), step)
+		d, e := s.base.vmQueryRange(ctx, tenantID, q, startNs/int64(1e9), endNs/int64(1e9), step, hostID, "apache")
+		if e != nil {
+			log.Printf("[apache] vm query error: %v | query: %s", e, q)
+		}
+		if len(d) == 0 && e == nil {
+			log.Printf("[apache] vm query returned empty data | query: %s", q)
+		}
 		return vR{d, e}
 	}
 
@@ -603,6 +610,7 @@ func (s *ApacheDashboardService) GetSlowRequestsList(
 	startNs, endNs int64,
 	minRT float64,
 	page, perPage int,
+	hostID string,
 ) (*SlowRequestsListResult, error) {
 	if minRT <= 0 {
 		minRT = 1000.0
@@ -613,7 +621,7 @@ func (s *ApacheDashboardService) GetSlowRequestsList(
 	if page <= 0 {
 		page = 1
 	}
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 
 	rangeSeconds := (endNs - startNs) / int64(1e9)
 	if rangeSeconds < 1 {
@@ -680,8 +688,9 @@ func (s *ApacheDashboardService) GetExplorerResult(
 	startNs, endNs int64,
 	step string,
 	filter ApacheExplorerFilter,
+	hostID string,
 ) (*ApacheExplorerResult, error) {
-	base := lokiSelector(serviceName, filter.Domain, "access")
+	base := lokiSelector(serviceName, filter.Domain, "access", hostID)
 	filterChain := base + " " + parseExpr
 
 	if filter.IP != "" {
@@ -792,11 +801,12 @@ func (s *ApacheDashboardService) GetErrorLogs(
 	domain string,
 	startNs, endNs int64,
 	limit int,
+	hostID string,
 ) ([]string, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	sel := lokiSelector(serviceName, domain, "error")
+	sel := lokiSelector(serviceName, domain, "error", hostID)
 	return s.base.lokiQueryLogLines(ctx, tenantUUID, sel, startNs, endNs, limit)
 }
 
@@ -888,9 +898,10 @@ func (s *ApacheDashboardService) GetIPInvestigation(
 	startNs, endNs int64,
 	step string,
 	seenStartNs, seenEndNs int64,
+	hostID string,
 ) (*ApacheIPInvestigationResult, error) {
 
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 	ipFilter := fmt.Sprintf(`%s %s | ip = "%s"`, base, parseExpr, lokiLabelValue(ip))
 	ipFilterRT := fmt.Sprintf(`%s %s %s | ip = "%s"`, base, parseExpr, rtParseExpr, lokiLabelValue(ip))
 

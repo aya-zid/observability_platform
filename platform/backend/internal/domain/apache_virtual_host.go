@@ -19,8 +19,6 @@ type ApacheVirtualHost struct {
 
 	Source      string `gorm:"type:varchar(20);not null;default:'detected'"`
 	Enabled     bool   `gorm:"type:boolean;not null"`
-	IsSharedLog bool   `gorm:"type:boolean;not null;default:false"`
-	IsDefault   bool   `gorm:"type:boolean;not null;default:false"`
 
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime"`

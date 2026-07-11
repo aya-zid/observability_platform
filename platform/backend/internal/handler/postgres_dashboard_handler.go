@@ -66,6 +66,7 @@ func (h *PostgresDashboardHandler) Dashboard(c echo.Context) error {
 		startNs,
 		endNs,
 		step,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[postgres-dashboard] summary failed: %v", err)
@@ -94,7 +95,7 @@ func (h *PostgresDashboardHandler) Config(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "service is not PostgreSQL"})
 	}
 
-	snapshot, err := h.svc.GetConfigSnapshot(c.Request().Context(), claims.TenantID)
+	snapshot, err := h.svc.GetConfigSnapshot(c.Request().Context(), claims.TenantID, svc.MachineID)
 	if err != nil {
 		c.Logger().Errorf("[postgres-config] fetch failed: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch config"})
@@ -138,7 +139,6 @@ func (h *PostgresDashboardHandler) Logs(c echo.Context) error {
 
 	category := c.QueryParam("category")
 	search := c.QueryParam("search")
-	includeMonitoring := c.QueryParam("include_monitoring") == "true"
 
 	page := 1
 	if p := c.QueryParam("page"); p != "" {
@@ -161,9 +161,9 @@ func (h *PostgresDashboardHandler) Logs(c echo.Context) error {
 		endNs,
 		category,
 		search,
-		includeMonitoring,
 		page,
 		pageSize,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[postgres-logs] fetch failed: %v", err)

@@ -87,6 +87,7 @@ func (h *ApacheDashboardHandler) Dashboard(c echo.Context) error {
 		step,
 		minRT,
 		rtPercentiles,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[apache-dashboard] summary failed: %v", err)
@@ -161,6 +162,7 @@ func (h *ApacheDashboardHandler) SlowRequests(c echo.Context) error {
 		minRT,
 		page,
 		perPage,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[apache-slow-requests] query failed: %v", err)
@@ -228,6 +230,7 @@ func (h *ApacheDashboardHandler) Explorer(c echo.Context) error {
 		endNs,
 		step,
 		filter,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[apache-explorer] query failed: %v", err)
@@ -269,17 +272,13 @@ func (h *ApacheDashboardHandler) Domains(c echo.Context) error {
 		if domainName == "" {
 			domainName = "(default)"
 		}
-		if idx, ok := seen[domainName]; ok {
-			items[idx].IsDefault = items[idx].IsDefault || row.IsDefault
-			items[idx].IsSharedLog = items[idx].IsSharedLog || row.IsSharedLog
+		if _, ok := seen[domainName]; ok {
 			continue
 		}
 		seen[domainName] = len(items)
 		items = append(items, service.ApacheDomainItem{
 			Domain:      domainName,
 			Enabled:     row.Enabled,
-			IsDefault:   row.IsDefault,
-			IsSharedLog: row.IsSharedLog,
 		})
 	}
 
@@ -339,6 +338,7 @@ func (h *ApacheDashboardHandler) ErrorLogs(c echo.Context) error {
 		startNs,
 		endNs,
 		limit,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[apache-error-logs] query failed: %v", err)
@@ -407,6 +407,7 @@ func (h *ApacheDashboardHandler) IPInvestigation(c echo.Context) error {
 		step,
 		seenStartNs,
 		seenEndNs,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[apache-ip-investigation] failed for ip=%s: %v", ip, err)

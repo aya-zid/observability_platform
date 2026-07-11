@@ -95,10 +95,9 @@ const (
 
 func (s *NginxPerformanceService) GetRTIntensityHeatmap(
 	ctx context.Context,
-	tenantUUID string,
-	serviceName string,
-	domain string,
+	tenantUUID, serviceName, domain string,
 	startNs, endNs int64,
+	hostID string,
 ) (*RTIntensityHeatmap, error) {
 	cacheKey := fmt.Sprintf(
 		"nginx:perf:heatmap:%s:%s:%s:%d:%d",
@@ -116,7 +115,7 @@ func (s *NginxPerformanceService) GetRTIntensityHeatmap(
 		}
 	}
 
-	result, err := s.fetchRTIntensityHeatmap(ctx, tenantUUID, serviceName, domain, startNs, endNs)
+	result, err := s.fetchRTIntensityHeatmap(ctx, tenantUUID, serviceName, domain, startNs, endNs, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -134,12 +133,13 @@ func (s *NginxPerformanceService) fetchRTIntensityHeatmap(
 	ctx context.Context,
 	tenantUUID, serviceName, domain string,
 	startNs, endNs int64,
+	hostID string,
 ) (*RTIntensityHeatmap, error) {
 	if endNs <= startNs {
 		return &RTIntensityHeatmap{}, nil
 	}
 
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 	rangeSec := (endNs - startNs) / int64(time.Second)
 	if rangeSec <= 0 {
 		return &RTIntensityHeatmap{}, nil
@@ -285,6 +285,7 @@ func (s *NginxPerformanceService) GetRTDistributionByStatus(
 	serviceName string,
 	domain string,
 	startNs, endNs int64,
+	hostID string,
 ) (*RTDistributionByStatus, error) {
 	cacheKey := fmt.Sprintf(
 		"nginx:perf:dist:%s:%s:%s:%d:%d",
@@ -302,7 +303,7 @@ func (s *NginxPerformanceService) GetRTDistributionByStatus(
 		}
 	}
 
-	result, err := s.fetchRTDistributionByStatus(ctx, tenantUUID, serviceName, domain, startNs, endNs)
+	result, err := s.fetchRTDistributionByStatus(ctx, tenantUUID, serviceName, domain, startNs, endNs, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -320,12 +321,13 @@ func (s *NginxPerformanceService) fetchRTDistributionByStatus(
 	ctx context.Context,
 	tenantUUID, serviceName, domain string,
 	startNs, endNs int64,
+	hostID string,
 ) (*RTDistributionByStatus, error) {
 	if endNs <= startNs {
 		return &RTDistributionByStatus{}, nil
 	}
 
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 	rangeSec := (endNs - startNs) / int64(time.Second)
 	if rangeSec <= 0 {
 		return &RTDistributionByStatus{}, nil
@@ -637,6 +639,7 @@ func (s *NginxPerformanceService) GetRTScatter(
 	serviceName string,
 	domain string,
 	startNs, endNs int64,
+	hostID string,
 ) (*RTScatter, error) {
 	cacheKey := fmt.Sprintf(
 		"nginx:perf:scatter:%s:%s:%s:%d:%d",
@@ -654,7 +657,7 @@ func (s *NginxPerformanceService) GetRTScatter(
 		}
 	}
 
-	result, err := s.fetchRTScatter(ctx, tenantUUID, serviceName, domain, startNs, endNs)
+	result, err := s.fetchRTScatter(ctx, tenantUUID, serviceName, domain, startNs, endNs, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -682,12 +685,13 @@ func (s *NginxPerformanceService) fetchRTScatter(
 	ctx context.Context,
 	tenantUUID, serviceName, domain string,
 	startNs, endNs int64,
+	hostID string,
 ) (*RTScatter, error) {
 	if endNs <= startNs {
 		return &RTScatter{Points: []RTScatterPoint{}}, nil
 	}
 
-	base := lokiSelector(serviceName, domain, "access")
+	base := lokiSelector(serviceName, domain, "access", hostID)
 	rangeSec := (endNs - startNs) / int64(time.Second)
 	if rangeSec <= 0 {
 		return &RTScatter{Points: []RTScatterPoint{}}, nil

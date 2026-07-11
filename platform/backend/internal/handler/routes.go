@@ -15,6 +15,17 @@ import (
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/service"
 )
 
+func touchHostsOnIngest(hostRepo *repository.HostRepository, next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		err := next(c)
+		tenant, ok := c.Get(custommiddleware.TenantContextKey).(*cache.CachedTenant)
+		if ok && tenant != nil {
+			_ = hostRepo.TouchHostsByTenant(c.Request().Context(), tenant.ID)
+		}
+		return err
+	}
+}
+
 func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	tenantRepo := repository.NewTenantRepository(infrastructure.DB)
 	userRepo := repository.NewUserRepository(infrastructure.DB)
@@ -94,6 +105,15 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		tenantRepo,
 	)
 
+	hostDashboardService := service.NewHostDashboardService(cfg, infrastructure.Redis)
+	hostLogsService := service.NewHostLogsService(cfg, infrastructure.Redis)
+	hostDashboardHandler := NewHostDashboardHandler(
+		hostDashboardService,
+		hostLogsService,
+		hostRepo,
+		tenantRepo,
+	)
+
 	e.GET("/install.sh", installHandler.AgentInstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
@@ -167,6 +187,16 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		api.GET("/apache/:id/performance/heatmap", apachePerformanceHandler.Heatmap)
 		api.GET("/apache/:id/performance/scatter", apachePerformanceHandler.Scatter)
 		api.GET("/apache/:id/performance/dist", apachePerformanceHandler.Distribution)
+
+		// Host dashboard routes (each section is an independent endpoint)
+		api.GET("/hosts/:machineId/dashboard/summary", hostDashboardHandler.Summary)
+		api.GET("/hosts/:machineId/dashboard/cpu", hostDashboardHandler.CPU)
+		api.GET("/hosts/:machineId/dashboard/memory", hostDashboardHandler.Memory)
+		api.GET("/hosts/:machineId/dashboard/disk", hostDashboardHandler.Disk)
+		api.GET("/hosts/:machineId/dashboard/network", hostDashboardHandler.Network)
+		api.GET("/hosts/:machineId/dashboard/processes", hostDashboardHandler.Processes)
+		api.GET("/hosts/:machineId/logs", hostDashboardHandler.Logs)
+		api.GET("/hosts/:machineId/logs/health-summary", hostDashboardHandler.LogsHealthSummary)
 	}
 
 	// ── Health check ─────────────────────────────────────────────────────────
@@ -204,13 +234,13 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		ingest.POST("/integrations/status", integrationHandler.IngestStatus)
 
 		// Prometheus remote_write → VictoriaMetrics vminsert (tenant isolated by URL path)
-		ingest.POST("/metrics", proxy.MetricsProxy(cfg))
+		ingest.POST("/metrics", touchHostsOnIngest(hostRepo, proxy.MetricsProxy(cfg)))
 
 		// OTLP logs → Loki (tenant isolated by X-Scope-OrgID header)
-		ingest.POST("/logs/*", proxy.LogsProxy(cfg))
+		ingest.POST("/logs/*", touchHostsOnIngest(hostRepo, proxy.LogsProxy(cfg)))
 
 		// OTLP traces → Tempo (tenant isolated by X-Scope-OrgID header)
-		ingest.POST("/traces/*", proxy.TracesProxy(cfg))
+		ingest.POST("/traces/*", touchHostsOnIngest(hostRepo, proxy.TracesProxy(cfg)))
 	}
 }
 

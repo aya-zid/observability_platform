@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -24,6 +28,140 @@ type MariaDBDashboardService struct {
 type vmQueryResult struct {
 	data []VMSeries
 	err  error
+}
+
+// injectMariaDBHostFilter adds {host_id="<hostID>"} to every metric name in PromQL.
+// It handles all patterns: metric, metric{...}, func(metric), rate(metric[5m]),
+// multi-metric expressions like sum(a) / sum(b), and complex nested queries.
+// Labels inside by(...) / without(...) are correctly skipped (handles spaces like "by (db)").
+func injectMariaDBHostFilter(promQL, hostID string) string {
+	if hostID == "" {
+		return promQL
+	}
+	var buf strings.Builder
+	buf.Grow(len(promQL) + 64)
+	last := 0
+	for {
+		loc := metricRe.FindStringIndex(promQL[last:])
+		if loc == nil {
+			break
+		}
+		start := last + loc[0]
+		end := last + loc[1]
+		name := promQL[start:end]
+
+		buf.WriteString(promQL[last:start])
+
+		if metricFuncs[name] {
+			buf.WriteString(name)
+			last = end
+			continue
+		}
+
+		if start > 0 && promQL[start-1] >= '0' && promQL[start-1] <= '9' {
+			buf.WriteString(name)
+			last = end
+			continue
+		}
+
+		before := promQL[:start]
+		trimmed := strings.TrimRightFunc(before, func(r rune) bool { return r == ' ' || r == '\t' })
+		trimmed = strings.TrimSuffix(trimmed, "(")
+		trimmed = strings.TrimRightFunc(trimmed, func(r rune) bool { return r == ' ' || r == '\t' })
+		if strings.HasSuffix(trimmed, "by") || strings.HasSuffix(trimmed, "without") {
+			buf.WriteString(name)
+			last = end
+			continue
+		}
+
+		buf.WriteString(name)
+		rest := promQL[end:]
+		if len(rest) > 0 && rest[0] == '{' {
+			if brace := strings.IndexByte(rest, '}'); brace >= 0 {
+				buf.WriteString(rest[:brace])
+				fmt.Fprintf(&buf, `, host_id="%s"`, hostID)
+				buf.WriteByte('}')
+				last = end + brace + 1
+				continue
+			}
+		}
+		fmt.Fprintf(&buf, `{host_id="%s"}`, hostID)
+		last = end
+	}
+	buf.WriteString(promQL[last:])
+	return buf.String()
+}
+
+func (s *MariaDBDashboardService) mariadbVMQueryRange(
+	ctx context.Context,
+	tenantID uint,
+	query string,
+	startSec, endSec int64,
+	step string,
+	hostID string,
+) ([]VMSeries, error) {
+	query = injectMariaDBHostFilter(query, hostID)
+	log.Printf("[mariadb] vm query (injected): %s", query)
+	upstream := fmt.Sprintf("http://%s:%s/select/%d/prometheus/api/v1/query_range",
+		s.base.cfg.VMSelectHost, s.base.cfg.VMSelectPort, tenantID)
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("start", strconv.FormatInt(startSec, 10))
+	params.Set("end", strconv.FormatInt(endSec, 10))
+	params.Set("step", step)
+	fullURL := upstream + "?" + params.Encode()
+	log.Printf("[mariadb] vm query URL: %s", fullURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.base.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := parseVMMatrixResponse(body)
+	if err != nil {
+		log.Printf("[mariadb] vm query parse error: %v | body: %s", err, string(body))
+		return nil, err
+	}
+	log.Printf("[mariadb] vm query result: %d series", len(parsed))
+	return parsed, nil
+}
+
+func (s *MariaDBDashboardService) mariadbVMQueryInstant(
+	ctx context.Context,
+	tenantID uint,
+	query string,
+	timeSec int64,
+	hostID string,
+) ([]VMSeries, error) {
+	query = injectMariaDBHostFilter(query, hostID)
+	upstream := fmt.Sprintf("http://%s:%s/select/%d/prometheus/api/v1/query",
+		s.base.cfg.VMSelectHost, s.base.cfg.VMSelectPort, tenantID)
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("time", strconv.FormatInt(timeSec, 10))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream+"?"+params.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.base.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return parseVMMatrixResponse(body)
 }
 
 type MariaDBDashboardSummary struct {
@@ -151,16 +289,23 @@ type MariaDBLogSummary struct {
 }
 
 type MariaDBLogEvent struct {
-	Timestamp  string            `json:"timestamp"`
-	Severity   string            `json:"severity"`
-	Category   string            `json:"category"`
-	User       string            `json:"user,omitempty"`
-	Host       string            `json:"host,omitempty"`
-	ThreadID   string            `json:"thread_id,omitempty"`
-	Subsystem  string            `json:"subsystem,omitempty"`
-	DurationMs *float64          `json:"duration_ms,omitempty"`
-	Message    string            `json:"message"`
-	Labels     map[string]string `json:"labels,omitempty"`
+	Timestamp    string            `json:"timestamp"`
+	Severity     string            `json:"severity"`
+	Category     string            `json:"category"`
+	User         string            `json:"user,omitempty"`
+	Host         string            `json:"host,omitempty"`
+	ThreadID     string            `json:"thread_id,omitempty"`
+	Subsystem    string            `json:"subsystem,omitempty"`
+	DurationMs   *float64          `json:"duration_ms,omitempty"`
+	LockTimeS    *float64          `json:"lock_time_s,omitempty"`
+	RowsSent     *int64            `json:"rows_sent,omitempty"`
+	RowsExamined *int64            `json:"rows_examined,omitempty"`
+	Schema       string            `json:"schema,omitempty"`
+	QCHit        string            `json:"qc_hit,omitempty"`
+	RowsAffected int64             `json:"rows_affected,omitempty"`
+	BytesSent    int64             `json:"bytes_sent,omitempty"`
+	Message      string            `json:"message"`
+	Labels       map[string]string `json:"labels,omitempty"`
 }
 
 type SlowQueryEntry struct {
@@ -168,10 +313,14 @@ type SlowQueryEntry struct {
 	User         string   `json:"user"`
 	Host         string   `json:"host"`
 	ThreadID     string   `json:"thread_id"`
+	Schema       string   `json:"schema"`
+	QCHit        string   `json:"qc_hit"`
 	QueryTimeS   float64  `json:"query_time_s"`
 	LockTimeS    float64  `json:"lock_time_s"`
 	RowsSent     int64    `json:"rows_sent"`
 	RowsExamined int64    `json:"rows_examined"`
+	RowsAffected int64    `json:"rows_affected"`
+	BytesSent    int64    `json:"bytes_sent"`
 	DB           string   `json:"db"`
 	SQL          string   `json:"sql"`
 	Lines        []string `json:"lines,omitempty"`
@@ -395,6 +544,7 @@ func (s *MariaDBDashboardService) GetDashboardSummary(
 	startNs, endNs int64,
 	step string,
 	minDurationSec float64,
+	hostID string,
 ) (*MariaDBDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -414,7 +564,7 @@ func (s *MariaDBDashboardService) GetDashboardSummary(
 		}
 	}
 
-	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step, minDurationSec)
+	summary, err := s.fetchDashboard(ctx, tenantUUID, tenantID, serviceName, startNs, endNs, step, minDurationSec, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -435,6 +585,7 @@ func (s *MariaDBDashboardService) fetchDashboard(
 	startNs, endNs int64,
 	step string,
 	minDurationSec float64,
+	hostID string,
 ) (*MariaDBDashboardSummary, error) {
 	startSec := startNs / int64(1e9)
 	endSec := endNs / int64(1e9)
@@ -447,8 +598,20 @@ func (s *MariaDBDashboardService) fetchDashboard(
 		entries []LokiLogEntry
 		err     error
 	}
-	query := func(q string) vmQueryResult {
-		data, err := s.base.vmQueryRange(ctx, tenantID, q, startSec, endSec, step)
+	query := func(name, q string) vmQueryResult {
+		log.Printf("[mariadb] running [%s]: %s", name, q)
+		data, err := s.mariadbVMQueryRange(ctx, tenantID, q, startSec, endSec, step, hostID)
+		if err != nil {
+			log.Printf("[mariadb] [%s] vm query error: %v | query: %s", name, err, q)
+		}
+		if err == nil {
+			log.Printf("[mariadb] [%s] vm query result: %d series", name, len(data))
+		}
+		if err == nil && len(data) > 0 && len(data[0].Values) > 0 {
+			first := data[0].Values[0][1]
+			last := data[0].Values[len(data[0].Values)-1][1]
+			log.Printf("[mariadb] [%s] first=%.2f last=%.2f", name, first, last)
+		}
 		return vmQueryResult{data: data, err: err}
 	}
 	logQuery := func(q string, limit int) logR {
@@ -501,10 +664,10 @@ func (s *MariaDBDashboardService) fetchDashboard(
 		"bp_used_pct":  `100 * (1 - (sum(mysql_global_status_buffer_pool_pages{state="free"}) / clamp_min(sum(mysql_global_status_buffer_pool_pages{state=~"data|free|misc"}), 1)))`,
 		"bp_wait_free": "rate(mysql_global_status_innodb_buffer_pool_wait_free[" + rw + "])",
 
-		"innodb_reads":        "rate(mysql_global_status_innodb_data_read[" + rw + "])",
-		"innodb_writes":       "rate(mysql_global_status_innodb_data_written[" + rw + "])",
-		"innodb_fsyncs":       "rate(mysql_global_status_innodb_data_fsyncs[" + rw + "])",
-		"innodb_log_writes":   "rate(mysql_global_status_innodb_log_writes[" + rw + "])",
+		"innodb_reads":        "rate(mysql_global_status_innodb_data_read[5m])",
+		"innodb_writes":       "rate(mysql_global_status_innodb_data_written[5m])",
+		"innodb_fsyncs":       "rate(mysql_global_status_innodb_data_fsyncs[5m])",
+		"innodb_log_writes":   "rate(mysql_global_status_innodb_log_writes[5m])",
 		"innodb_log_waits":    "rate(mysql_global_status_innodb_log_waits[" + rw + "])",
 		"innodb_pending_reads":  "mysql_global_status_innodb_data_pending_reads",
 		"innodb_pending_writes": "mysql_global_status_innodb_data_pending_writes",
@@ -571,14 +734,14 @@ func (s *MariaDBDashboardService) fetchDashboard(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r := query(q)
+			r := query(name, q)
 			mu.Lock()
 			results[name] = r
 			mu.Unlock()
 		}()
 	}
 
-	baseSelector := mariaDBLokiSelector(serviceName)
+	baseSelector := mariaDBLokiSelector(serviceName, hostID)
 	logQueries := buildMariaDBLogQueries(baseSelector)
 	for name, q := range logQueries {
 		name, q := name, q
@@ -780,7 +943,7 @@ func (s *MariaDBDashboardService) fetchDashboard(
 	summary.TopDBsByNoIndex = latestLabelCounts(results["db_no_index"].data, "db", 10)
 	summary.DBStorageSizes = latestLabelCounts(results["db_size"].data, "schema", 10)
 
-	slowDBEntries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, mariaDBLokiSelector(serviceName)+` |~ "(?i)(Query_time|slow query)"`, startNs, endNs)
+	slowDBEntries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, mariaDBLokiSelector(serviceName, hostID)+` |~ "(?i)(Query_time|slow query)"`, startNs, endNs)
 	if err == nil {
 		parsedSlow := parseSlowQueryEntries(slowDBEntries)
 		dbCounts := make(map[string]float64)
@@ -799,7 +962,7 @@ func (s *MariaDBDashboardService) fetchDashboard(
 	summary.InefficientDigests = topMariaDBDigests(digests, func(d MariaDBQueryDigest) float64 { return d.RowsExaminedPerSent }, 20)
 	summary.NoIndexDigests = topMariaDBDigests(digests, func(d MariaDBQueryDigest) float64 { return d.NoIndexUsedCount }, 20)
 
-	summary.LogSummary = s.countParsedLogCategories(ctx, tenantUUID, serviceName, startNs, endNs, minDurationSec)
+	summary.LogSummary = s.countParsedLogCategories(ctx, tenantUUID, serviceName, startNs, endNs, minDurationSec, hostID)
 	summary.RecentLogs = mergeMariaDBLogEvents(20,
 		logResults["errors"].entries,
 		logResults["warnings"].entries,
@@ -814,6 +977,7 @@ func (s *MariaDBDashboardService) fetchDashboard(
 func (s *MariaDBDashboardService) GetConfigSnapshot(
 	ctx context.Context,
 	tenantID uint,
+	hostID string,
 ) (*MariaDBConfigSnapshot, error) {
 	now := time.Now()
 	result := &MariaDBConfigSnapshot{
@@ -821,11 +985,12 @@ func (s *MariaDBDashboardService) GetConfigSnapshot(
 		Groups:      mariaDBConfigCatalog(),
 	}
 
-	for groupIndex := range result.Groups {
+		for groupIndex := range result.Groups {
 		for settingIndex := range result.Groups[groupIndex].Settings {
 			setting := &result.Groups[groupIndex].Settings[settingIndex]
-			series, err := s.base.vmQueryInstant(ctx, tenantID, setting.Name, now.Unix())
+			series, err := s.mariadbVMQueryInstant(ctx, tenantID, setting.Name, now.Unix(), hostID)
 			if err != nil {
+				log.Printf("[mariadb] vm instant query error: %v | query: %s", err, setting.Name)
 				continue
 			}
 			if value := latestVMValue(series); value != nil {
@@ -845,7 +1010,14 @@ func (s *MariaDBDashboardService) GetLogs(
 	search string,
 	page int,
 	pageSize int,
-	minDurationMs float64,
+	minDurationMs, maxDurationMs float64,
+	hostID string,
+	userFilter, hostFilter, schemaFilter, qcHitFilter string,
+	minRowsSent, maxRowsSent int64,
+	minRowsExamined, maxRowsExamined int64,
+	minLockTimeS, maxLockTimeS float64,
+	minRowsAffected, maxRowsAffected int64,
+	minBytesSent, maxBytesSent int64,
 ) (*MariaDBLogsPage, error) {
 	if page < 1 {
 		page = 1
@@ -854,23 +1026,16 @@ func (s *MariaDBDashboardService) GetLogs(
 		pageSize = 100
 	}
 	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID,
-		mariaDBLogsLokiQuery(mariaDBLokiSelector(serviceName), category),
+		mariaDBLogsLokiQuery(mariaDBLokiSelector(serviceName, hostID), category),
 		startNs, endNs)
 	if err != nil {
 		return nil, err
 	}
 
-	// stitchLogLines needs ascending order
-	sort.Slice(entries, func(i, j int) bool {
-		ti, _ := strconv.ParseInt(entries[i].TimestampNs, 10, 64)
-		tj, _ := strconv.ParseInt(entries[j].TimestampNs, 10, 64)
-		return ti < tj
-	})
-	merged := stitchLogLines(entries)
-	sortLokiLogEntriesDesc(merged)
+	sortLokiLogEntriesDesc(entries)
 
-	events := make([]MariaDBLogEvent, 0, len(merged))
-	for _, entry := range merged {
+	events := make([]MariaDBLogEvent, 0, len(entries))
+	for _, entry := range entries {
 		events = append(events, parseMariaDBLogEvent(entry))
 	}
 	if category != "" && category != "all" {
@@ -891,10 +1056,149 @@ func (s *MariaDBDashboardService) GetLogs(
 		}
 		events = filtered
 	}
+	if maxDurationMs > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.DurationMs != nil && *ev.DurationMs <= maxDurationMs {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
 	if needle := strings.ToLower(strings.TrimSpace(search)); needle != "" {
 		filtered := events[:0]
 		for _, ev := range events {
 			if mariaDBLogMatchesSearch(ev, needle) {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if userFilter != "" {
+		uf := strings.ToLower(userFilter)
+		filtered := events[:0]
+		for _, ev := range events {
+			if strings.Contains(strings.ToLower(ev.User), uf) {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if hostFilter != "" {
+		hf := strings.ToLower(hostFilter)
+		filtered := events[:0]
+		for _, ev := range events {
+			if strings.Contains(strings.ToLower(ev.Host), hf) {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if schemaFilter != "" {
+		sf := strings.ToLower(schemaFilter)
+		filtered := events[:0]
+		for _, ev := range events {
+			if strings.Contains(strings.ToLower(ev.Schema), sf) {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if qcHitFilter != "" {
+		qf := strings.ToLower(qcHitFilter)
+		filtered := events[:0]
+		for _, ev := range events {
+			if strings.EqualFold(ev.QCHit, qf) {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if minRowsSent > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.RowsSent != nil && *ev.RowsSent >= minRowsSent {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if maxRowsSent > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.RowsSent != nil && *ev.RowsSent <= maxRowsSent {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if minRowsExamined > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.RowsExamined != nil && *ev.RowsExamined >= minRowsExamined {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if maxRowsExamined > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.RowsExamined != nil && *ev.RowsExamined <= maxRowsExamined {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if minLockTimeS > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.LockTimeS != nil && *ev.LockTimeS >= minLockTimeS {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if maxLockTimeS > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.LockTimeS != nil && *ev.LockTimeS <= maxLockTimeS {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if minRowsAffected > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.RowsAffected >= minRowsAffected {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if maxRowsAffected > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.RowsAffected <= maxRowsAffected {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if minBytesSent > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.BytesSent >= minBytesSent {
+				filtered = append(filtered, ev)
+			}
+		}
+		events = filtered
+	}
+	if maxBytesSent > 0 {
+		filtered := events[:0]
+		for _, ev := range events {
+			if ev.BytesSent <= maxBytesSent {
 				filtered = append(filtered, ev)
 			}
 		}
@@ -919,6 +1223,10 @@ func (s *MariaDBDashboardService) GetSlowQueryLogs(
 	startNs, endNs int64,
 	page, pageSize int,
 	minDurationMs float64,
+	hostID string,
+	search, userFilter, hostFilter, schemaFilter, dbFilter, threadFilter, qcHitFilter string,
+	minQueryTime, maxQueryTime, minLockTime, maxLockTime float64,
+	minRowsSent, maxRowsSent, minRowsExamined, maxRowsExamined int64,
 ) (*SlowQueryLogsPage, error) {
 	if page < 1 {
 		page = 1
@@ -926,14 +1234,14 @@ func (s *MariaDBDashboardService) GetSlowQueryLogs(
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 50
 	}
-	sel := mariaDBLokiSelector(serviceName) + ` |~ "(?i)(Query_time|slow query)"`
+	sel := mariaDBLokiSelector(serviceName, hostID) + ` |~ "(?i)(Query_time|slow query)"`
 	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, sel, startNs, endNs)
 	if err != nil {
 		return nil, err
 	}
 
 	// stitchSlowQueryLines needs ascending order
-	sort.Slice(entries, func(i, j int) bool {
+	sort.SliceStable(entries, func(i, j int) bool {
 		ti, _ := strconv.ParseInt(entries[i].TimestampNs, 10, 64)
 		tj, _ := strconv.ParseInt(entries[j].TimestampNs, 10, 64)
 		return ti < tj
@@ -952,7 +1260,155 @@ func (s *MariaDBDashboardService) GetSlowQueryLogs(
 		parsed = filtered
 	}
 
-	sort.Slice(parsed, func(i, j int) bool { return parsed[i].Timestamp > parsed[j].Timestamp })
+	if search != "" {
+		needle := strings.ToLower(search)
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if strings.Contains(strings.ToLower(p.User), needle) ||
+				strings.Contains(strings.ToLower(p.Host), needle) ||
+				strings.Contains(strings.ToLower(p.Schema), needle) ||
+				strings.Contains(strings.ToLower(p.DB), needle) ||
+				strings.Contains(strings.ToLower(p.SQL), needle) ||
+				strings.Contains(strings.ToLower(p.ThreadID), needle) {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if userFilter != "" {
+		uf := strings.ToLower(userFilter)
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if strings.Contains(strings.ToLower(p.User), uf) {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if hostFilter != "" {
+		hf := strings.ToLower(hostFilter)
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if strings.Contains(strings.ToLower(p.Host), hf) {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if schemaFilter != "" {
+		sf := strings.ToLower(schemaFilter)
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if strings.Contains(strings.ToLower(p.Schema), sf) {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if dbFilter != "" {
+		df := strings.ToLower(dbFilter)
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if strings.Contains(strings.ToLower(p.DB), df) {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if threadFilter != "" {
+		tf := strings.ToLower(threadFilter)
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if strings.Contains(strings.ToLower(p.ThreadID), tf) {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if qcHitFilter != "" {
+		qf := strings.ToLower(qcHitFilter)
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if strings.Contains(strings.ToLower(p.QCHit), qf) {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if minQueryTime > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.QueryTimeS >= minQueryTime {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if maxQueryTime > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.QueryTimeS <= maxQueryTime {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if minLockTime > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.LockTimeS >= minLockTime {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if maxLockTime > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.LockTimeS <= maxLockTime {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if minRowsSent > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.RowsSent >= minRowsSent {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if maxRowsSent > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.RowsSent <= maxRowsSent {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if minRowsExamined > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.RowsExamined >= minRowsExamined {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+	if maxRowsExamined > 0 {
+		filtered := parsed[:0]
+		for _, p := range parsed {
+			if p.RowsExamined <= maxRowsExamined {
+				filtered = append(filtered, p)
+			}
+		}
+		parsed = filtered
+	}
+
+	sort.SliceStable(parsed, func(i, j int) bool { return parsed[i].Timestamp > parsed[j].Timestamp })
 
 	total := len(parsed)
 	offset := (page - 1) * pageSize
@@ -978,11 +1434,12 @@ func (s *MariaDBDashboardService) GetErrorLogs(
 	serviceName string,
 	startNs, endNs int64,
 	limit int,
+	hostID string,
 ) ([]string, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	sel := mariaDBLokiSelector(serviceName) + ` | log_kind="error"`
+	sel := mariaDBLokiSelector(serviceName, hostID) + ` | log_kind="error"`
 	return s.base.lokiQueryLogLines(ctx, tenantUUID, sel, startNs, endNs, limit)
 }
 
@@ -995,77 +1452,15 @@ var (
 	slowQueryTimeRE = regexp.MustCompile(`(?i)Query_time:\s*([0-9.]+)\s+Lock_time:\s*([0-9.]+)\s+Rows_sent:\s*(\d+)\s+Rows_examined:\s*(\d+)`)
 	slowSchemaRE    = regexp.MustCompile(`(?i)use\s+(\S+)\s*;`)
 	slowSetTsRE     = regexp.MustCompile(`(?i)SET\s+timestamp=\d+;`)
+	slowSchemaFieldRE = regexp.MustCompile(`(?i)Schema:\s*(.*?)\s*QC_hit:`)
+	slowQCHitRE      = regexp.MustCompile(`(?i)QC_hit:\s*(\S+)`)
+	slowRowsAffectedRE = regexp.MustCompile(`(?i)Rows_affected:\s*(\d+)`)
+	slowBytesSentRE   = regexp.MustCompile(`(?i)Bytes_sent:\s*(\d+)`)
 )
 
-type logGroup struct {
-	ts    string
-	lines []string
-	meta  map[string]string
-}
-
-func stitchLogLines(entries []LokiLogEntry) []LokiLogEntry {
-	out := make([]LokiLogEntry, 0, len(entries))
-	var cur *logGroup
-
-	flush := func() {
-		if cur == nil {
-			return
-		}
-		out = append(out, LokiLogEntry{
-			TimestampNs: cur.ts,
-			Line:        strings.Join(cur.lines, "\n"),
-			Metadata:    cur.meta,
-		})
-		cur = nil
-	}
-
-	for _, e := range entries {
-		line := strings.TrimSpace(e.Line)
-		isTimeHeader := strings.HasPrefix(line, "# Time:")
-		isUserHeader := strings.HasPrefix(line, "# User@Host:")
-
-		if isTimeHeader || isUserHeader {
-			if cur != nil && isTimeHeader {
-				flush()
-			}
-			if cur == nil {
-				cur = &logGroup{ts: e.TimestampNs, meta: e.Metadata}
-			}
-			cur.lines = append(cur.lines, line)
-			continue
-		}
-
-		if cur != nil {
-			cur.lines = append(cur.lines, line)
-			if strings.HasSuffix(line, ";") && !strings.HasPrefix(line, "#") && !slowSetTsRE.MatchString(line) {
-				flush()
-			}
-			continue
-		}
-
-		// General stitching: if this line doesn't end with ';' and isn't a
-		// complete log entry (no ISO/classic timestamp prefix), it may be a
-		// SQL fragment belonging to a multi-line statement — group it.
-		hasTerminator := strings.HasSuffix(line, ";")
-		isLogLine := mariaDBISOLogRE.MatchString(line) || mariaDBClassicLogRE.MatchString(line)
-
-		if hasTerminator || isLogLine || slowSetTsRE.MatchString(line) || line == "" {
-			flush()
-			out = append(out, e)
-			continue
-		}
-
-		cur = &logGroup{ts: e.TimestampNs, meta: e.Metadata}
-		cur.lines = append(cur.lines, line)
-	}
-	flush()
-	return out
-}
-
 func parseSlowQueryEntries(entries []LokiLogEntry) []SlowQueryEntry {
-	stitched := stitchLogLines(entries)
 	var result []SlowQueryEntry
-	for _, e := range stitched {
+	for _, e := range entries {
 		lines := strings.Split(e.Line, "\n")
 		if len(lines) < 2 {
 			continue
@@ -1077,9 +1472,6 @@ func parseSlowQueryEntries(entries []LokiLogEntry) []SlowQueryEntry {
 		}
 		for _, l := range lines {
 			l = strings.TrimSpace(l)
-			if m := slowTimeRE.FindStringSubmatch(l); len(m) == 2 {
-				sqe.Timestamp = strings.TrimSpace(m[1])
-			}
 			if m := slowUserRE.FindStringSubmatch(l); len(m) >= 3 {
 				sqe.User = strings.TrimSpace(m[1])
 				sqe.Host = strings.TrimSpace(m[2])
@@ -1087,11 +1479,23 @@ func parseSlowQueryEntries(entries []LokiLogEntry) []SlowQueryEntry {
 			if m := slowThreadRE.FindStringSubmatch(l); len(m) == 2 {
 				sqe.ThreadID = m[1]
 			}
+			if m := slowSchemaFieldRE.FindStringSubmatch(l); len(m) == 2 {
+				sqe.Schema = strings.TrimSpace(m[1])
+			}
+			if m := slowQCHitRE.FindStringSubmatch(l); len(m) == 2 {
+				sqe.QCHit = m[1]
+			}
 			if m := slowQueryTimeRE.FindStringSubmatch(l); len(m) == 5 {
 				sqe.QueryTimeS, _ = strconv.ParseFloat(m[1], 64)
 				sqe.LockTimeS, _ = strconv.ParseFloat(m[2], 64)
 				sqe.RowsSent, _ = strconv.ParseInt(m[3], 10, 64)
 				sqe.RowsExamined, _ = strconv.ParseInt(m[4], 10, 64)
+			}
+			if m := slowRowsAffectedRE.FindStringSubmatch(l); len(m) == 2 {
+				sqe.RowsAffected, _ = strconv.ParseInt(m[1], 10, 64)
+			}
+			if m := slowBytesSentRE.FindStringSubmatch(l); len(m) == 2 {
+				sqe.BytesSent, _ = strconv.ParseInt(m[1], 10, 64)
 			}
 			if m := slowSchemaRE.FindStringSubmatch(l); len(m) == 2 {
 				sqe.DB = m[1]
@@ -1151,8 +1555,8 @@ func (s *MariaDBDashboardService) lokiQueryAllLogEntries(ctx context.Context, te
 	return all, nil
 }
 
-func (s *MariaDBDashboardService) countParsedLogCategories(ctx context.Context, tenantUUID, serviceName string, startNs, endNs int64, minDurationSec float64) MariaDBLogSummary {
-	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, mariaDBLokiSelector(serviceName), startNs, endNs)
+func (s *MariaDBDashboardService) countParsedLogCategories(ctx context.Context, tenantUUID, serviceName string, startNs, endNs int64, minDurationSec float64, hostID string) MariaDBLogSummary {
+	entries, err := s.lokiQueryAllLogEntries(ctx, tenantUUID, mariaDBLokiSelector(serviceName, hostID), startNs, endNs)
 	if err != nil {
 		return MariaDBLogSummary{}
 	}
@@ -1187,12 +1591,20 @@ func (s *MariaDBDashboardService) countParsedLogCategories(ctx context.Context, 
 
 // ── Loki selector / query builders ──────────────────────────────────────
 
-func mariaDBLokiSelector(serviceName string) string {
+func mariaDBLokiSelector(serviceName, hostID string) string {
 	serviceName = strings.TrimSpace(serviceName)
+	// service_name is an indexed label (must be in {}).
+	// host_id is structured metadata set by OTel - use pipeline filter.
+	selector := ""
 	if serviceName == "" {
-		return `{service_name=~"mysql.*|mariadb.*|mysqld.*"}`
+		selector = `{service_name=~"mysql.*|mariadb.*|mysqld.*"}`
+	} else {
+		selector = fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
 	}
-	return fmt.Sprintf(`{service_name="%s"}`, lokiLabelValue(serviceName))
+	if hostID != "" {
+		selector += fmt.Sprintf(` | host_id="%s"`, lokiLabelValue(hostID))
+	}
+	return selector
 }
 
 func mariaDBLogsLokiQuery(baseSelector, category string) string {
@@ -1241,12 +1653,6 @@ func parseMariaDBLogEvent(entry LokiLogEntry) MariaDBLogEvent {
 		Severity:  "INFO",
 		Category:  "event",
 		Message:   strings.TrimSpace(entry.Line),
-		Labels:    map[string]string{},
-	}
-	for key, value := range entry.Metadata {
-		if strings.TrimSpace(value) != "" {
-			event.Labels[key] = value
-		}
 	}
 	if ts, err := strconv.ParseInt(entry.TimestampNs, 10, 64); err == nil {
 		event.Timestamp = time.Unix(0, ts).Format(time.RFC3339)
@@ -1263,21 +1669,79 @@ func parseMariaDBLogEvent(entry LokiLogEntry) MariaDBLogEvent {
 		event.Severity = normalizeMariaDBSeverity(matches[2])
 		event.Message = strings.TrimSpace(matches[3])
 	}
-	if matches := mariaDBSlowUserRE.FindStringSubmatch(line); len(matches) == 3 {
-		event.User = matches[1]
-		event.Host = strings.TrimSpace(matches[2])
+
+	// Extract duration from Query_time: if present anywhere in the line
+	if m := mariaDBQueryTimeRE.FindStringSubmatch(line); len(m) == 2 {
+		event.DurationMs = parseSlowQueryDuration(m[1])
 	}
-	if matches := mariaDBQueryTimeRE.FindStringSubmatch(line); len(matches) == 2 {
-		if value, err := strconv.ParseFloat(matches[1], 64); err == nil {
-			ms := value * 1000
-			event.DurationMs = &ms
+
+	// Parse multi-line slow query entries: extract fields from # lines and clean message
+	if strings.Contains(line, "#") {
+		var cleanLines []string
+		for _, l := range strings.Split(line, "\n") {
+			l = strings.TrimSpace(l)
+			if l == "" {
+				continue
+			}
+			if slowTimeRE.MatchString(l) {
+				continue
+			}
+			if m := slowUserRE.FindStringSubmatch(l); len(m) >= 3 {
+				event.User = strings.TrimSpace(m[1])
+				event.Host = strings.TrimSpace(m[2])
+				continue
+			}
+			if m := slowThreadRE.FindStringSubmatch(l); len(m) == 2 {
+				event.ThreadID = m[1]
+			}
+			if m := slowSchemaFieldRE.FindStringSubmatch(l); len(m) == 2 {
+				event.Schema = strings.TrimSpace(m[1])
+			}
+			if m := slowQCHitRE.FindStringSubmatch(l); len(m) == 2 {
+				event.QCHit = m[1]
+			}
+			if m := slowQueryTimeRE.FindStringSubmatch(l); len(m) == 5 {
+				event.DurationMs = parseSlowQueryDuration(m[1])
+				if lockTime, err := strconv.ParseFloat(m[2], 64); err == nil {
+					event.LockTimeS = &lockTime
+				}
+				if rowsSent, err := strconv.ParseInt(m[3], 10, 64); err == nil {
+					event.RowsSent = &rowsSent
+				}
+				if rowsExamined, err := strconv.ParseInt(m[4], 10, 64); err == nil {
+					event.RowsExamined = &rowsExamined
+				}
+			}
+			if m := slowRowsAffectedRE.FindStringSubmatch(l); len(m) == 2 {
+				event.RowsAffected, _ = strconv.ParseInt(m[1], 10, 64)
+			}
+			if m := slowBytesSentRE.FindStringSubmatch(l); len(m) == 2 {
+				event.BytesSent, _ = strconv.ParseInt(m[1], 10, 64)
+			}
+			if strings.HasPrefix(l, "#") {
+				continue
+			}
+			if slowSetTsRE.MatchString(l) {
+				continue
+			}
+			cleanLines = append(cleanLines, l)
+		}
+		if len(cleanLines) > 0 {
+			event.Message = strings.TrimSpace(strings.Join(cleanLines, "\n"))
+		} else if len(cleanLines) == 0 {
+			event.Message = ""
 		}
 	}
 	event.Category = classifyMariaDBLog(event.Message, line, event.Severity)
-	if len(event.Labels) == 0 {
-		event.Labels = nil
-	}
 	return event
+}
+
+func parseSlowQueryDuration(value string) *float64 {
+	if v, err := strconv.ParseFloat(value, 64); err == nil {
+		ms := v * 1000
+		return &ms
+	}
+	return nil
 }
 
 func classifyMariaDBLog(message, raw, severity string) string {
@@ -1318,7 +1782,7 @@ func normalizeMariaDBSeverity(value string) string {
 }
 
 func mariaDBLogMatchesSearch(ev MariaDBLogEvent, needle string) bool {
-	for _, field := range []string{ev.Timestamp, ev.Severity, ev.Category, ev.User, ev.Host, ev.ThreadID, ev.Subsystem, ev.Message} {
+	for _, field := range []string{ev.Timestamp, ev.Severity, ev.Category, ev.User, ev.Host, ev.ThreadID, ev.Subsystem, ev.Schema, ev.QCHit, ev.Message} {
 		if strings.Contains(strings.ToLower(field), needle) {
 			return true
 		}

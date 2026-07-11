@@ -74,11 +74,25 @@ export type PoolDetail = {
   top_uris?: LabelCount[]
   request_count?: number
 
+  avg_duration_ms?: number
+  avg_memory_kb?: number
+  avg_cpu_pct?: number
+  top_memory_scripts?: ScriptStat[]
+  method_distribution?: LabelCount[]
+  duration_histogram?: LabelCount[]
+  memory_histogram?: LabelCount[]
+  top_error_uris?: LabelCount[]
+
+  req_rate_timeseries?: PHPFPMTimePoint[]
+  latency_percentiles_timeseries?: PHPFPMTimePoint[]
+  memory_timeseries?: PHPFPMTimePoint[]
+  cpu_timeseries?: PHPFPMTimePoint[]
+  workers_timeseries?: PHPFPMTimePoint[]
+
   error_count?: number
   warning_count?: number
   notice_count?: number
   slow_request_count?: number
-  top_error_messages?: LabelCount[]
 }
 
 export type PHPFPMDashboardSummary = {
@@ -86,8 +100,6 @@ export type PHPFPMDashboardSummary = {
   up?: number
   scrape_failures?: number
   uptime_seconds?: number
-  health_score?: number
-
   // Worker pool
   active_processes?: number
   idle_processes?: number
@@ -160,8 +172,16 @@ export type PHPFPMDashboardSummary = {
   opcache_hit_rate_timeseries: PHPFPMTimePoint[]
   opcache_memory_timeseries: PHPFPMTimePoint[]
   opcache_scripts_timeseries: PHPFPMTimePoint[]
+  opcache_wasted_timeseries?: PHPFPMTimePoint[]
+
+  // VM rate timeseries
+  slow_req_rate_timeseries: PHPFPMTimePoint[]
+  scrape_fail_rate_timeseries: PHPFPMTimePoint[]
+  children_rate_timeseries: PHPFPMTimePoint[]
+  running_procs_timeseries: PHPFPMTimePoint[]
 
   // Log-derived timeseries
+  latency_percentiles_timeseries: PHPFPMTimePoint[]
   status_timeseries: PHPFPMTimePoint[]
   req_rate_timeseries: PHPFPMTimePoint[]
 
@@ -179,7 +199,6 @@ export type PHPFPMDashboardSummary = {
   duration_histogram?: LabelCount[]
   memory_histogram?: LabelCount[]
   cpu_histogram?: LabelCount[]
-  top_error_messages?: LabelCount[]
   error_type_breakdown?: LabelCount[]
 }
 

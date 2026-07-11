@@ -88,6 +88,7 @@ func (h *NginxDashboardHandler) Dashboard(c echo.Context) error {
 		step,
 		minRT,
 		rtPercentiles,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-dashboard] summary failed: %v", err)
@@ -178,6 +179,7 @@ func (h *NginxDashboardHandler) SlowRequests(c echo.Context) error {
 		minRT,
 		page,
 		perPage,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-slow-requests] query failed: %v", err)
@@ -245,6 +247,7 @@ func (h *NginxDashboardHandler) Explorer(c echo.Context) error {
 		endNs,
 		step,
 		filter,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-explorer] query failed: %v", err)
@@ -286,17 +289,13 @@ func (h *NginxDashboardHandler) Domains(c echo.Context) error {
 		if domainName == "" {
 			domainName = "(default)"
 		}
-		if idx, ok := seen[domainName]; ok {
-			items[idx].IsDefault = items[idx].IsDefault || row.IsDefault
-			items[idx].IsSharedLog = items[idx].IsSharedLog || row.IsSharedLog
+		if _, ok := seen[domainName]; ok {
 			continue
 		}
 		seen[domainName] = len(items)
 		items = append(items, service.NginxDomainItem{
 			Domain:      domainName,
 			Enabled:     row.Enabled,
-			IsDefault:   row.IsDefault,
-			IsSharedLog: row.IsSharedLog,
 		})
 	}
 
@@ -356,6 +355,7 @@ func (h *NginxDashboardHandler) ErrorLogs(c echo.Context) error {
 		startNs,
 		endNs,
 		limit,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-error-logs] query failed: %v", err)
@@ -458,6 +458,7 @@ func (h *NginxDashboardHandler) IPInvestigation(c echo.Context) error {
 		step,
 		seenStartNs,
 		seenEndNs,
+		svc.MachineID,
 	)
 	if err != nil {
 		c.Logger().Errorf("[nginx-ip-investigation] failed for ip=%s: %v", ip, err)

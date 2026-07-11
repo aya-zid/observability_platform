@@ -79,6 +79,12 @@ FILELOG_RECEIVERS_YAML=""
 declare -a FILELOG_PIPELINE=()
 declare -a METRIC_PIPELINE=("hostmetrics")
 
+DOCKER_LOG_TAILER_UNIT_READY=false
+DOCKER_METRICS_UNIT_READY=false
+PROM_FILE_SERVER_UNIT_READY=false
+DOCKER_WATCHER_UNIT_READY=false
+HEARTBEAT_UNIT_READY=false
+
 # ============================================
 # CHECKS
 # ============================================
@@ -738,24 +744,41 @@ discover_phpfpm() {
   info "  Discovering php-fpm ($UNIT)..."
   local PATHS=""
 
+  # Read error log from main config (one per FPM master, not per pool)
   for CONF in /etc/php/*/fpm/php-fpm.conf /etc/php-fpm.conf; do
     [ -f "$CONF" ] || continue
-    local E S A
-    E=$(grep -oP '(?<=^error_log\s*=\s*).*'  "$CONF" 2>/dev/null | tr -d ' ') || true
-    S=$(grep -oP '(?<=^slowlog\s*=\s*).*'    "$CONF" 2>/dev/null | tr -d ' ') || true
-    A=$(grep -oP '(?<=^access\.log\s*=\s*).*' "$CONF" 2>/dev/null | tr -d ' ') || true
+    local E
+    E=$(grep -oP '(?<=^error_log\s*=\s*).*' "$CONF" 2>/dev/null | tr -d ' ') || true
     [ -f "$E" ] && PATHS="${PATHS}"$'\n'"$E"
-    [ -f "$S" ] && PATHS="${PATHS}"$'\n'"$S"
-    [ -f "$A" ] && PATHS="${PATHS}"$'\n'"$A"
   done
+
+  # Read per-pool log files from each pool config
+  # Resolve $pool variable to the actual pool name (filename without .conf)
+  local LISTEN_ALL=""
+  local POOL_COUNT=0
   for POOL in /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf; do
     [ -f "$POOL" ] || continue
-    local S A
+    local POOL_NAME
+    POOL_NAME=$(basename "$POOL" .conf)
+    local S A L
     S=$(grep -oP '(?<=^slowlog\s*=\s*).*'    "$POOL" 2>/dev/null | tr -d ' ') || true
     A=$(grep -oP '(?<=^access\.log\s*=\s*).*' "$POOL" 2>/dev/null | tr -d ' ') || true
+    L=$(grep -oP '(?<=^listen\s*=\s*).*'     "$POOL" 2>/dev/null | head -1 | tr -d ' ') || true
+
+    # Resolve $pool variable to actual pool name
+    S="${S//\$pool/$POOL_NAME}"
+    A="${A//\$pool/$POOL_NAME}"
+
     [ -f "$S" ] && PATHS="${PATHS}"$'\n'"$S"
     [ -f "$A" ] && PATHS="${PATHS}"$'\n'"$A"
+    if [ -n "$L" ]; then
+      [ -n "$LISTEN_ALL" ] && LISTEN_ALL="${LISTEN_ALL}, "
+      LISTEN_ALL="${LISTEN_ALL}${L}"
+      POOL_COUNT=$((POOL_COUNT + 1))
+    fi
   done
+
+  # Fallback: catch any log files in the common log directory
   [ -d /var/log/php-fpm ] && PATHS="${PATHS}"$'\n'"/var/log/php-fpm/*.log"
   PATHS=$(echo "$PATHS" | sort -u | filter_existing)
 
@@ -763,15 +786,11 @@ discover_phpfpm() {
   local STATUS="no_logs"
   [ -n "$PATHS" ] && STATUS="logs_found"
   local VERSION; VERSION=$(get_unit_version "${UNIT}.service" || echo "")
-  local LISTEN=""
-  for POOL in /etc/php/*/fpm/pool.d/*.conf /etc/php-fpm.d/*.conf; do
-    [ -f "$POOL" ] || continue
-    local L
-    L=$(grep -oP '(?<=^listen\s*=\s*).*' "$POOL" 2>/dev/null | head -1) || true
-    [ -n "$L" ] && LISTEN="$L"
-  done
   local NOTES="php-fpm"
-  [ -n "$LISTEN" ] && NOTES="${NOTES} | listen=${LISTEN}"
+  if [ -n "$LISTEN_ALL" ]; then
+    NOTES="${NOTES} | listen=${LISTEN_ALL}"
+    [ "$POOL_COUNT" -gt 1 ] && NOTES="${NOTES} | pools=${POOL_COUNT}"
+  fi
   unit_uses_journald "$UNIT" && NOTES="${NOTES} | also_logs_to=journald"
   register_service "phpfpm" "$PATHS" "$STATUS" "" "$NOTES" "$VERSION"
 }
@@ -1260,14 +1279,17 @@ ${VOLUME_PATHS_YAML}
       - type: copy
         from: attributes.s
         to: attributes.log_level
+        if: 'attributes.s != nil'
         on_error: send_quiet
       - type: copy
         from: attributes.level
         to: attributes.log_level
+        if: 'attributes.level != nil'
         on_error: send_quiet
       - type: copy
         from: attributes.severity
         to: attributes.log_level
+        if: 'attributes.severity != nil'
         on_error: send_quiet
       - type: severity_parser
         parse_from: body
@@ -1306,14 +1328,17 @@ ${VOLUME_PATHS_YAML}
       - type: copy
         from: attributes.level
         to: attributes.log_level
+        if: 'attributes.level != nil'
         on_error: send_quiet
       - type: copy
         from: attributes.severity
         to: attributes.log_level
+        if: 'attributes.severity != nil'
         on_error: send_quiet
       - type: copy
         from: attributes.msg
         to: body
+        if: 'attributes.msg != nil'
         on_error: send_quiet
     resource:
       service.name: $(yaml_quote "$CNAME")
@@ -1446,14 +1471,8 @@ SyslogIdentifier=agent-docker-log-tailer
 WantedBy=multi-user.target
 DOCKERTAILERSVC
 
-  systemctl daemon-reload
-  systemctl enable agent-docker-log-tailer
-  if systemctl start agent-docker-log-tailer && sleep 2 && systemctl is-active --quiet agent-docker-log-tailer; then
-    log "  Docker real-time log tailer started"
-  else
-    warn "  Docker log tailer failed to start"
-    MANUAL_STEPS+=("Docker log tailer: systemctl start agent-docker-log-tailer")
-  fi
+  DOCKER_LOG_TAILER_UNIT_READY=true
+  log "  Docker real-time log tailer unit installed"
 
 else
   info "Docker not available — skipping container discovery"
@@ -1585,16 +1604,10 @@ AccuracySec=5s
 WantedBy=timers.target
 DOCKERMETRICTIMER
 
-  systemctl daemon-reload
-  systemctl enable agent-docker-metrics.timer
-  if systemctl start agent-docker-metrics.timer && systemctl start agent-docker-metrics; then
-    log "  Docker container metrics collector started (timer: every 30s)"
-    DOCKER_METRICS_OK=true
-    METRIC_PIPELINE+=("prometheus/docker_containers")
-  else
-    warn "  Docker metrics collector failed to start"
-    MANUAL_STEPS+=("Docker container metrics: systemctl start agent-docker-metrics.timer")
-  fi
+  DOCKER_METRICS_UNIT_READY=true
+  DOCKER_METRICS_OK=true
+  METRIC_PIPELINE+=("prometheus/docker_containers")
+  log "  Docker container metrics collector unit installed"
 else
   info "  Docker not available — skipping container metrics collector"
 fi
@@ -1651,14 +1664,8 @@ SyslogIdentifier=agent-prom-file-server
 WantedBy=multi-user.target
 PROMSERVERSVC
 
-  systemctl daemon-reload
-  systemctl enable agent-prom-file-server
-  if systemctl start agent-prom-file-server && sleep 1 && systemctl is-active --quiet agent-prom-file-server; then
-    log "Prometheus file server started on 127.0.0.1:19101 (routes: /docker, /mariadb)"
-  else
-    warn "Prometheus file server failed to start"
-    MANUAL_STEPS+=("Start the metrics file server: systemctl start agent-prom-file-server")
-  fi
+  PROM_FILE_SERVER_UNIT_READY=true
+  log "Prometheus file server unit installed"
 else
   warn "python3 not found — Prometheus file server not installed"
   MANUAL_STEPS+=("Install python3 and then: systemctl enable --now agent-prom-file-server")
@@ -1787,14 +1794,17 @@ ${PATHS_YAML}
       - type: copy
         from: attributes.s
         to: attributes.log_level
+        if: 'attributes.s != nil'
         on_error: send_quiet
       - type: copy
         from: attributes.level
         to: attributes.log_level
+        if: 'attributes.level != nil'
         on_error: send_quiet
       - type: move
         from: attributes.msg
         to: body
+        if: 'attributes.msg != nil'
         on_error: send_quiet
       - type: add
         field: attributes.log_format
@@ -1814,12 +1824,33 @@ ${PATHS_YAML}
     include_file_path: true
     start_at: end
     operators:
+      # Combine continuation lines (e.g. bare DETAIL/HINT/CONTEXT/LOCATION
+      # lines without a full log header) into the preceding primary entry.
+      - type: recombine
+        is_first_entry: 'body matches "^\\\\d{4}-\\\\d{2}-\\\\d{2}[T ]\\\\d{2}:\\\\d{2}:\\\\d{2}"'
+        combine_field: body
+        combine_with: "\n"
+        source_identifier: attributes["log.file.path"]
+        max_batch_size: 200
+        force_flush_period: 5s
+        max_log_size: 65536
+        on_error: send_quiet
       - type: regex_parser
-        regex: '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\[]*\[\d+\]\s*(?:(?P<pg_user>\S+)@(?P<pg_database>\S+))?\s+(?P<log_level>LOG|ERROR|FATAL|PANIC|WARNING|NOTICE|INFO|DETAIL|HINT|DEBUG\d*):\s+(?P<pg_message>.{0,600})'
+        regex: '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\[]*\[\d+\]\s*(?:(?P<pg_user>\S+)@(?P<pg_database>\S+)\s+)?\S+\(\d+\)\s+\S+\s+(?P<log_level>LOG|ERROR|FATAL|PANIC|WARNING|NOTICE|INFO|DETAIL|HINT|DEBUG\d*):\s+(?P<pg_message>.{0,600})'
         on_error: send_quiet
       - type: regex_parser
         parse_from: attributes.pg_message
         regex: '^duration:\s+(?P<duration_ms>[\d.]+)\s+ms'
+        on_error: send_quiet
+      # Drop "connection received" lines — they carry no user info and are not
+      # useful in isolation. The meaningful data is in the authenticated/
+      # authorized/disconnection lines which have the actual user.
+      - type: filter
+        expr: 'body matches "connection received:"'
+        on_error: send_quiet
+      # Drop monitoring user logs — the agent's own connections, not real app traffic.
+      - type: filter
+        expr: 'attributes.pg_user == "monitoring" or attributes.pg_user == "postgres_exporter" or attributes.pg_user == "pgexporter"'
         on_error: send_quiet
       - type: add
         field: attributes.log_format
@@ -1890,6 +1921,29 @@ ${SLOW_YAML}
     include_file_path: true
     start_at: end
     operators:
+      # Drop the useless "# Time:" lines — they appear at second boundaries
+      # but carry no query data and break the recombine boundary detection.
+      # Also drops timestamp-prefixed variant: "2026-07-08 19:12:35.005 # Time: ..."
+      - type: filter
+        expr: 'body matches "#\\s*Time:\\s*\\d+"'
+        on_error: send_quiet
+      # Join every physical line of one slow-query entry into a single record,
+      # using the "# User@Host:" line as the boundary (appears once per query).
+      - type: recombine
+        is_first_entry: 'body matches "^# User@Host:"'
+        combine_field: body
+        combine_with: "\n"
+        source_identifier: attributes["log.file.path"]
+        max_batch_size: 200
+        force_flush_period: 5s
+        max_log_size: 65536
+        on_error: send_quiet
+      # Drop the monitoring agent's own queries entirely, now that each entry
+      # is a complete record. The "monitor" user is created for the agent's DB
+      # connection and is not real application traffic.
+      - type: filter
+        expr: 'body matches "User@Host:\\\\s*monitor\\\\[monitor\\\\]"'
+        on_error: send_quiet
       - type: regex_parser
         regex: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[.\dZ+:\-]*\s+\d+\s+\[(?P<log_level>System|Warning|ERROR|Note)\](?:\s+\[(?P<mysql_error_code>MY-\d+)\])?\s+\[(?P<mysql_subsystem>\w+)\]\s+(?P<mysql_message>.{0,400})'
         on_error: send_quiet
@@ -1959,6 +2013,7 @@ ${PATHS_YAML}
       - type: copy
         from: attributes.level
         to: attributes.log_level
+        if: 'attributes.level != nil'
         on_error: send_quiet
       - type: severity_parser
         parse_from: body
@@ -2052,6 +2107,54 @@ LOG_RECEIVERS_LIST="journald"
 for R in "${FILELOG_PIPELINE[@]}"; do
   LOG_RECEIVERS_LIST="${LOG_RECEIVERS_LIST}, ${R}"
 done
+
+host_log_unit_match_expr() {
+  local UNIT=$1
+  printf '(attributes["_SYSTEMD_UNIT"] == "%s" or attributes["systemd.unit"] == "%s" or attributes["systemd_unit"] == "%s" or resource.attributes["systemd_unit"] == "%s")' "$UNIT" "$UNIT" "$UNIT" "$UNIT"
+}
+
+host_log_identifier_match_expr() {
+  local IDENTIFIER=$1
+  printf '(attributes["SYSLOG_IDENTIFIER"] == "%s" or attributes["syslog.identifier"] == "%s" or attributes["syslog_identifier"] == "%s")' "$IDENTIFIER" "$IDENTIFIER" "$IDENTIFIER"
+}
+
+host_log_or_expr() {
+  local EXPR=""
+  local PART
+  for PART in "$@"; do
+    [ -z "$PART" ] && continue
+    if [ -z "$EXPR" ]; then
+      EXPR="$PART"
+    else
+      EXPR="${EXPR} or ${PART}"
+    fi
+  done
+  printf '%s' "$EXPR"
+}
+
+declare -a HOST_LOG_KEEP_EXPR_PARTS=()
+HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_identifier_match_expr sshd)")
+HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_identifier_match_expr sudo)")
+HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_identifier_match_expr otelcol)")
+HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_unit_match_expr ssh.service)")
+HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_unit_match_expr sshd.service)")
+HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_unit_match_expr sudo.service)")
+HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_unit_match_expr otelcol.service)")
+
+for SVC in "${ALL_SERVICES[@]}"; do
+  [ -z "$SVC" ] && continue
+  HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_unit_match_expr "${SVC}.service")")
+  HOST_LOG_KEEP_EXPR_PARTS+=("$(host_log_identifier_match_expr "$SVC")")
+done
+
+HOST_LOG_KEEP_EXPR=$(host_log_or_expr "${HOST_LOG_KEEP_EXPR_PARTS[@]}")
+[ -z "$HOST_LOG_KEEP_EXPR" ] && HOST_LOG_KEEP_EXPR="false"
+
+HOST_LOG_PRIORITY_AT_LEAST_WARNING='((attributes["PRIORITY"] == nil and attributes["priority"] == nil) or (attributes["PRIORITY"] != nil and Int(attributes["PRIORITY"]) >= 4) or (attributes["priority"] != nil and Int(attributes["priority"]) >= 4))'
+HOST_LOG_PRIORITY_INFO_OR_DEBUG='((attributes["PRIORITY"] != nil and Int(attributes["PRIORITY"]) >= 6) or (attributes["priority"] != nil and Int(attributes["priority"]) >= 6))'
+HOST_LOG_NOISY_ERROR_PLUS_ONLY='(attributes["_SYSTEMD_UNIT"] == "systemd-udevd.service" or attributes["systemd.unit"] == "systemd-udevd.service" or attributes["systemd_unit"] == "systemd-udevd.service" or resource.attributes["systemd_unit"] == "systemd-udevd.service" or attributes["SYSLOG_IDENTIFIER"] == "kernel" or attributes["syslog.identifier"] == "kernel" or attributes["syslog_identifier"] == "kernel" or attributes["_TRANSPORT"] == "kernel" or attributes["systemd.transport"] == "kernel" or attributes["transport"] == "kernel")'
+HOST_LOG_NOISY_INFO_DEBUG='(attributes["_SYSTEMD_UNIT"] == "systemd-resolved.service" or attributes["systemd.unit"] == "systemd-resolved.service" or attributes["systemd_unit"] == "systemd-resolved.service" or resource.attributes["systemd_unit"] == "systemd-resolved.service" or attributes["_SYSTEMD_UNIT"] == "systemd-timesyncd.service" or attributes["systemd.unit"] == "systemd-timesyncd.service" or attributes["systemd_unit"] == "systemd-timesyncd.service" or resource.attributes["systemd_unit"] == "systemd-timesyncd.service" or attributes["_SYSTEMD_UNIT"] == "NetworkManager.service" or attributes["systemd.unit"] == "NetworkManager.service" or attributes["systemd_unit"] == "NetworkManager.service" or resource.attributes["systemd_unit"] == "NetworkManager.service" or attributes["SYSLOG_IDENTIFIER"] == "NetworkManager" or attributes["syslog.identifier"] == "NetworkManager" or attributes["syslog_identifier"] == "NetworkManager")'
+HOST_LOG_OTELCOL_STACK_FRAME='((attributes["_SYSTEMD_UNIT"] == "otelcol.service" or attributes["systemd.unit"] == "otelcol.service" or attributes["systemd_unit"] == "otelcol.service" or attributes["SYSLOG_IDENTIFIER"] == "otelcol" or attributes["syslog.identifier"] == "otelcol" or attributes["syslog_identifier"] == "otelcol") and IsMatch(body, "^github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza"))'
 
 # ============================================
 # WRITE CONFIG FILE
@@ -2163,24 +2266,6 @@ receivers:
             enabled: true
           system.processes.created:
             enabled: true
-      process:
-        mute_process_name_error: true
-        metrics:
-          process.cpu.time:
-            enabled: true
-          process.memory.usage:
-            enabled: true
-          process.memory.virtual:
-            enabled: true
-          process.disk.io:
-            enabled: true
-          process.threads:
-            enabled: true
-          process.open_file_descriptors:
-            enabled: true
-          process.context_switches:
-            enabled: true
-
   journald:
     start_at: end
     resource:
@@ -2205,6 +2290,11 @@ ${PHPFPM_OPCACHE_YAML}
 ${FILELOG_RECEIVERS_YAML}
 
 processors:
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
 
   batch:
     timeout: 5s
@@ -2241,12 +2331,27 @@ processors:
         - 'name == "target_info"'
         - 'IsMatch(name, "^scrape_")'
 
+  filter/drop_process:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'IsMatch(name, "^process_")'
+
   filter/drop_phpfpm_pollution:
     error_mode: ignore
     logs:
       log_record:
         - 'IsMatch(body, "GET /status")'
         - 'IsMatch(body, "/internal/opcache-collector")'
+
+  filter/drop_host_log_noise:
+    error_mode: ignore
+    logs:
+      log_record:
+        - '${HOST_LOG_OTELCOL_STACK_FRAME}'
+        - '(${HOST_LOG_NOISY_ERROR_PLUS_ONLY}) and (${HOST_LOG_PRIORITY_AT_LEAST_WARNING})'
+        - '(${HOST_LOG_NOISY_INFO_DEBUG}) and (${HOST_LOG_PRIORITY_INFO_OR_DEBUG})'
+        - '(${HOST_LOG_PRIORITY_INFO_OR_DEBUG}) and not (${HOST_LOG_KEEP_EXPR})'
 
 exporters:
 
@@ -2256,6 +2361,8 @@ exporters:
       insecure: true
     headers:
       Authorization: "Basic ${AUTH_B64}"
+    resource_to_telemetry_conversion:
+      enabled: true
 
   otlphttp/logs:
     endpoint: "${LOGS_ENDPOINT}"
@@ -2277,17 +2384,17 @@ service:
 
     metrics:
       receivers: [${METRIC_RECEIVERS_STR}]
-      processors: [resourcedetection, resource, filter/drop_scrape_meta, batch]
+      processors: [memory_limiter, resourcedetection, resource, filter/drop_scrape_meta, filter/drop_process, batch]
       exporters: [prometheusremotewrite]
 
     logs:
       receivers: [${LOG_RECEIVERS_LIST}]
-      processors: [resourcedetection, resource, filter/drop_phpfpm_pollution, batch]
+      processors: [memory_limiter, resourcedetection, resource, filter/drop_phpfpm_pollution, filter/drop_host_log_noise, batch]
       exporters: [otlphttp/logs]
 
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter, batch]
       exporters: [otlphttp/traces]
 
   telemetry:
@@ -2355,6 +2462,36 @@ else
   error "otelcol failed to start — run: journalctl -u otelcol -n 50"
 fi
 
+if [ "$PROM_FILE_SERVER_UNIT_READY" = "true" ]; then
+  systemctl enable agent-prom-file-server
+  if systemctl restart agent-prom-file-server && sleep 1 && systemctl is-active --quiet agent-prom-file-server; then
+    log "Prometheus file server started on 127.0.0.1:19101 (routes: /docker, /mariadb)"
+  else
+    warn "Prometheus file server failed to start"
+    MANUAL_STEPS+=("Start the metrics file server: systemctl restart agent-prom-file-server")
+  fi
+fi
+
+if [ "$DOCKER_LOG_TAILER_UNIT_READY" = "true" ]; then
+  systemctl enable agent-docker-log-tailer
+  if systemctl restart agent-docker-log-tailer && sleep 2 && systemctl is-active --quiet agent-docker-log-tailer; then
+    log "  Docker real-time log tailer started"
+  else
+    warn "  Docker log tailer failed to start"
+    MANUAL_STEPS+=("Docker log tailer: systemctl restart agent-docker-log-tailer")
+  fi
+fi
+
+if [ "$DOCKER_METRICS_UNIT_READY" = "true" ]; then
+  systemctl enable agent-docker-metrics.timer
+  if systemctl restart agent-docker-metrics.timer && systemctl start agent-docker-metrics; then
+    log "  Docker container metrics collector started (timer: every 30s)"
+  else
+    warn "  Docker metrics collector failed to start"
+    MANUAL_STEPS+=("Docker container metrics: systemctl restart agent-docker-metrics.timer")
+  fi
+fi
+
 # ============================================
 # PHASE 5 — DOCKER EVENT WATCHER
 # ============================================
@@ -2391,14 +2528,8 @@ SyslogIdentifier=agent-docker-watcher
 WantedBy=multi-user.target
 DOCKERSVC
 
-  systemctl daemon-reload
-  systemctl enable agent-docker-watcher
-  if systemctl start agent-docker-watcher && sleep 2 && systemctl is-active --quiet agent-docker-watcher; then
-    log "  Docker event watcher started"
-  else
-    warn "  Docker event watcher failed to start"
-    MANUAL_STEPS+=("Docker watcher: systemctl start agent-docker-watcher")
-  fi
+  DOCKER_WATCHER_UNIT_READY=true
+  log "  Docker event watcher unit installed"
 else
   info "  Docker not available — skipping docker event watcher"
 fi
@@ -2490,11 +2621,20 @@ PAYLOAD=\$(cat <<JSON
 JSON
 )
 
-curl -sf -X POST \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Basic \${AUTH_B64}" \
-  -d "\${PAYLOAD}" \
-  "\${HOST_HEARTBEAT_ENDPOINT}" >/dev/null 2>&1 || true
+MAX_ATTEMPTS=3
+for i in \$(seq 1 \$MAX_ATTEMPTS); do
+  if curl -sf -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Basic \${AUTH_B64}" \
+    -d "\${PAYLOAD}" \
+    "\${HOST_HEARTBEAT_ENDPOINT}" >/dev/null 2>&1; then
+    exit 0
+  fi
+  if [ \$i -lt \$MAX_ATTEMPTS ]; then
+    sleep \$((i * 5))
+  fi
+done
+logger -t agent-heartbeat "Failed to send heartbeat after \$MAX_ATTEMPTS attempts"
 HEARTBEAT
 chmod +x /usr/local/bin/agent-heartbeat
 
@@ -2523,12 +2663,29 @@ Persistent=true
 WantedBy=timers.target
 HEARTBEAT_TIMER
 
-systemctl daemon-reload
-systemctl enable --now agent-heartbeat.timer
-if systemctl is-active --quiet agent-heartbeat.timer; then
-  log "Heartbeat timer enabled (every 5 minutes)"
-else
-  warn "Failed to start heartbeat timer"
+HEARTBEAT_UNIT_READY=true
+
+if [ "$DOCKER_WATCHER_UNIT_READY" = "true" ] || [ "$HEARTBEAT_UNIT_READY" = "true" ]; then
+  systemctl daemon-reload
+fi
+
+if [ "$DOCKER_WATCHER_UNIT_READY" = "true" ]; then
+  systemctl enable agent-docker-watcher
+  if systemctl restart agent-docker-watcher && sleep 2 && systemctl is-active --quiet agent-docker-watcher; then
+    log "  Docker event watcher started"
+  else
+    warn "  Docker event watcher failed to start"
+    MANUAL_STEPS+=("Docker watcher: systemctl restart agent-docker-watcher")
+  fi
+fi
+
+if [ "$HEARTBEAT_UNIT_READY" = "true" ]; then
+  systemctl enable --now agent-heartbeat.timer
+  if systemctl is-active --quiet agent-heartbeat.timer; then
+    log "Heartbeat timer enabled (every 5 minutes)"
+  else
+    warn "Failed to start heartbeat timer"
+  fi
 fi
 
 # ============================================

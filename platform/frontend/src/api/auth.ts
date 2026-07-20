@@ -1,5 +1,6 @@
 import client from "@/api/client"
 
+export type AuthResponse = { ok: boolean; role?: string }
 export type OkResponse = { ok: boolean }
 
 export type SignupRequest = {
@@ -10,18 +11,18 @@ export type SignupRequest = {
   password: string
 }
 
-export async function login(email: string, password: string): Promise<OkResponse> {
-  const { data } = await client.post<OkResponse>("/login", { email, password })
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  const { data } = await client.post<AuthResponse>("/login", { email, password })
   return data
 }
 
-export async function signup(req: SignupRequest): Promise<OkResponse> {
-  const { data } = await client.post<OkResponse>("/signup", req)
+export async function signup(req: SignupRequest): Promise<AuthResponse> {
+  const { data } = await client.post<AuthResponse>("/signup", req)
   return data
 }
 
-export async function refresh(): Promise<OkResponse> {
-  const { data } = await client.post<OkResponse>("/refresh")
+export async function refresh(): Promise<AuthResponse> {
+  const { data } = await client.post<AuthResponse>("/refresh")
   return data
 }
 

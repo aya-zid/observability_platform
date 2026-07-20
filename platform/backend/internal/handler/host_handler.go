@@ -12,11 +12,12 @@ import (
 )
 
 type HostHandler struct {
-	hostRepo *repository.HostRepository
+	hostRepo         *repository.HostRepository
+	subscriptionRepo *repository.SubscriptionRepository
 }
 
-func NewHostHandler(hostRepo *repository.HostRepository) *HostHandler {
-	return &HostHandler{hostRepo: hostRepo}
+func NewHostHandler(hostRepo *repository.HostRepository, subscriptionRepo *repository.SubscriptionRepository) *HostHandler {
+	return &HostHandler{hostRepo: hostRepo, subscriptionRepo: subscriptionRepo}
 }
 
 func (h *HostHandler) Register(c echo.Context) error {
@@ -31,6 +32,21 @@ func (h *HostHandler) Register(c echo.Context) error {
 	}
 	if err := validator.ValidateStruct(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	// Check if host already exists (upsert is fine)
+	existing, _ := h.hostRepo.FindByTenantMachineCtx(c.Request().Context(), tenant.ID, req.MachineID)
+	if existing == nil {
+		// New host registration — check plan limit
+		sub, err := h.subscriptionRepo.FindByTenantCtx(c.Request().Context(), tenant.ID)
+		if err == nil && sub != nil {
+			hosts, err := h.hostRepo.ListByTenantCtx(c.Request().Context(), tenant.ID)
+			if err == nil && len(hosts) >= sub.Plan.MaxHosts {
+				return c.JSON(http.StatusPaymentRequired, map[string]string{
+					"error": "Host limit reached. Upgrade your plan.",
+				})
+			}
+		}
 	}
 
 	if err := h.hostRepo.UpsertByTenantMachineCtx(
@@ -77,4 +93,3 @@ func (h *HostHandler) Heartbeat(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, dto.OkResponse{OK: true})
 }
-

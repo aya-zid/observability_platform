@@ -77,6 +77,15 @@ type Config struct {
 	VulnerabilityScanEnabled     bool
 	VulnerabilityScanInterval    time.Duration
 	VulnerabilitySeverityMinimum string
+
+	// ── SMTP / Email ────────────────────────────────────────────
+	SMTPHost        string
+	SMTPPort        string
+	SMTPUser        string
+	SMTPPass        string
+	SMTPFromAddress string
+	SMTPFromName    string
+	PlatformURL     string // public URL for invite links in emails
 }
 
 func Load() *Config {
@@ -147,6 +156,15 @@ func Load() *Config {
 		VulnerabilityScanEnabled:     getEnvBool("VULNERABILITY_SCAN_ENABLED", true),
 		VulnerabilityScanInterval:    time.Duration(getEnvInt("VULNERABILITY_SCAN_INTERVAL_HOURS", 2)) * time.Hour,
 		VulnerabilitySeverityMinimum: strings.ToUpper(getEnv("VULNERABILITY_SEVERITY_MINIMUM", "MEDIUM")),
+
+		// SMTP / Email
+		SMTPHost:        getEnv("SMTP_HOST", ""),
+		SMTPPort:        getEnv("SMTP_PORT", "587"),
+		SMTPUser:        getEnv("SMTP_USER", ""),
+		SMTPPass:        getEnv("SMTP_PASS", ""),
+		SMTPFromAddress: getEnv("SMTP_FROM_ADDRESS", ""),
+		SMTPFromName:    getEnv("SMTP_FROM_NAME", "Observability Platform"),
+		PlatformURL:     getEnv("PLATFORM_URL", "http://localhost:5173"),
 	}
 
 	// Hard requirements

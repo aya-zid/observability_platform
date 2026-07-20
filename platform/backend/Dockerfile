@@ -9,5 +9,6 @@ FROM alpine:3.21
 RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /app/obs-backend .
+COPY .env .env
 EXPOSE 8080
 CMD ["./obs-backend"]

@@ -16,6 +16,7 @@ export type CatalogService = {
 }
 
 export type DiscoveryHost = {
+  id: number
   machine_id: string
   hostname: string
   os_name: string

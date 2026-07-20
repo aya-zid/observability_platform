@@ -29,6 +29,11 @@ type MeResponse struct {
 	CompanyName string `json:"company_name"`
 }
 
+type AuthResponse struct {
+	OK   bool   `json:"ok"`
+	Role string `json:"role"`
+}
+
 type OkResponse struct {
 	OK bool `json:"ok"`
 }

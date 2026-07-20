@@ -10,6 +10,7 @@ import (
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/apierror"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/config"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/dto"
+	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/infrastructure"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/service"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/validator"
 )
@@ -39,7 +40,8 @@ func (h *AuthHandler) Signup(c echo.Context) error {
 	}
 
 	h.setAuthCookies(c, accessToken, refreshToken)
-	return c.JSON(http.StatusCreated, dto.OkResponse{OK: true})
+	role := extractRole(accessToken)
+	return c.JSON(http.StatusCreated, dto.AuthResponse{OK: true, Role: role})
 }
 
 func (h *AuthHandler) Login(c echo.Context) error {
@@ -58,7 +60,8 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	}
 
 	h.setAuthCookies(c, accessToken, refreshToken)
-	return c.JSON(http.StatusOK, dto.OkResponse{OK: true})
+	role := extractRole(accessToken)
+	return c.JSON(http.StatusOK, dto.AuthResponse{OK: true, Role: role})
 }
 
 func (h *AuthHandler) Refresh(c echo.Context) error {
@@ -73,7 +76,8 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 	}
 
 	h.setAuthCookies(c, accessToken, refreshToken)
-	return c.JSON(http.StatusOK, dto.OkResponse{OK: true})
+	role := extractRole(accessToken)
+	return c.JSON(http.StatusOK, dto.AuthResponse{OK: true, Role: role})
 }
 
 func (h *AuthHandler) Logout(c echo.Context) error {
@@ -137,6 +141,14 @@ func (h *AuthHandler) setAuthCookies(c echo.Context, accessToken string, refresh
 		Secure:   h.cfg.CookieSecure,
 		SameSite: sameSite,
 	})
+}
+
+func extractRole(accessToken string) string {
+	claims, err := infrastructure.ParseToken(accessToken)
+	if err != nil {
+		return ""
+	}
+	return claims.Role
 }
 
 func (h *AuthHandler) clearAuthCookies(c echo.Context) {

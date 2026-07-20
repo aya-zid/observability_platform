@@ -105,7 +105,17 @@ func (s *AuthService) Signup(ctx context.Context, req dto.SignupRequest) (access
 			return err
 		}
 
-		return nil
+		// Create free subscription for new tenant
+		var freePlan domain.Plan
+		if err := tx.Where("name = ?", "Free").First(&freePlan).Error; err != nil {
+			return err
+		}
+		sub := &domain.TenantSubscription{
+			TenantID: createdTenant.ID,
+			PlanID:   freePlan.ID,
+			Status:   "active",
+		}
+		return tx.Create(sub).Error
 	}); err != nil {
 		return "", "", err
 	}

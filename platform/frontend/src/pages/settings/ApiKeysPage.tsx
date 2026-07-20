@@ -2,11 +2,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { getApiKey, rotateApiKey } from "@/api/tenant"
-import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
+import { getMe } from "@/api/tenant"
+import { SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
+import { useAuthStore } from "@/store/authStore"
 
 export default function ApiKeysPage() {
+  const role = useAuthStore((s) => s.role)
+  const isAdmin = role === "admin"
   const [rotateError, setRotateError] = useState<string | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [newKey, setNewKey] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const q = useQuery({
@@ -16,43 +22,113 @@ export default function ApiKeysPage() {
     retry: 0,
   })
 
+  const meQuery = useQuery({
+    queryKey: ["me"],
+    queryFn: getMe,
+    refetchOnWindowFocus: false,
+    retry: 0,
+  })
+
   async function onRotate() {
     setRotateError(null)
     try {
       const data = await rotateApiKey()
+      setNewKey(data.api_key)
       queryClient.setQueryData(["tenant", "api-key"], data)
+      setShowConfirm(false)
     } catch {
       setRotateError("Failed to rotate API key.")
     }
   }
 
+  function maskKey(key: string): string {
+    if (key.length <= 12) return key
+    return key.substring(0, 12) + "••••••••"
+  }
+
   return (
-    <Page>
-      <PageHeader
-        title="API Keys"
-        description="Manage keys used by agents and services."
-      />
+    <div className="grid gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold">API Keys</h1>
+        <p className="text-sm text-muted-foreground mt-1">Manage keys used by agents and services to send telemetry.</p>
+      </div>
 
       <SectionCard
         title="Current API key"
-        description="This is the key agents use as Basic auth to send telemetry to /ingest/*."
+        description="This key is used by agents as Basic auth to send telemetry to /ingest/* endpoints."
       >
-        <div className="mb-3">
-          <Button onClick={onRotate} disabled={q.isLoading}>
-            Rotate API key
-          </Button>
+        {isAdmin && (
+          <div className="mb-3">
+            <Button onClick={() => setShowConfirm(true)} disabled={q.isLoading}>
+              Rotate API key
+            </Button>
+          </div>
+        )}
+
+        <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all flex items-center justify-between">
+          <span>
+            {q.isLoading
+              ? "Loading…"
+              : q.isError
+                ? "Unable to load API key."
+                : q.data?.api_key
+                  ? maskKey(q.data.api_key)
+                  : "No API key."}
+          </span>
+          {q.data?.api_key && (
+            <button
+              onClick={() => navigator.clipboard.writeText(q.data!.api_key)}
+              className="ml-2 text-xs text-primary hover:underline shrink-0"
+            >
+              Copy
+            </button>
+          )}
         </div>
-        <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all">
-          {q.isLoading
-            ? "Loading…"
-            : q.isError
-              ? "Unable to load API key."
-              : q.data?.api_key ?? "No API key."}
-        </div>
+
+        {q.data?.api_key && (
+          <div className="mt-2 text-xs text-muted-foreground">
+            Last used: {meQuery.data?.company_name ? "tracked" : "N/A"}
+          </div>
+        )}
+
         {rotateError ? (
           <div className="mt-2 text-xs text-destructive">{rotateError}</div>
         ) : null}
       </SectionCard>
-    </Page>
+
+      {isAdmin && showConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card rounded-2xl border border-border p-6 w-full max-w-md">
+            <h3 className="font-semibold text-lg">Rotate API Key?</h3>
+            <p className="text-sm text-muted-foreground mt-2">
+              This will immediately invalidate the old key. All agents using the current key will stop sending data until reconfigured.
+            </p>
+            <div className="mt-4 flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowConfirm(false)}>Cancel</Button>
+              <Button onClick={onRotate}>Confirm Rotation</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newKey && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-card rounded-2xl border border-border p-6 w-full max-w-md">
+            <h3 className="font-semibold text-lg text-amber-500">Copy Your New Key</h3>
+            <p className="text-sm text-muted-foreground mt-2">
+              You won't be able to see this key again. Copy it now and update your agents.
+            </p>
+            <div className="mt-3 rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all">
+              {newKey}
+            </div>
+            <div className="mt-4 flex gap-2 justify-end">
+              <Button onClick={() => { navigator.clipboard.writeText(newKey); setNewKey(null) }}>
+                Copy & Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

@@ -1,35 +1,162 @@
 import { useQuery } from "@tanstack/react-query"
+import { RefreshCw, Server, Activity, GitBranch, Clock, Sparkles } from "lucide-react"
 
-import { getApiKey } from "@/api/tenant"
+import { getOverview } from "@/api/overview"
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
+import { Button } from "@/components/ui/button"
+import { GlobalHealthStrip } from "./components/GlobalHealthStrip"
+import { HostCard } from "./components/HostCard"
+import { TopIssuesFeed } from "./components/TopIssuesFeed"
+import { CorrelationFindings } from "./components/CorrelationFindings"
+import { IncidentTimeline } from "./components/IncidentTimeline"
+import { DependencyGraph } from "./components/DependencyGraph"
+import { AIInsightPanel } from "./components/AIInsightPanel"
 
 export default function OverviewPage() {
   const q = useQuery({
-    queryKey: ["tenant", "api-key"],
-    queryFn: getApiKey,
+    queryKey: ["overview"],
+    queryFn: getOverview,
+    refetchInterval: 30_000,
     refetchOnWindowFocus: false,
-    retry: 0,
   })
+
+  const data = q.data
+  const loading = q.isLoading
 
   return (
     <Page>
       <PageHeader
-        title="Overview"
-        description="Your tenant dashboard. We’ll place KPI cards and charts here."
+        title="Overview & Correlation"
+        description="Cross-service observability: fleet health, dependency correlation, and incident timeline in one place."
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => q.refetch()}
+            disabled={q.isRefetching}
+          >
+            <RefreshCw
+              className={`h-4 w-4 ${q.isRefetching ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+        }
       />
 
-      <SectionCard
-        title="Your API key (agents)"
-        description="Use this API key to authenticate your agents (Basic auth) against backend ingest endpoints."
-      >
-        <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all">
-          {q.isLoading
-            ? "Loading…"
-            : q.isError
-              ? "Unable to load API key."
-              : q.data?.api_key ?? "No API key."}
-        </div>
+      {/* Zone A — Overview */}
+      <SectionCard title="Fleet Health" description="Global health snapshot across all hosts and services">
+        {loading ? (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-border bg-card p-4 animate-pulse">
+                <div className="h-3 w-16 bg-muted rounded" />
+                <div className="mt-2 h-7 w-12 bg-muted rounded" />
+              </div>
+            ))}
+          </div>
+        ) : data ? (
+          <GlobalHealthStrip data={data.global} />
+        ) : (
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            Unable to load fleet health data.
+          </div>
+        )}
       </SectionCard>
+
+      <SectionCard
+        title="Hosts"
+        description="Per-host status, resource usage, and installed services"
+      >
+        {loading ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="rounded-lg border border-border bg-card p-4 animate-pulse"
+              >
+                <div className="h-4 w-24 bg-muted rounded" />
+                <div className="mt-3 flex gap-1.5">
+                  <div className="h-5 w-14 bg-muted rounded" />
+                  <div className="h-5 w-14 bg-muted rounded" />
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="h-3 bg-muted rounded" />
+                  <div className="h-3 bg-muted rounded" />
+                  <div className="h-3 bg-muted rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : data ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {(data.hosts ?? []).map((host) => (
+              <HostCard key={host.machine_id} host={host} />
+            ))}
+          </div>
+        ) : null}
+      </SectionCard>
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <SectionCard
+          title="Top Issues"
+          description="Ranked cross-service issues requiring attention"
+        >
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-12 bg-muted rounded animate-pulse" />
+              ))}
+            </div>
+          ) : data ? (
+            <TopIssuesFeed issues={data.top_issues} />
+          ) : null}
+        </SectionCard>
+
+        <SectionCard
+          title="Incident Timeline"
+          description="Recent log events across all services"
+        >
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-10 bg-muted rounded animate-pulse" />
+              ))}
+            </div>
+          ) : data ? (
+            <IncidentTimeline events={data.timeline?.events ?? null} />
+          ) : null}
+        </SectionCard>
+      </div>
+
+      {/* Zone B — Correlation */}
+      <SectionCard
+        title="Correlation Findings"
+        description="Automated cross-service correlation rules detecting dependency chain issues"
+      >
+        {loading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="h-24 bg-muted rounded animate-pulse" />
+            ))}
+          </div>
+        ) : data ? (
+          <CorrelationFindings findings={data.findings} />
+        ) : null}
+      </SectionCard>
+
+      <SectionCard
+        title="Dependency Graph"
+        description="Service dependency topology with live health overlay"
+      >
+        {loading ? (
+          <div className="h-48 bg-muted rounded animate-pulse" />
+        ) : data ? (
+          <DependencyGraph data={data.dep_graph} />
+        ) : null}
+      </SectionCard>
+
+      {/* AI Insight (on-demand) */}
+      {data ? <AIInsightPanel overview={data} /> : null}
     </Page>
   )
 }

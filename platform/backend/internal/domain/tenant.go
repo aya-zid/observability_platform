@@ -23,9 +23,11 @@ type Tenant struct {
     // APIKey is the tenant API key used by agents to authenticate (Basic auth).
     // NOTE: This is stored in clear text by request (not recommended for production).
     APIKey       string    `gorm:"column:api_key;type:varchar(255);unique;not null"`
+    APIKeyLastUsedAt *time.Time `gorm:"column:api_key_last_used_at"`
+    Timezone     string    `gorm:"type:varchar(50);default:'UTC'"`
 
     // Has many Users (bidirectional)
-    Users        []User    `gorm:"foreignKey:TenantID"` 
+    Users        []User    `gorm:"foreignKey:TenantID"`
 
     CreatedAt    time.Time `gorm:"autoCreateTime"`
     UpdatedAt    time.Time `gorm:"autoUpdateTime"`

@@ -26,13 +26,19 @@ func touchHostsOnIngest(hostRepo *repository.HostRepository, next echo.HandlerFu
 	}
 }
 
-func SetupRoutes(e *echo.Echo, cfg *config.Config) {
+func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSender) {
 	tenantRepo := repository.NewTenantRepository(infrastructure.DB)
 	userRepo := repository.NewUserRepository(infrastructure.DB)
 	hostRepo := repository.NewHostRepository(infrastructure.DB)
 	alertsRepo := repository.NewAlertsRepository(infrastructure.DB)
 	discoveryRepo := repository.NewDiscoveryRepository(infrastructure.DB)
 	tenantCache := cache.NewTenantCache(infrastructure.Redis)
+	invitationRepo := repository.NewInvitationRepository(infrastructure.DB)
+	notifRepo := repository.NewNotificationChannelRepository(infrastructure.DB)
+	planRepo := repository.NewPlanRepository(infrastructure.DB)
+	subscriptionRepo := repository.NewSubscriptionRepository(infrastructure.DB)
+	usageRepo := repository.NewUsageRepository(infrastructure.DB)
+	alertRuleRepo := repository.NewAlertRuleRepository(infrastructure.DB)
 
 	// ── Auth routes (public) ─────────────────────────────────────────────────
 	authService := service.NewAuthService(infrastructure.DB, infrastructure.Redis, cfg, tenantRepo, userRepo)
@@ -40,6 +46,11 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	queryService := service.NewQueryService(cfg, tenantRepo)
 	discoveryService := service.NewDiscoveryService(hostRepo, discoveryRepo, alertsRepo)
 	integrationService := service.NewIntegrationService(cfg, tenantRepo, discoveryRepo)
+
+	// ── Team / Profile / Settings / Billing services ─────────────────────────
+	teamService := service.NewTeamService(infrastructure.DB, userRepo, invitationRepo, tenantRepo, emailSender, cfg.PlatformURL)
+	profileService := service.NewProfileService(infrastructure.DB, userRepo)
+	billingService := service.NewBillingService(planRepo, subscriptionRepo, usageRepo, hostRepo)
 
 	rlWindow := time.Duration(cfg.AuthRateLimitWindowSeconds) * time.Second
 	e.POST("/signup", authHandler.Signup, custommiddleware.RateLimitByIP(infrastructure.Redis, "signup", cfg.AuthSignupRateLimitPerWindow, rlWindow))
@@ -49,6 +60,12 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	installHandler := NewInstallHandler(cfg)
 	integrationHandler := NewIntegrationHandler(integrationService)
 	alertsHandler := NewAlertsHandler(alertsRepo)
+	teamHandler := NewTeamHandler(teamService)
+	settingsHandler := NewSettingsHandler(tenantRepo)
+	notificationHandler := NewNotificationHandler(notifRepo)
+	profileHandler := NewProfileHandler(profileService)
+	billingHandler := NewBillingHandler(billingService)
+	alertRulesHandler := NewAlertRulesHandler(alertRuleRepo)
 
 	nginxDashboardService := service.NewNginxDashboardService(cfg, infrastructure.Redis)
 	nginxDashboardHandler := NewNginxDashboardHandler(
@@ -105,6 +122,9 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 		tenantRepo,
 	)
 
+	overviewService := service.NewOverviewService(cfg, infrastructure.Redis, hostRepo, discoveryRepo)
+	overviewHandler := NewOverviewHandler(overviewService, tenantRepo)
+
 	hostDashboardService := service.NewHostDashboardService(cfg, infrastructure.Redis)
 	hostLogsService := service.NewHostLogsService(cfg, infrastructure.Redis)
 	hostDashboardHandler := NewHostDashboardHandler(
@@ -118,85 +138,129 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
 
+	// Invite routes (public)
+	e.GET("/invite/:token", teamHandler.ValidateInvitation)
+	e.POST("/invite/:token/accept", teamHandler.AcceptInvitation)
+
 	// ── Platform API (browser auth) ───────────────────────────────────────────
 	tenantHandler := NewTenantHandler(tenantRepo, userRepo, tenantCache)
 	discoveryAPIHandler := NewDiscoveryAPIHandler(discoveryService)
 	queryHandler := NewQueryHandler(queryService)
 	api := e.Group("/api", custommiddleware.AuthMiddleware(tenantRepo))
 	{
-		api.GET("/me", tenantHandler.GetMe)
-		api.GET("/api-key", tenantHandler.GetAPIKey)
-		api.POST("/api-key/rotate", tenantHandler.RotateAPIKey)
-		api.GET("/alerts/vulnerabilities", alertsHandler.ListVulnerabilityAlerts)
-		api.GET("/catalog", discoveryAPIHandler.ListCatalog)
-		api.GET("/discovery/hosts", discoveryAPIHandler.ListHosts)
-		api.GET("/discovery/services", discoveryAPIHandler.ListServices)
-		api.GET("/discovery/services/:id", discoveryAPIHandler.GetService)
+		// ── Member-accessible mutations ─────────────────────────
+		// Profile (own name / password)
+		api.GET("/profile", profileHandler.GetProfile)
+		api.PATCH("/profile", profileHandler.UpdateProfile)
+		api.POST("/profile/change-password", profileHandler.ChangePassword)
+
+		// Org settings — readable by all (company name, timezone), writable only by admin
+		api.GET("/settings/org", settingsHandler.GetOrgSettings)
+
+		// Service config — members can enable/disable collection, save config, generate commands
 		api.PATCH("/discovery/services/:id/collection", discoveryAPIHandler.UpdateCollection)
 		api.PATCH("/discovery/services/:id/config", discoveryAPIHandler.UpdateServiceConfig)
 		api.POST("/discovery/services/:id/integration", integrationHandler.CreateInstallCommand)
 
-		// Query routes for dashboards — tenant-isolated via JWT claims
-		api.GET("/query/metrics", queryHandler.QueryMetrics)
-		api.GET("/query/logs", queryHandler.QueryLogs)
-		api.GET("/query/logs/range", queryHandler.QueryLogsRange)
-		api.GET("/query/logs/labels", queryHandler.QueryLogsLabels)
-		api.GET("/grafana/dashboard-url", queryHandler.GrafanaDashboardURL)
+		// ── Admin-only mutations (members can still GET) ─────────
+		r := api.Group("", custommiddleware.RequireAdminForMutation())
+		{
+			r.GET("/me", tenantHandler.GetMe)
+			r.GET("/api-key", tenantHandler.GetAPIKey)
+			r.POST("/api-key/rotate", tenantHandler.RotateAPIKey)
 
-		// Nginx dashboard routes
-		api.GET("/nginx/:id/domains", nginxDashboardHandler.Domains)
-		api.GET("/nginx/:id/dashboard", nginxDashboardHandler.Dashboard)
-		api.GET("/nginx/:id/explorer", nginxDashboardHandler.Explorer)
-		api.GET("/nginx/:id/error-logs", nginxDashboardHandler.ErrorLogs)
-		api.GET("/nginx/:id/ip-investigation", nginxDashboardHandler.IPInvestigation)
-		api.GET("/nginx/:id/slow-requests", nginxDashboardHandler.SlowRequests)
-		// Nginx performance chart routes (Chart 1, 2, 3)
-		api.GET("/nginx/:id/performance/heatmap", nginxPerformanceHandler.Heatmap)
-		api.GET("/nginx/:id/performance/scatter", nginxPerformanceHandler.Scatter)
-		api.GET("/nginx/:id/performance/dist", nginxPerformanceHandler.Distribution)
+			// Settings — fully admin-only
+			settings := r.Group("/settings", custommiddleware.RequireRole("admin"))
+			settings.PATCH("/org", settingsHandler.UpdateOrgSettings)
+			settings.GET("/team", teamHandler.ListTeam)
+			settings.POST("/team/invite", teamHandler.InviteTeammate)
+			settings.DELETE("/team/:userId", teamHandler.RemoveMember)
+			settings.PATCH("/team/:userId/role", teamHandler.ChangeRole)
+			settings.POST("/team/invitations/:id/resend", teamHandler.ResendInvitation)
+			settings.DELETE("/team/invitations/:id", teamHandler.RevokeInvitation)
+			settings.GET("/notifications", notificationHandler.ListChannels)
+			settings.POST("/notifications", notificationHandler.AddChannel)
+			settings.DELETE("/notifications/:id", notificationHandler.DeleteChannel)
+			settings.GET("/billing", billingHandler.GetBilling)
+			settings.POST("/billing/change-plan", billingHandler.ChangePlan)
+			settings.GET("/billing/usage", billingHandler.GetUsageHistory)
 
-		// PostgreSQL dashboard routes
-		api.GET("/postgres/:id/dashboard", postgresDashboardHandler.Dashboard)
-		api.GET("/postgres/:id/config", postgresDashboardHandler.Config)
-		api.GET("/postgres/:id/logs", postgresDashboardHandler.Logs)
+			// Alert rules / events
+			r.GET("/alerts/templates", alertRulesHandler.ListTemplates)
+			r.GET("/alerts/templates/:serviceType", alertRulesHandler.ListTemplatesByService)
+			r.POST("/alerts/rules", alertRulesHandler.CreateRule)
+			r.GET("/alerts/rules", alertRulesHandler.ListRules)
+			r.PATCH("/alerts/rules/:id", alertRulesHandler.UpdateRule)
+			r.DELETE("/alerts/rules/:id", alertRulesHandler.DeleteRule)
+			r.GET("/alerts/events", alertRulesHandler.ListAlertEvents)
+			r.POST("/alerts/events/:id/acknowledge", alertRulesHandler.AcknowledgeEvent)
+			r.GET("/overview", overviewHandler.GetOverview)
+			r.GET("/alerts/vulnerabilities", alertsHandler.ListVulnerabilityAlerts)
+			r.GET("/catalog", discoveryAPIHandler.ListCatalog)
+			r.GET("/discovery/hosts", discoveryAPIHandler.ListHosts)
+			r.GET("/discovery/services", discoveryAPIHandler.ListServices)
+			r.GET("/discovery/services/:id", discoveryAPIHandler.GetService)
 
-		// PHP-FPM dashboard routes
-		api.GET("/phpfpm/:id/dashboard", phpfpmDashboardHandler.Dashboard)
-		api.GET("/phpfpm/:id/logs", phpfpmDashboardHandler.Logs)
-		api.GET("/phpfpm/:id/logs-meta", phpfpmDashboardHandler.LogsMeta)
+			// Query routes for dashboards
+			r.GET("/query/metrics", queryHandler.QueryMetrics)
+			r.GET("/query/logs", queryHandler.QueryLogs)
+			r.GET("/query/logs/range", queryHandler.QueryLogsRange)
+			r.GET("/query/logs/labels", queryHandler.QueryLogsLabels)
+			r.GET("/grafana/dashboard-url", queryHandler.GrafanaDashboardURL)
 
-		// Redis dashboard routes
-		api.GET("/redis/:id/dashboard", redisDashboardHandler.Dashboard)
-		api.GET("/redis/:id/logs", redisDashboardHandler.Logs)
+			// Nginx dashboard routes
+			r.GET("/nginx/:id/domains", nginxDashboardHandler.Domains)
+			r.GET("/nginx/:id/dashboard", nginxDashboardHandler.Dashboard)
+			r.GET("/nginx/:id/explorer", nginxDashboardHandler.Explorer)
+			r.GET("/nginx/:id/error-logs", nginxDashboardHandler.ErrorLogs)
+			r.GET("/nginx/:id/ip-investigation", nginxDashboardHandler.IPInvestigation)
+			r.GET("/nginx/:id/slow-requests", nginxDashboardHandler.SlowRequests)
+			r.GET("/nginx/:id/performance/heatmap", nginxPerformanceHandler.Heatmap)
+			r.GET("/nginx/:id/performance/scatter", nginxPerformanceHandler.Scatter)
+			r.GET("/nginx/:id/performance/dist", nginxPerformanceHandler.Distribution)
 
-		// MariaDB dashboard routes
-		api.GET("/mariadb/:id/dashboard", mariadbDashboardHandler.Dashboard)
-		api.GET("/mariadb/:id/config", mariadbDashboardHandler.Config)
-		api.GET("/mariadb/:id/logs", mariadbDashboardHandler.Logs)
-		api.GET("/mariadb/:id/error-logs", mariadbDashboardHandler.ErrorLogs)
-		api.GET("/mariadb/:id/slow-query-logs", mariadbDashboardHandler.SlowQueryLogs)
+			// PostgreSQL dashboard routes
+			r.GET("/postgres/:id/dashboard", postgresDashboardHandler.Dashboard)
+			r.GET("/postgres/:id/config", postgresDashboardHandler.Config)
+			r.GET("/postgres/:id/logs", postgresDashboardHandler.Logs)
 
-		// Apache dashboard routes
-		api.GET("/apache/:id/dashboard", apacheDashboardHandler.Dashboard)
-		api.GET("/apache/:id/slow-requests", apacheDashboardHandler.SlowRequests)
-		api.GET("/apache/:id/explorer", apacheDashboardHandler.Explorer)
-		api.GET("/apache/:id/domains", apacheDashboardHandler.Domains)
-		api.GET("/apache/:id/error-logs", apacheDashboardHandler.ErrorLogs)
-		api.GET("/apache/:id/ip-investigation", apacheDashboardHandler.IPInvestigation)
-		// Apache performance chart routes
-		api.GET("/apache/:id/performance/heatmap", apachePerformanceHandler.Heatmap)
-		api.GET("/apache/:id/performance/scatter", apachePerformanceHandler.Scatter)
-		api.GET("/apache/:id/performance/dist", apachePerformanceHandler.Distribution)
+			// PHP-FPM dashboard routes
+			r.GET("/phpfpm/:id/dashboard", phpfpmDashboardHandler.Dashboard)
+			r.GET("/phpfpm/:id/logs", phpfpmDashboardHandler.Logs)
+			r.GET("/phpfpm/:id/logs-meta", phpfpmDashboardHandler.LogsMeta)
 
-		// Host dashboard routes (each section is an independent endpoint)
-		api.GET("/hosts/:machineId/dashboard/summary", hostDashboardHandler.Summary)
-		api.GET("/hosts/:machineId/dashboard/cpu", hostDashboardHandler.CPU)
-		api.GET("/hosts/:machineId/dashboard/memory", hostDashboardHandler.Memory)
-		api.GET("/hosts/:machineId/dashboard/disk", hostDashboardHandler.Disk)
-		api.GET("/hosts/:machineId/dashboard/network", hostDashboardHandler.Network)
-		api.GET("/hosts/:machineId/dashboard/processes", hostDashboardHandler.Processes)
-		api.GET("/hosts/:machineId/logs", hostDashboardHandler.Logs)
-		api.GET("/hosts/:machineId/logs/health-summary", hostDashboardHandler.LogsHealthSummary)
+			// Redis dashboard routes
+			r.GET("/redis/:id/dashboard", redisDashboardHandler.Dashboard)
+			r.GET("/redis/:id/logs", redisDashboardHandler.Logs)
+
+			// MariaDB dashboard routes
+			r.GET("/mariadb/:id/dashboard", mariadbDashboardHandler.Dashboard)
+			r.GET("/mariadb/:id/config", mariadbDashboardHandler.Config)
+			r.GET("/mariadb/:id/logs", mariadbDashboardHandler.Logs)
+			r.GET("/mariadb/:id/error-logs", mariadbDashboardHandler.ErrorLogs)
+			r.GET("/mariadb/:id/slow-query-logs", mariadbDashboardHandler.SlowQueryLogs)
+
+			// Apache dashboard routes
+			r.GET("/apache/:id/dashboard", apacheDashboardHandler.Dashboard)
+			r.GET("/apache/:id/slow-requests", apacheDashboardHandler.SlowRequests)
+			r.GET("/apache/:id/explorer", apacheDashboardHandler.Explorer)
+			r.GET("/apache/:id/domains", apacheDashboardHandler.Domains)
+			r.GET("/apache/:id/error-logs", apacheDashboardHandler.ErrorLogs)
+			r.GET("/apache/:id/ip-investigation", apacheDashboardHandler.IPInvestigation)
+			r.GET("/apache/:id/performance/heatmap", apachePerformanceHandler.Heatmap)
+			r.GET("/apache/:id/performance/scatter", apachePerformanceHandler.Scatter)
+			r.GET("/apache/:id/performance/dist", apachePerformanceHandler.Distribution)
+
+			// Host dashboard routes
+			r.GET("/hosts/:machineId/dashboard/summary", hostDashboardHandler.Summary)
+			r.GET("/hosts/:machineId/dashboard/cpu", hostDashboardHandler.CPU)
+			r.GET("/hosts/:machineId/dashboard/memory", hostDashboardHandler.Memory)
+			r.GET("/hosts/:machineId/dashboard/disk", hostDashboardHandler.Disk)
+			r.GET("/hosts/:machineId/dashboard/network", hostDashboardHandler.Network)
+			r.GET("/hosts/:machineId/dashboard/processes", hostDashboardHandler.Processes)
+			r.GET("/hosts/:machineId/logs", hostDashboardHandler.Logs)
+			r.GET("/hosts/:machineId/logs/health-summary", hostDashboardHandler.LogsHealthSummary)
+		}
 	}
 
 	// ── Health check ─────────────────────────────────────────────────────────
@@ -218,7 +282,7 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config) {
 	//   2. Resolves tenant (Redis → Postgres)
 	//   3. Attaches CachedTenant to context for proxy handlers
 	ingestAuth := custommiddleware.IngestMiddleware(tenantCache, tenantRepo)
-	hostHandler := NewHostHandler(hostRepo)
+	hostHandler := NewHostHandler(hostRepo, subscriptionRepo)
 	discoveryHandler := NewDiscoveryHandler(infrastructure.DB)
 
 	ingest := e.Group("/ingest", ingestAuth)
@@ -250,3 +314,5 @@ func boolStatus(ok bool) string {
 	}
 	return "disconnected"
 }
+
+

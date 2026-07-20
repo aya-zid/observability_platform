@@ -19,6 +19,7 @@ type FormValues = z.infer<typeof schema>
 export default function LoginPage() {
   const navigate = useNavigate()
   const setStatus = useAuthStore((s) => s.setStatus)
+  const setRole = useAuthStore((s) => s.setRole)
   const [error, setError] = useState<string | null>(null)
 
   const form = useForm<FormValues>({
@@ -29,8 +30,9 @@ export default function LoginPage() {
   async function onSubmit(values: FormValues) {
     setError(null)
     try {
-      await authApi.login(values.email, values.password)
+      const res = await authApi.login(values.email, values.password)
       setStatus("authenticated")
+      if (res.role) setRole(res.role)
       navigate("/overview", { replace: true })
     } catch {
       setStatus("unauthenticated")

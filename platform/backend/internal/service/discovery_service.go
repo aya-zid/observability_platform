@@ -76,6 +76,7 @@ func (s *DiscoveryService) ListHosts(ctx context.Context, tenantID uint) ([]dto.
 		}
 
 		out = append(out, dto.DiscoveryHostListItem{
+			ID:           host.ID,
 			MachineID:    host.MachineID,
 			Hostname:     host.Hostname,
 			OSName:       host.OSName,

@@ -10,6 +10,7 @@ export default function AuthBootstrap({
 }) {
   const ran = useRef(false)
   const setStatus = useAuthStore((s) => s.setStatus)
+  const setRole = useAuthStore((s) => s.setRole)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
@@ -17,12 +18,16 @@ export default function AuthBootstrap({
     ran.current = true
 
     // On page load, try to refresh using HttpOnly refresh_token cookie.
+    // The /refresh endpoint returns the role directly in the response body.
     authApi
       .refresh()
-      .then(() => setStatus("authenticated"))
+      .then((res) => {
+        setStatus("authenticated")
+        if (res.role) setRole(res.role)
+      })
       .catch(() => setStatus("unauthenticated"))
       .finally(() => setReady(true))
-  }, [setStatus])
+  }, [setStatus, setRole])
 
   if (!ready) {
     return (

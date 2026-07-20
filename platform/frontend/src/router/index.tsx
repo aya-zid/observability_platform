@@ -3,6 +3,7 @@ import { Navigate, createBrowserRouter } from "react-router-dom"
 import AppLayout from "@/components/layout/AppLayout"
 import LoginPage from "@/pages/auth/LoginPage"
 import SignupPage from "@/pages/auth/SignupPage"
+import AcceptInvitePage from "@/pages/auth/AcceptInvitePage"
 import AlertsPage from "@/pages/alerts/AlertsPage"
 import ServicesPage from "@/pages/service/ServicesPage"
 import ServiceConfigPage from "@/pages/service/ServiceConfigPage"
@@ -26,7 +27,12 @@ import HostDetailPage from "@/pages/hosts/HostDetailPage"
 import { HostLogsPage } from "@/pages/hosts/HostLogsPage"
 import OverviewPage from "@/pages/overview/OverviewPage"
 import ProfilePage from "@/pages/profile/ProfilePage"
+import SettingsLayout from "@/pages/settings/SettingsLayout"
+import OrgSettingsPage from "@/pages/settings/OrgSettingsPage"
+import TeamPage from "@/pages/settings/TeamPage"
 import ApiKeysPage from "@/pages/settings/ApiKeysPage"
+import NotificationsPage from "@/pages/settings/NotificationsPage"
+import BillingPage from "@/pages/settings/BillingPage"
 import WelcomePage from "@/pages/welcome/WelcomePage"
 import { ProtectedRoute, PublicRoute } from "@/router/guards"
 
@@ -37,6 +43,7 @@ export const router = createBrowserRouter([
       { path: "/", element: <WelcomePage /> },
       { path: "/login", element: <LoginPage /> },
       { path: "/signup", element: <SignupPage /> },
+      { path: "/invite/:token", element: <AcceptInvitePage /> },
     ],
   },
   {
@@ -45,7 +52,7 @@ export const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
-          { path: "/", element: <Navigate to="/overview" replace /> },
+          { index: true, element: <Navigate to="/overview" replace /> },
           { path: "/overview", element: <OverviewPage /> },
           { path: "/alerts", element: <AlertsPage /> },
           { path: "/hosts", element: <HostsPage /> },
@@ -68,8 +75,19 @@ export const router = createBrowserRouter([
           { path: "/services/redis-logs/:id", element: <RedisLogsPage /> },
           { path: "/services/mariadb-dashboard/:id", element: <MariaDBDashboardPage /> },
           { path: "/services/mariadb-logs/:id", element: <MariaDBLogsPage /> },
-          { path: "/settings/api-keys", element: <ApiKeysPage /> },
           { path: "/profile", element: <ProfilePage /> },
+          {
+            path: "/settings",
+            element: <SettingsLayout />,
+            children: [
+              { index: true, element: <Navigate to="/settings/general" replace /> },
+              { path: "general", element: <OrgSettingsPage /> },
+              { path: "team", element: <TeamPage /> },
+              { path: "api-keys", element: <ApiKeysPage /> },
+              { path: "notifications", element: <NotificationsPage /> },
+              { path: "billing", element: <BillingPage /> },
+            ],
+          },
         ],
       },
     ],

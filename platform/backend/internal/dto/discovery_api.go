@@ -8,6 +8,7 @@ import (
 )
 
 type DiscoveryHostListItem struct {
+	ID           uint   `json:"id"`
 	MachineID    string `json:"machine_id"`
 	Hostname     string `json:"hostname"`
 	OSName       string `json:"os_name"`

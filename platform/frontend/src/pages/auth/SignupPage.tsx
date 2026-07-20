@@ -28,6 +28,7 @@ type FormValues = z.infer<typeof schema>
 export default function SignupPage() {
   const navigate = useNavigate()
   const setStatus = useAuthStore((s) => s.setStatus)
+  const setRole = useAuthStore((s) => s.setRole)
   const [error, setError] = useState<string | null>(null)
 
   const form = useForm<FormValues>({
@@ -44,7 +45,7 @@ export default function SignupPage() {
   async function onSubmit(values: FormValues) {
     setError(null)
     try {
-      await authApi.signup({
+      const res = await authApi.signup({
         company_name: values.company,
         business_email: values.business_email,
         contact_phone: values.phone ? values.phone : undefined,
@@ -52,6 +53,7 @@ export default function SignupPage() {
         password: values.password,
       })
       setStatus("authenticated")
+      if (res.role) setRole(res.role)
       navigate("/overview", { replace: true })
     } catch {
       setStatus("unauthenticated")

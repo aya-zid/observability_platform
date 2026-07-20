@@ -2,13 +2,17 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/cache"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/repository"
 )
+
+var lastUsedTracker = make(map[uint]time.Time)
 
 const TenantContextKey = "ingest_tenant"
 
@@ -38,13 +42,15 @@ func IngestMiddleware(tenantCache *cache.TenantCache, tenantRepo *repository.Ten
 				c.Logger().Errorf("[ingest] redis get error: %v", err)
 			}
 
-			if cached != nil {
-				if !cached.IsActive || !cached.APIKeyEnabled {
-					return c.JSON(http.StatusUnauthorized, map[string]string{"error": "api key disabled"})
-				}
-				c.Set(TenantContextKey, cached)
-				return next(c)
+		if cached != nil {
+			if !cached.IsActive || !cached.APIKeyEnabled {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "api key disabled"})
 			}
+			c.Set(TenantContextKey, cached)
+			// Async last-used tracking (debounced to 1 min)
+			updateLastUsed(tenantRepo, cached.ID)
+			return next(c)
+		}
 
 			// ── 2. DB lookup on cache miss ─────────────────────────────
 			tenant, err := tenantRepo.FindByAPIKey(ctx, rawAPIKey)
@@ -72,9 +78,25 @@ func IngestMiddleware(tenantCache *cache.TenantCache, tenantRepo *repository.Ten
 			}
 
 			c.Set(TenantContextKey, resolved)
+			// Async last-used tracking (debounced to 1 min)
+			updateLastUsed(tenantRepo, resolved.ID)
 			return next(c)
 		}
 	}
+}
+
+func updateLastUsed(tenantRepo *repository.TenantRepository, tenantID uint) {
+	now := time.Now()
+	last, ok := lastUsedTracker[tenantID]
+	if ok && now.Sub(last) < time.Minute {
+		return
+	}
+	lastUsedTracker[tenantID] = now
+	go func() {
+		_ = tenantRepo.UpdateOrgSettingsCtx(context.Background(), tenantID, map[string]interface{}{
+			"api_key_last_used_at": now,
+		})
+	}()
 }
 
 // GetTenantFromContext is a helper used by proxy handlers to extract the resolved tenant.

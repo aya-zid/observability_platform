@@ -55,6 +55,7 @@ export type AlertRule = {
   default_severity: string
   for_duration: string
   is_enabled: boolean
+  domain: string
   scopes: AlertRuleScope[]
   thresholds: AlertThreshold[]
   created_at: string
@@ -64,7 +65,7 @@ export type AlertRule = {
 export type AlertEvent = {
   id: number
   rule_id: number
-  rule: AlertRule
+  rule: AlertRule | null
   threshold_id: number | null
   threshold: AlertThreshold | null
   tenant_id: number
@@ -72,9 +73,12 @@ export type AlertEvent = {
   service_id: number | null
   status: string
   is_notified: boolean
+  domain: string
   triggered_at: string
   resolved_at: string | null
   acknowledged_by: number | null
+  actual_value: number | null
+  metric_string: string
   created_at: string
 }
 
@@ -107,6 +111,7 @@ export async function getAlertTemplatesByService(serviceType: string): Promise<A
 
 export async function createAlertRule(rule: {
   template_id: string
+  domain?: string
   scopes: ScopeInput[]
   thresholds: ThresholdInput[]
   for_duration?: string

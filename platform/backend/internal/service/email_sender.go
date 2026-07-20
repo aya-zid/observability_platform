@@ -169,7 +169,7 @@ func (s *EmailSender) InviteTeammateHTML(inviterName, companyName, inviteeEmail,
 </html>`, companyName, inviterName, companyName, roleDisplay, inviteeEmail, roleDisplay, inviteURL, inviteURL)
 }
 
-func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, description, dashboardURL string) string {
+func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, hostname, serviceName, domain, description string, metricValue, thresholdValue *float64, unit string, dashboardURL string) string {
 	severityColor := "#f59e0b"
 	severityLabel := "Warning"
 	if severity == "critical" {
@@ -181,6 +181,60 @@ func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, descriptio
 	}
 	serviceLabel := strings.Title(serviceType)
 	timeStr := time.Now().Format("Jan 2, 2006 15:04 UTC")
+
+	// Build extra detail rows
+	var detailRows string
+	if hostname != "" {
+		detailRows += fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Host</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;font-weight:500;text-align:right">%s</td>
+                </tr>`, hostname)
+	}
+	if serviceName != "" {
+		detailRows += fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Service</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;font-weight:500;text-align:right">%s</td>
+                </tr>`, serviceName)
+	}
+	if domain != "" {
+		detailRows += fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Domain</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;font-weight:500;text-align:right">%s</td>
+                </tr>`, domain)
+	}
+	if metricValue != nil {
+		mv := fmt.Sprintf("%.2f", *metricValue)
+		if unit != "" {
+			mv += unit
+		}
+		detailRows += fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Current Value</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#ef4444;font-weight:600;text-align:right">%s</td>
+                </tr>`, mv)
+	}
+	if thresholdValue != nil {
+		tv := fmt.Sprintf("%.2f", *thresholdValue)
+		if unit != "" {
+			tv += unit
+		}
+		detailRows += fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Threshold</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;font-weight:500;text-align:right">%s</td>
+                </tr>`, tv)
+	}
+	detailRows += fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Service Type</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;font-weight:500;text-align:right">%s</td>
+                </tr>`, serviceLabel)
+	detailRows += fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Time</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;text-align:right">%s</td>
+                </tr>`, timeStr)
+
+	severityRow := fmt.Sprintf(`                <tr>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Severity</td>
+                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:%s;font-weight:600;text-align:right">%s</td>
+                </tr>`, severityColor, severityLabel)
 
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
@@ -204,20 +258,10 @@ func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, descriptio
               <h1 style="margin:0 0 8px;font-size:20px;color:#1e293b;font-weight:600">%[3]s</h1>
               <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.5">%[4]s</p>
               <table cellpadding="0" cellspacing="0" style="margin-bottom:24px;width:100%%">
-                <tr>
-                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Service</td>
-                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;font-weight:500;text-align:right">%[5]s</td>
-                </tr>
-                <tr>
-                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Severity</td>
-                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:%[1]s;font-weight:600;text-align:right">%[2]s</td>
-                </tr>
-                <tr>
-                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Time</td>
-                  <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#1e293b;text-align:right">%[6]s</td>
-                </tr>
+                %s
+                %s
               </table>
-              <a href="%[7]s" style="display:inline-block;background-color:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 32px;border-radius:8px">View in Dashboard</a>
+              <a href="%s" style="display:inline-block;background-color:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 32px;border-radius:8px">View in Dashboard</a>
             </td>
           </tr>
           <tr>
@@ -230,7 +274,7 @@ func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, descriptio
     </tr>
   </table>
 </body>
-</html>`, severityColor, severityLabel, ruleName, description, serviceLabel, timeStr, dashboardURL)
+</html>`, severityColor, severityLabel, ruleName, description, detailRows, severityRow, dashboardURL)
 }
 
 func (s *EmailSender) TestEmailHTML() string {

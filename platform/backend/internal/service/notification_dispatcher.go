@@ -25,7 +25,13 @@ func NewNotificationDispatcher(notifRepo *repository.NotificationChannelReposito
 	}
 }
 
-func (d *NotificationDispatcher) DispatchAlertEvent(ctx context.Context, ruleID, tenantID uint, ruleName, serviceType, severity, description string) {
+func (d *NotificationDispatcher) DispatchAlertEvent(
+	ctx context.Context,
+	ruleID, tenantID uint,
+	ruleName, serviceType, severity, hostname, serviceName, domain, description, metricString string,
+	metricValue, thresholdValue *float64,
+	unit string,
+) {
 	if !d.emailSender.IsEnabled() {
 		return
 	}
@@ -44,7 +50,7 @@ func (d *NotificationDispatcher) DispatchAlertEvent(ctx context.Context, ruleID,
 		}
 
 		subject := fmt.Sprintf("[%s] Alert: %s", severity, ruleName)
-		body := d.emailSender.AlertFiredHTML(ruleName, serviceType, severity, description, dashboardURL)
+		body := d.emailSender.AlertFiredHTML(ruleName, serviceType, severity, hostname, serviceName, domain, description, metricValue, thresholdValue, unit, dashboardURL)
 
 		if err := d.emailSender.Send(ch.Target, subject, body); err != nil {
 			log.Printf("[notif] failed to send alert email to %s: %v", ch.Target, err)
@@ -81,9 +87,35 @@ func (d *NotificationDispatcher) processPending(ctx context.Context) {
 			ruleName = "Alert Rule"
 		}
 		serviceType := ev.Rule.ServiceType
+		severity := "warning"
+		if ev.Threshold != nil {
+			severity = ev.Threshold.Severity
+		}
 		description := ev.Rule.Description
 
-		d.DispatchAlertEvent(ctx, ev.RuleID, ev.TenantID, ruleName, serviceType, ev.Status, description)
+		domain := ev.Rule.Domain
+		unit := ev.Rule.Unit
+
+		var metricValue, thresholdValue *float64
+		metricValue = ev.ActualValue
+		if ev.Threshold != nil {
+			t := ev.Threshold.Threshold
+			thresholdValue = &t
+		}
+
+		// The hostname & service name are embedded in MetricString
+		// (set by the alert engine at event creation time).
+		metricString := ev.MetricString
+		if metricString == "" {
+			metricString = fmt.Sprintf("machine=%s", ev.HostMachineID)
+		}
+
+		d.DispatchAlertEvent(
+			ctx, ev.RuleID, ev.TenantID,
+			ruleName, serviceType, severity,
+			"", "", domain, description,
+			metricString, metricValue, thresholdValue, unit,
+		)
 
 		if err := d.alertRuleRepo.MarkEventNotifiedCtx(ctx, ev.ID); err != nil {
 			log.Printf("[notif] failed to mark event %d notified: %v", ev.ID, err)

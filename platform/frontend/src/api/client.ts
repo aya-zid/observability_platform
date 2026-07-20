@@ -12,6 +12,7 @@ const client = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true, // cookie-based auth: access_token + refresh_token
   headers: { "Content-Type": "application/json" },
+  timeout: 15000, // 15s timeout so mutations don't hang forever
 })
 
 function isAuthEndpoint(url?: string) {

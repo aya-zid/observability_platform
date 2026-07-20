@@ -3,6 +3,8 @@ import { useState } from "react"
 
 import { getAlertTemplatesByService, createAlertRule, type AlertTemplate, type ScopeInput, type ThresholdInput } from "@/api/alerts"
 import { getDiscoveryHosts, getDiscoveryServices, type DiscoveryHost, type DiscoveryService } from "@/api/discovery"
+import { getNginxDomains } from "@/api/nginx"
+import { getApacheDomains } from "@/api/apache"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -26,6 +28,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
 
   const [selectedHostIds, setSelectedHostIds] = useState<number[]>([])
   const [selectedServiceIds, setSelectedServiceIds] = useState<number[]>([])
+  const [selectedDomain, setSelectedDomain] = useState("")
   const [thresholds, setThresholds] = useState<ThresholdInput[]>([{ label: "", threshold: 0, severity: "warning" }])
   const [forDuration, setForDuration] = useState("5m")
   const [showHostPicker, setShowHostPicker] = useState(false)
@@ -51,6 +54,18 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
     (s) => s.service_name === serviceType
   ) ?? []
 
+  const isWebService = serviceType === "nginx" || serviceType === "apache"
+
+  const domainsQuery = useQuery({
+    queryKey: [serviceType === "nginx" ? "nginx-domains" : "apache-domains"],
+    queryFn: () => {
+      const id = filteredServices.length > 0 ? String(filteredServices[0].id) : ""
+      if (!id) return Promise.resolve([])
+      return serviceType === "nginx" ? getNginxDomains(id) : getApacheDomains(id)
+    },
+    enabled: isWebService && filteredServices.length > 0,
+  })
+
   const createMutation = useMutation({
     mutationFn: () => {
       const scopes: ScopeInput[] = []
@@ -67,6 +82,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
 
       return createAlertRule({
         template_id: selectedTemplate!.id,
+        domain: selectedDomain || undefined,
         scopes,
         thresholds,
         for_duration: forDuration,
@@ -75,6 +91,9 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["alert-rules"] })
       onClose()
+    },
+    onError: (err) => {
+      console.error("[CreateAlertRule] API error:", err)
     },
   })
 
@@ -332,6 +351,27 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
               </select>
             </div>
 
+            {/* Domain (nginx / apache only) */}
+            {isWebService && (
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Domain (optional)</label>
+                <div className="mt-1.5">
+                  <select
+                    value={selectedDomain}
+                    onChange={(e) => setSelectedDomain(e.target.value)}
+                    className="w-full border border-border rounded-lg px-3 py-2 bg-background"
+                  >
+                    <option value="">All domains</option>
+                    {domainsQuery.data?.map((d) => (
+                      <option key={d.domain} value={d.domain}>
+                        {d.domain} {d.enabled ? "" : "(disabled)"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
             {/* Thresholds */}
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -411,6 +451,13 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
             </div>
           </div>
 
+          {createMutation.isError && (
+            <div className="mt-3 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive">
+              {createMutation.error instanceof Error
+                ? createMutation.error.message
+                : "Failed to create rule. Check console for details."}
+            </div>
+          )}
           <div className="mt-6 flex gap-2 justify-end">
             <Button variant="outline" onClick={() => setStep("pick-template")}>Back</Button>
             <Button variant="outline" onClick={onClose}>Cancel</Button>

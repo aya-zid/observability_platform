@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
@@ -88,6 +89,7 @@ type createRuleRequest struct {
 	Thresholds []thresholdRequest `json:"thresholds" validate:"required,min=1"`
 
 	ForDuration string `json:"for_duration"`
+	Domain      string `json:"domain"`
 }
 
 func (h *AlertRulesHandler) CreateRule(c echo.Context) error {
@@ -95,11 +97,13 @@ func (h *AlertRulesHandler) CreateRule(c echo.Context) error {
 
 	var req createRuleRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		log.Printf("[alerts] CreateRule bind error: %v", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request: " + err.Error()})
 	}
 
 	tpl := domain.FindTemplateByID(req.TemplateID)
 	if tpl == nil {
+		log.Printf("[alerts] CreateRule unknown template: %q", req.TemplateID)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown template_id"})
 	}
 
@@ -143,6 +147,7 @@ func (h *AlertRulesHandler) CreateRule(c echo.Context) error {
 		DefaultSeverity: tpl.DefaultSeverity,
 		ForDuration:     req.ForDuration,
 		IsEnabled:       true,
+		Domain:          req.Domain,
 		Scopes:          scopes,
 		Thresholds:      thresholds,
 	}
@@ -151,7 +156,8 @@ func (h *AlertRulesHandler) CreateRule(c echo.Context) error {
 	}
 
 	if err := h.alertRuleRepo.CreateRuleCtx(c.Request().Context(), rule); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create rule"})
+		log.Printf("[alerts] CreateRule db error: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create rule: " + err.Error()})
 	}
 
 	// Reload with preloaded associations
@@ -176,6 +182,7 @@ type updateRuleRequest struct {
 	Thresholds  *[]thresholdRequest  `json:"thresholds"`
 	IsEnabled   *bool                `json:"is_enabled"`
 	ForDuration *string              `json:"for_duration"`
+	Domain      *string              `json:"domain"`
 }
 
 func (h *AlertRulesHandler) UpdateRule(c echo.Context) error {
@@ -197,6 +204,9 @@ func (h *AlertRulesHandler) UpdateRule(c echo.Context) error {
 	}
 	if req.ForDuration != nil {
 		updates["for_duration"] = *req.ForDuration
+	}
+	if req.Domain != nil {
+		updates["domain"] = *req.Domain
 	}
 
 	if len(updates) > 0 {

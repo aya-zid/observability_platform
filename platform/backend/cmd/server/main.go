@@ -82,9 +82,11 @@ func main() {
 		log.Println("[email] SMTP not configured — email delivery disabled (set SMTP_HOST, SMTP_USER, SMTP_PASS, SMTP_FROM_ADDRESS)")
 	}
 
-	// ── Start alert evaluator ────────────────────────────────────────────────
+	// ── Alert engine ─────────────────────────────────────────────────────────
 	alertRuleRepo := repository.NewAlertRuleRepository(infrastructure.DB)
-	alertEngine := service.NewAlertEngineService(alertRuleRepo)
+	tenantRepo := repository.NewTenantRepository(infrastructure.DB)
+	queryBuilder := service.NewAlertQueryBuilder(cfg)
+	alertEngine := service.NewAlertEngineService(alertRuleRepo, queryBuilder, tenantRepo)
 	go alertEngine.StartEvaluator(context.Background())
 
 	// ── Start notification dispatcher ─────────────────────────────────────────

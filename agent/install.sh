@@ -2,15 +2,15 @@
 # ============================================
 # OBSERVABILITY PLATFORM — Agent Installer
 # Usage:
-#   curl -sSL https://platform/install.sh | API_KEY=xxx bash
-#   sudo API_KEY=obs_live_xxx PLATFORM_HOST=localhost bash install.sh
+#   curl -sSL http://<platform>:8080/install.sh | sudo API_KEY=xxx bash
+#   sudo API_KEY=xxx PLATFORM_HOST=<host> bash install.sh
 # Runs as root for full system access
 # ============================================
 
 set -uo pipefail
 
 # ============================================
-# PHASE 0 — BOOTSTRAP
+# BOOTSTRAP
 # ============================================
 
 # ---- Colors ----
@@ -22,6 +22,7 @@ warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
 info()    { echo -e "${CYAN}[i]${NC} $1"; }
 error()   { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 section() { echo -e "\n${BOLD}${BLUE}━━━ $1 ━━━${NC}"; }
+step()    { echo -e "\n${BOLD}${BLUE}◆ $1${NC}"; }
 fixed()   { echo -e "${GREEN}[fixed]${NC} $1"; }
 skipped() { echo -e "${YELLOW}[skipped]${NC} $1"; }
 manual()  { echo -e "${RED}[manual]${NC} $1"; }
@@ -39,6 +40,14 @@ backup_file() {
   local FILE=$1
   [ -f "$FILE" ] && cp "$FILE" "${FILE}.bak.$(date +%s)" && info "Backed up $FILE"
 }
+
+# ---- Startup banner ----
+echo ""
+echo -e "${BOLD}${BLUE}  ╔══════════════════════════════════════════════════════════╗${NC}"
+printf "${BOLD}${BLUE}  ║${NC}  Observability Platform — Agent Installer%14s${BOLD}${BLUE}║${NC}\n" ""
+printf "${BOLD}${BLUE}  ║${NC}  Version ${AGENT_VERSION:-1.0.0}%39s${BOLD}${BLUE}║${NC}\n" ""
+echo -e "${BOLD}${BLUE}  ╚══════════════════════════════════════════════════════════╝${NC}"
+echo ""
 
 # ============================================
 # CONFIGURATION
@@ -1295,7 +1304,7 @@ ${VOLUME_PATHS_YAML}
         parse_from: body
         on_error: send_quiet
     resource:
-      service.name: $(yaml_quote "$CNAME")
+      service.name: $(yaml_quote "container_${CNAME}")
       container.id: $(yaml_quote "$CID")
       container.image: $(yaml_quote "$CIMAGE")
       container.service: $(yaml_quote "$CONTAINER_SERVICE")
@@ -1341,7 +1350,7 @@ ${VOLUME_PATHS_YAML}
         if: 'attributes.msg != nil'
         on_error: send_quiet
     resource:
-      service.name: $(yaml_quote "$CNAME")
+      service.name: $(yaml_quote "container_${CNAME}")
       container.id: $(yaml_quote "$CID")
       container.image: $(yaml_quote "$CIMAGE")
       container.service: $(yaml_quote "$CONTAINER_SERVICE")
@@ -1484,6 +1493,7 @@ fi
 # Per-container metrics: cpu, mem, net, block I/O, pids
 # Collected every 30s via docker stats; served as Prometheus text via file server
 # ============================================
+step "Docker container metrics collector"
 
 if [ -S /var/run/docker.sock ] && command -v docker &>/dev/null; then
   cat > /usr/local/bin/agent-docker-metrics <<'DOCKERMETRICS'
@@ -2353,6 +2363,24 @@ processors:
         - '(${HOST_LOG_NOISY_INFO_DEBUG}) and (${HOST_LOG_PRIORITY_INFO_OR_DEBUG})'
         - '(${HOST_LOG_PRIORITY_INFO_OR_DEBUG}) and not (${HOST_LOG_KEEP_EXPR})'
 
+  filter/drop_container_log_noise:
+    error_mode: ignore
+    logs:
+      log_record:
+        # Only apply to container logs (job: docker)
+        - 'resource.attributes["job"] == "docker" and body == nil'
+        - 'resource.attributes["job"] == "docker" and body == ""'
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "^[[:space:]]*$")'
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "(?i)(GET|POST|HEAD|PUT|DELETE|OPTIONS|PATCH) /(health|healthz|readyz|livez|ping|status|metrics|heartbeat)")'
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "(?i)\"GET /(health|healthz|readyz|livez|ping|status|metrics|heartbeat)\"")'
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "(?i)health check|health status|container (is )?(healthy|unhealthy|starting)")'
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "(?i)heartbeat|keepalive|alive check")'
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "^-+$")'
+        # Drop structured info-level logs (common formats: level=info, "level":"info")
+        # unless the line also contains error/warn/fatal/etc keywords
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "(?i)level=info($|[^a-z0-9])") and not IsMatch(body, "(?i)(error|warn|fatal|panic|exception|critical)")'
+        - 'resource.attributes["job"] == "docker" and IsMatch(body, "(?i)\\"level\\"[[:space:]]*:[[:space:]]*\\"info\\"") and not IsMatch(body, "(?i)(error|warn|fatal|panic|exception|critical|\\"alert\\"|\\"emergency\\")")'
+
 exporters:
 
   prometheusremotewrite:
@@ -2389,7 +2417,7 @@ service:
 
     logs:
       receivers: [${LOG_RECEIVERS_LIST}]
-      processors: [memory_limiter, resourcedetection, resource, filter/drop_phpfpm_pollution, filter/drop_host_log_noise, batch]
+      processors: [memory_limiter, resourcedetection, resource, filter/drop_phpfpm_pollution, filter/drop_host_log_noise, filter/drop_container_log_noise, batch]
       exporters: [otlphttp/logs]
 
     traces:
@@ -2867,3 +2895,26 @@ if [ "$CONTAINERS_SENT" = true ]; then
 else
   warn "Could not reach ${CONTAINER_DISCOVERY_ENDPOINT} — container discovery kept local"
 fi
+
+# ============================================
+# INSTALLATION COMPLETE
+# ============================================
+echo ""
+_BANNER_LN() { local T="$1"; local P=$((54 - 2 - ${#T})); printf "${GREEN}  ║${NC}  %s%${P}s${GREEN}║${NC}\n" "$T" ""; }
+echo -e "${GREEN}  ╔══════════════════════════════════════════════════════════╗${NC}"
+_BANNER_LN "✓  Installation Complete"
+_BANNER_LN "Agent v${AGENT_VERSION} — ${HOSTNAME_FQDN}"
+echo -e "${GREEN}  ╚══════════════════════════════════════════════════════════╝${NC}"
+unset -f _BANNER_LN
+echo ""
+log "Agent v${AGENT_VERSION} installed successfully on ${HOSTNAME_FQDN}"
+log "Platform: ${PLATFORM_HOST}:${PLATFORM_PORT}"
+echo ""
+echo -e "  ${BOLD}Quick Start:${NC}"
+info "  View agent status  → sudo systemctl status otelcol"
+info "  View agent logs    → sudo journalctl -u otelcol -f"
+info ""
+echo -e "  ${BOLD}Uninstall:${NC}"
+info "  curl -sSL http://${PLATFORM_HOST}:${PLATFORM_PORT}/uninstall.sh | sudo bash"
+echo ""
+log "System monitoring is now active"

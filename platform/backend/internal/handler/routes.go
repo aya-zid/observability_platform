@@ -122,7 +122,9 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 		tenantRepo,
 	)
 
-	overviewService := service.NewOverviewService(cfg, infrastructure.Redis, hostRepo, discoveryRepo)
+	correlationFindingRepo := repository.NewCorrelationFindingRepository(infrastructure.DB)
+	issueDetectionService := service.NewIssueDetectionService(cfg)
+	overviewService := service.NewOverviewService(cfg, infrastructure.Redis, hostRepo, discoveryRepo, correlationFindingRepo, issueDetectionService)
 	overviewHandler := NewOverviewHandler(overviewService, tenantRepo)
 
 	hostDashboardService := service.NewHostDashboardService(cfg, infrastructure.Redis)
@@ -134,7 +136,15 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 		tenantRepo,
 	)
 
+	containerDashboardService := service.NewContainerDashboardService(cfg, infrastructure.Redis)
+	containerDashboardHandler := NewContainerDashboardHandler(
+		containerDashboardService,
+		discoveryRepo,
+		tenantRepo,
+	)
+
 	e.GET("/install.sh", installHandler.AgentInstallScript)
+	e.GET("/uninstall.sh", installHandler.AgentUninstallScript)
 	e.GET("/integrations/nginx.sh", integrationHandler.NginxScript)
 	e.GET("/integrations/generic.sh", integrationHandler.GenericScript)
 
@@ -200,6 +210,8 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 			r.GET("/discovery/hosts", discoveryAPIHandler.ListHosts)
 			r.GET("/discovery/services", discoveryAPIHandler.ListServices)
 			r.GET("/discovery/services/:id", discoveryAPIHandler.GetService)
+			r.GET("/discovery/containers", discoveryAPIHandler.ListContainers)
+			r.GET("/discovery/containers/:id", discoveryAPIHandler.GetContainer)
 
 			// Query routes for dashboards
 			r.GET("/query/metrics", queryHandler.QueryMetrics)
@@ -260,6 +272,10 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 			r.GET("/hosts/:machineId/dashboard/processes", hostDashboardHandler.Processes)
 			r.GET("/hosts/:machineId/logs", hostDashboardHandler.Logs)
 			r.GET("/hosts/:machineId/logs/health-summary", hostDashboardHandler.LogsHealthSummary)
+
+			// Container dashboard routes
+			r.GET("/containers/:id/dashboard", containerDashboardHandler.Dashboard)
+			r.GET("/containers/:id/logs", containerDashboardHandler.Logs)
 		}
 	}
 

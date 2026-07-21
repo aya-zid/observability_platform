@@ -89,6 +89,13 @@ func main() {
 	alertEngine := service.NewAlertEngineService(alertRuleRepo, queryBuilder, tenantRepo)
 	go alertEngine.StartEvaluator(context.Background())
 
+	// ── Correlation worker ────────────────────────────────────────────────────
+	hostRepo := repository.NewHostRepository(infrastructure.DB)
+	discRepo := repository.NewDiscoveryRepository(infrastructure.DB)
+	correlationFindingRepo := repository.NewCorrelationFindingRepository(infrastructure.DB)
+	correlationWorker := service.NewCorrelationWorker(cfg, hostRepo, discRepo, tenantRepo, correlationFindingRepo)
+	go correlationWorker.StartEvaluator(context.Background())
+
 	// ── Start notification dispatcher ─────────────────────────────────────────
 	notifRepo := repository.NewNotificationChannelRepository(infrastructure.DB)
 	notifDispatcher := service.NewNotificationDispatcher(notifRepo, alertRuleRepo, emailSender, cfg.PlatformURL)

@@ -18,7 +18,7 @@ export default function Sidebar() {
       <div className="p-4 md:p-6">
         <div className="font-semibold tracking-tight">Observability Platform</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Overview, alerts, hosts, services
+          Overview, alerts, hosts, services, containers
         </div>
       </div>
 
@@ -46,6 +46,12 @@ export default function Sidebar() {
           className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
         >
           Services
+        </NavLink>
+        <NavLink
+          to="/containers"
+          className={({ isActive }) => cn(linkBase, isActive && "bg-muted")}
+        >
+          Containers
         </NavLink>
 
         <div>

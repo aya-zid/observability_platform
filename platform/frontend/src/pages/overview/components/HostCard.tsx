@@ -4,15 +4,6 @@ import { ChevronRight } from "lucide-react"
 import type { HostOverview } from "@/api/overview"
 import { cn } from "@/lib/utils"
 
-const serviceColors: Record<string, string> = {
-  nginx: "bg-blue-500",
-  apache: "bg-orange-500",
-  phpfpm: "bg-purple-500",
-  mariadb: "bg-rose-500",
-  postgres: "bg-cyan-500",
-  redis: "bg-amber-500",
-}
-
 const statusColors: Record<string, string> = {
   healthy: "bg-green-500",
   degraded: "bg-amber-500",
@@ -21,9 +12,23 @@ const statusColors: Record<string, string> = {
   offline: "bg-red-500",
 }
 
-function formatUsage(val: number | undefined, unit: string): string {
-  if (val === undefined || val === null) return "—"
-  return `${val.toFixed(1)}${unit}`
+function UsageBar({ label, pct, unit }: { label: string; pct: number | undefined; unit: string }) {
+  const safe = pct ?? 0
+  const color = safe > 90 ? "bg-red-500" : safe > 70 ? "bg-amber-500" : "bg-green-500"
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className={cn("font-medium tabular-nums", safe > 80 ? "text-red-500" : safe > 60 ? "text-amber-500" : "")}>
+          {pct !== undefined ? `${pct.toFixed(1)}${unit}` : "—"}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full rounded-full transition-all", color)} style={{ width: `${Math.min(safe, 100)}%` }} />
+      </div>
+    </div>
+  )
 }
 
 export function HostCard({ host }: { host: HostOverview }) {
@@ -53,11 +58,19 @@ export function HostCard({ host }: { host: HostOverview }) {
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
       </div>
 
+      {/* Clickable service chips */}
       <div className="mt-3 flex flex-wrap gap-1.5">
         {(host.services ?? []).map((svc) => (
           <span
             key={svc.name}
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs"
+            className={cn(
+              "inline-flex cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs transition-colors hover:bg-accent",
+            )}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              window.location.href = `/${svc.name}/${host.machine_id}/dashboard`
+            }}
           >
             <span
               className={cn(
@@ -77,25 +90,11 @@ export function HostCard({ host }: { host: HostOverview }) {
         </p>
       ) : null}
 
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <div>
-          <span className="text-muted-foreground">CPU </span>
-          <span className={cn(host.cpu_pct != null && host.cpu_pct > 80 ? "text-red-500" : "")}>
-            {formatUsage(host.cpu_pct, "%")}
-          </span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Mem </span>
-          <span className={cn(host.mem_pct != null && host.mem_pct > 80 ? "text-red-500" : "")}>
-            {formatUsage(host.mem_pct, "%")}
-          </span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Disk </span>
-          <span className={cn(host.disk_pct != null && host.disk_pct > 80 ? "text-red-500" : "")}>
-            {formatUsage(host.disk_pct, "%")}
-          </span>
-        </div>
+      {/* Progress bars */}
+      <div className="mt-3 space-y-2">
+        <UsageBar label="CPU" pct={host.cpu_pct} unit="%" />
+        <UsageBar label="Memory" pct={host.mem_pct} unit="%" />
+        <UsageBar label="Disk" pct={host.disk_pct} unit="%" />
       </div>
     </Link>
   )

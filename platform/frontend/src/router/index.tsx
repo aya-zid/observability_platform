@@ -24,6 +24,9 @@ import { MariaDBDashboardPage } from "@/pages/service/mariadb/MariaDBDashboardPa
 import { MariaDBLogsPage } from "@/pages/service/mariadb/MariaDBLogsPage"
 import HostsPage from "@/pages/hosts/HostsPage"
 import HostDetailPage from "@/pages/hosts/HostDetailPage"
+import ContainersPage from "@/pages/container/ContainersPage"
+import { ContainerDashboardPage } from "@/pages/container/ContainerDashboardPage"
+import { ContainerLogsPage } from "@/pages/container/ContainerLogsPage"
 import { HostLogsPage } from "@/pages/hosts/HostLogsPage"
 import OverviewPage from "@/pages/overview/OverviewPage"
 import ProfilePage from "@/pages/profile/ProfilePage"
@@ -58,6 +61,9 @@ export const router = createBrowserRouter([
           { path: "/hosts", element: <HostsPage /> },
           { path: "/hosts/:machineId", element: <HostDetailPage /> },
           { path: "/hosts/:machineId/logs", element: <HostLogsPage /> },
+          { path: "/containers", element: <ContainersPage /> },
+          { path: "/containers/:id/dashboard", element: <ContainerDashboardPage /> },
+          { path: "/containers/:id/logs", element: <ContainerLogsPage /> },
           { path: "/services", element: <ServicesPage /> },
           { path: "/services/:id", element: <ServiceConfigPage /> },
           { path: "/services/nginx-dashboard/:id", element: <NginxDashboardPage /> },

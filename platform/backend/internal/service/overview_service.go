@@ -21,12 +21,12 @@ import (
 // ─── Response DTOs ───────────────────────────────────────────────────────────
 
 type OverviewResponse struct {
-	Global    GlobalHealth   `json:"global"`
-	Hosts     []HostOverview `json:"hosts"`
-	TopIssues []TopIssue     `json:"top_issues"`
-	Findings  []FindingVO    `json:"findings"`
-	Timeline  TimelineData   `json:"timeline"`
-	DepGraph  DepGraphData   `json:"dep_graph"`
+	Global          GlobalHealth     `json:"global"`
+	Hosts           []HostOverview   `json:"hosts"`
+	Issues []DiagnosedIssue `json:"issues"`
+	Findings        []FindingVO      `json:"findings"`
+	Timeline        TimelineData     `json:"timeline"`
+	DepGraph        DepGraphData     `json:"dep_graph"`
 }
 
 type GlobalHealth struct {
@@ -58,25 +58,25 @@ type ServiceChip struct {
 	Port   *int   `json:"port,omitempty"`
 }
 
-type TopIssue struct {
-	MachineID string `json:"machine_id"`
-	Hostname  string `json:"hostname"`
-	Service   string `json:"service"`
-	Issue     string `json:"issue"`
-	Value     string `json:"value"`
-	Severity  string `json:"severity"`
-	Age       string `json:"age"`
+type FindingVO struct {
+	ID                 uint           `json:"id"`
+	RuleID             string         `json:"rule_id"`
+	Severity           string         `json:"severity"`
+	Title              string         `json:"title"`
+	Message            string         `json:"message"`
+	Evidence           []EvidenceItem `json:"evidence"`
+	RecommendedAction  *string        `json:"recommended_action,omitempty"`
+	DashboardLink      *string        `json:"dashboard_link,omitempty"`
+	ServiceName        *string        `json:"service_name,omitempty"`
+	InvestigationLinks []LinkVO       `json:"investigation_links,omitempty"`
+	Hostname           string         `json:"hostname"`
+	FiredAt            string         `json:"fired_at"`
+	Duration           string         `json:"duration"`
 }
 
-type FindingVO struct {
-	ID        uint           `json:"id"`
-	RuleID    string         `json:"rule_id"`
-	Severity  string         `json:"severity"`
-	Title     string         `json:"title"`
-	Message   string         `json:"message"`
-	Evidence  []EvidenceItem `json:"evidence"`
-	FiredAt   string         `json:"fired_at"`
-	Hostname  string         `json:"hostname"`
+type LinkVO struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
 }
 
 type EvidenceItem struct {
@@ -118,11 +118,13 @@ type DepEdge struct {
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 type OverviewService struct {
-	cfg        *config.Config
-	redis      *redis.Client
-	httpClient *http.Client
-	hostRepo   *repository.HostRepository
-	discRepo   *repository.DiscoveryRepository
+	cfg                   *config.Config
+	redis                 *redis.Client
+	httpClient            *http.Client
+	hostRepo              *repository.HostRepository
+	discRepo              *repository.DiscoveryRepository
+	correlationFindingRepo *repository.CorrelationFindingRepository
+	issueDetectionService  *IssueDetectionService
 }
 
 func NewOverviewService(
@@ -130,18 +132,27 @@ func NewOverviewService(
 	redisClient *redis.Client,
 	hostRepo *repository.HostRepository,
 	discRepo *repository.DiscoveryRepository,
+	correlationFindingRepo *repository.CorrelationFindingRepository,
+	issueDetectionService *IssueDetectionService,
 ) *OverviewService {
 	return &OverviewService{
-		cfg:        cfg,
-		redis:      redisClient,
-		httpClient: &http.Client{Timeout: 45 * time.Second},
-		hostRepo:   hostRepo,
-		discRepo:   discRepo,
+		cfg:                   cfg,
+		redis:                 redisClient,
+		httpClient:            &http.Client{Timeout: 45 * time.Second},
+		hostRepo:              hostRepo,
+		discRepo:              discRepo,
+		correlationFindingRepo: correlationFindingRepo,
+		issueDetectionService:  issueDetectionService,
 	}
 }
 
 // GetOverview builds the full overview + correlation response for a tenant.
-func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenantUUID string) (*OverviewResponse, error) {
+// timelineStart and timelineEnd are optional nanosecond epoch values; if zero,
+// a rolling 5-minute window is used for the incident timeline.
+func (s *OverviewService) GetOverview(
+	ctx context.Context, tenantID uint, tenantUUID string,
+	timelineStartNs, timelineEndNs int64,
+) (*OverviewResponse, error) {
 	hosts, err := s.hostRepo.ListByTenantCtx(ctx, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("list hosts: %w", err)
@@ -154,7 +165,6 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 
 	now := time.Now()
 
-	// Group services by machine_id.
 	svcsByHost := map[string][]serviceBrief{}
 	for _, svc := range services {
 		svcsByHost[svc.MachineID] = append(svcsByHost[svc.MachineID], serviceBrief{
@@ -181,10 +191,16 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 		})
 	}
 
+	// Timeline window: default to 5min if not specified.
+	if timelineStartNs == 0 || timelineEndNs == 0 {
+		timelineEndNs = now.UnixNano()
+		timelineStartNs = timelineEndNs - int64(5*time.Minute)
+	}
+
 	var (
 		global     GlobalHealth
 		hostCards  []HostOverview
-		topIssues  []TopIssue
+		allIssues  []DiagnosedIssue
 		findings   []FindingVO
 		timeline   TimelineData
 		depGraph   DepGraphData
@@ -195,6 +211,32 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 	timeSec := now.Unix()
 	timeNs := now.UnixNano()
 	startNs := timeNs - int64(5*time.Minute)
+
+	// Pre-load active correlation findings from DB.
+	dbFindings, err := s.correlationFindingRepo.ListActiveByTenantCtx(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list findings: %w", err)
+	}
+	findingsByHost := map[string][]domainFindingBrief{}
+	for _, f := range dbFindings {
+		machineID := f.MachineID
+		serviceName := ""
+		if f.ServiceName != nil {
+			serviceName = *f.ServiceName
+		}
+		findingsByHost[machineID] = append(findingsByHost[machineID], domainFindingBrief{
+			ruleID:            f.RuleID,
+			severity:          f.Severity,
+			title:             f.Title,
+			message:           f.Message,
+			evidence:          f.Evidence,
+			recommendedAction: f.RecommendedAction,
+			dashboardLink:     f.DashboardLink,
+			svcName:           serviceName,
+			hostname:          f.Hostname,
+			firedAt:           f.FiredAt,
+		})
+	}
 
 	for _, hb := range hostBriefs {
 		wg.Add(1)
@@ -207,7 +249,6 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 				hostStatus = "online"
 			}
 
-			// Query host-level metrics (best-effort).
 			cpu := s.queryVMInstantSafe(ctx, tenantID,
 				fmt.Sprintf(`(1 - avg(system_cpu_utilization_ratio{host_id="%s",state="idle"}) > 0) * 100`, hb.machineID), timeSec)
 			mem := s.queryVMInstantSafe(ctx, tenantID,
@@ -215,7 +256,6 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 			disk := s.queryVMInstantSafe(ctx, tenantID,
 				fmt.Sprintf(`system_filesystem_utilization_ratio{host_id="%s",mountpoint="/"} * 100`, hb.machineID), timeSec)
 
-			// Determine service chips.
 			chips := s.getServiceChips(ctx, tenantID, tenantUUID, hb.machineID, svcsByHost[hb.machineID], timeSec, startNs, timeNs)
 			healthyCount, degradedCount, downCount := 0, 0, 0
 			summaryParts := []string{}
@@ -233,25 +273,25 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 			}
 			if !online {
 				summaryParts = append(summaryParts, "host offline")
-				downCount += len(chips) // all services are down if host is offline
+				downCount += len(chips)
 			}
 			summary := ""
 			if len(summaryParts) > 0 {
 				summary = strings.Join(summaryParts, ", ")
 			}
 
-			// Generate top issues from log signals.
-			issues := s.getLogIssues(ctx, tenantUUID, hb.machineID, hb.hostname, svcsByHost[hb.machineID], startNs, timeNs)
-			// Add metric-based issues.
-			metricIssues := s.getMetricIssues(ctx, tenantID, hb.machineID, hb.hostname, svcsByHost[hb.machineID], timeSec)
-			issues = append(issues, metricIssues...)
+			// Diagnosed issues from IssueDetectionService.
+			issues := s.issueDetectionService.DetectHostIssues(
+				ctx, tenantID, tenantUUID, hb.machineID, hb.hostname,
+				svcsByHost[hb.machineID], timeSec, startNs, timeNs,
+			)
 
-			// Run correlation rules for this host.
-			hostFindings := s.evaluateCorrelationRules(ctx, tenantID, tenantUUID, hb.machineID, hb.hostname, svcsByHost[hb.machineID], timeSec, startNs, timeNs)
-			hostDepNodes, hostDepEdges := s.buildDepGraph(hb.machineID, hb.hostname, chips)
+			// Build dep graph nodes + edges with coloring from active findings.
+			hostFindings := findingsByHost[hb.machineID]
+			hostDepNodes, hostDepEdges := s.buildDepGraph(hb.machineID, hb.hostname, chips, hostFindings)
 
-			// Build timeline events from log signals.
-			hostTimeline := s.getTimelineEvents(ctx, tenantUUID, hb.machineID, hb.hostname, svcsByHost[hb.machineID], startNs, timeNs)
+			// Build timeline events from logs using the requested window.
+			hostTimeline := s.getTimelineEvents(ctx, tenantUUID, hb.machineID, hb.hostname, svcsByHost[hb.machineID], timelineStartNs, timelineEndNs)
 
 			mu.Lock()
 			global.HostsTotal++
@@ -275,20 +315,41 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 				Summary:   summary,
 				Services:  chips,
 			})
-			topIssues = append(topIssues, issues...)
-			findings = append(findings, hostFindings...)
-			timeline.Events = append(timeline.Events, hostTimeline...)
+			allIssues = append(allIssues, issues...)
 			depGraph.Nodes = append(depGraph.Nodes, hostDepNodes...)
 			depGraph.Edges = append(depGraph.Edges, hostDepEdges...)
+			timeline.Events = append(timeline.Events, hostTimeline...)
 			mu.Unlock()
 		}(hb)
 	}
 	wg.Wait()
 
+	// Build FindingsVO from DB findings.
+	for _, f := range dbFindings {
+		evidence := parseEvidenceJSON(f.Evidence)
+		duration := computeDuration(f.FiredAt)
+		links := buildInvestigationLinks(f.MachineID, f.RuleID)
+		findings = append(findings, FindingVO{
+			ID:                 f.ID,
+			RuleID:             f.RuleID,
+			Severity:           f.Severity,
+			Title:              f.Title,
+			Message:            f.Message,
+			Evidence:           evidence,
+			RecommendedAction:  f.RecommendedAction,
+			DashboardLink:      f.DashboardLink,
+			ServiceName:        f.ServiceName,
+			InvestigationLinks: links,
+			Hostname:           f.Hostname,
+			FiredAt:            f.FiredAt.UTC().Format(time.RFC3339),
+			Duration:           duration,
+		})
+	}
+
 	global.OpenFindings = len(findings)
 	global.ActiveSignals += len(findings)
 
-	// Sort: newest timeline first.
+	// Sort timeline: newest first.
 	sort.Slice(timeline.Events, func(i, j int) bool {
 		return timeline.Events[i].Timestamp > timeline.Events[j].Timestamp
 	})
@@ -297,20 +358,20 @@ func (s *OverviewService) GetOverview(ctx context.Context, tenantID uint, tenant
 	}
 
 	// Sort issues by severity: critical > warning > info.
-	sort.Slice(topIssues, func(i, j int) bool {
-		return severityWeight(topIssues[i].Severity) > severityWeight(topIssues[j].Severity)
+	sort.Slice(allIssues, func(i, j int) bool {
+		return severityWeight(allIssues[i].Severity) > severityWeight(allIssues[j].Severity)
 	})
-	if len(topIssues) > 20 {
-		topIssues = topIssues[:20]
+	if len(allIssues) > 20 {
+		allIssues = allIssues[:20]
 	}
 
 	return &OverviewResponse{
-		Global:    global,
-		Hosts:     hostCards,
-		TopIssues: topIssues,
-		Findings:  findings,
-		Timeline:  timeline,
-		DepGraph:  depGraph,
+		Global:   global,
+		Hosts:    hostCards,
+		Issues:   allIssues,
+		Findings: findings,
+		Timeline: timeline,
+		DepGraph: depGraph,
 	}, nil
 }
 
@@ -356,7 +417,6 @@ func (s *OverviewService) getServiceHealth(
 	svc serviceBrief, timeSec int64, startNs, endNs int64,
 ) string {
 	if !svc.MetricColl {
-		// If metrics not collected, check logs for errors as a fallback.
 		errCount := s.queryLogErrorCount(ctx, tenantUUID, machineID, svc.Name, startNs, endNs)
 		if errCount > 10 {
 			return "degraded"
@@ -364,21 +424,18 @@ func (s *OverviewService) getServiceHealth(
 		return "unknown"
 	}
 
-	// Check *_up metric.
 	upMetric := fmt.Sprintf(`%s_up{host_id="%s"}`, svc.Name, machineID)
 	up := s.queryVMInstantSafe(ctx, tenantID, upMetric, timeSec)
 	if up != nil && *up == 0 {
 		return "down"
 	}
 
-	// Check scrape error.
 	scrapeErr := s.queryVMInstantSafe(ctx, tenantID,
 		fmt.Sprintf(`%s_scrape_error{host_id="%s"}`, svc.Name, machineID), timeSec)
 	if scrapeErr != nil && *scrapeErr > 0 {
 		return "down"
 	}
 
-	// Service-specific degradation checks.
 	switch svc.Name {
 	case "phpfpm":
 		sat := s.queryVMInstantSafe(ctx, tenantID,
@@ -412,7 +469,6 @@ func (s *OverviewService) getServiceHealth(
 		}
 	}
 
-	// Log-based degradation: check for elevated errors.
 	errCount := s.queryLogErrorCount(ctx, tenantUUID, machineID, svc.Name, startNs, endNs)
 	if errCount > 50 {
 		return "degraded"
@@ -421,298 +477,37 @@ func (s *OverviewService) getServiceHealth(
 	return "healthy"
 }
 
-// ─── Log-based issues ─────────────────────────────────────────────────────────
+// ─── Dependency graph with edge coloring ──────────────────────────────────────
 
-func (s *OverviewService) getLogIssues(
-	ctx context.Context, tenantUUID, machineID, hostname string,
-	svcs []serviceBrief, startNs, endNs int64,
-) []TopIssue {
-	var issues []TopIssue
-	for _, svc := range svcs {
-		if !supportedServices[svc.Name] || !svc.LogCollOn {
-			continue
-		}
-
-		qErr := fmt.Sprintf(`sum by(service) (count_over_time({service=%q, host_id=%q} |= "error" [5m])) > 0`, svc.Name, machineID)
-		rows, err := s.lokiQueryRange(ctx, tenantUUID, qErr, startNs, endNs, "5m", 10)
-		if err != nil || len(rows) == 0 {
-			continue
-		}
-		for _, row := range rows {
-			if len(row.Values) == 0 {
-				continue
-			}
-			val := row.Values[len(row.Values)-1][1]
-			if val > 0 {
-				sev := "warning"
-				if val > 50 {
-					sev = "critical"
-				}
-				age := "just now"
-				issues = append(issues, TopIssue{
-					MachineID: machineID,
-					Hostname:  hostname,
-					Service:   svc.Name,
-					Issue:     fmt.Sprintf("Error rate elevated in %s logs", svc.Name),
-					Value:     fmt.Sprintf("%.0f/min", val),
-					Severity:  sev,
-					Age:       age,
-				})
-			}
-		}
-	}
-	return issues
+type domainFindingBrief struct {
+	ruleID            string
+	severity          string
+	title             string
+	message           string
+	evidence          string
+	recommendedAction *string
+	dashboardLink     *string
+	svcName           string
+	hostname          string
+	firedAt           time.Time
 }
 
-// ─── Metric-based issues ──────────────────────────────────────────────────────
-
-func (s *OverviewService) getMetricIssues(
-	ctx context.Context, tenantID uint, machineID, hostname string,
-	svcs []serviceBrief, timeSec int64,
-) []TopIssue {
-	var issues []TopIssue
-
-	for _, svc := range svcs {
-		if !supportedServices[svc.Name] || !svc.MetricColl {
-			continue
-		}
-
-		switch svc.Name {
-		case "phpfpm":
-			sat := s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`phpfpm_active_workers{host_id="%s"} / phpfpm_total_workers{host_id="%s"}`, machineID, machineID), timeSec)
-			if sat != nil && *sat > 0.85 {
-				issues = append(issues, TopIssue{
-					MachineID: machineID,
-					Hostname:  hostname,
-					Service:   "phpfpm",
-					Issue:     "PHP-FPM worker pool saturation",
-					Value:     fmt.Sprintf("%.0f%%", *sat*100),
-					Severity:  "warning",
-					Age:       "just now",
-				})
-			}
-		case "mariadb":
-			bp := s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`mysql_global_status_innodb_buffer_pool_hit_ratio{host_id="%s"}`, machineID), timeSec)
-			if bp != nil && *bp < 0.95 {
-				issues = append(issues, TopIssue{
-					MachineID: machineID,
-					Hostname:  hostname,
-					Service:   "mariadb",
-					Issue:     "InnoDB buffer pool hit ratio low",
-					Value:     fmt.Sprintf("%.1f%%", *bp*100),
-					Severity:  "warning",
-					Age:       "just now",
-				})
-			}
-			slowQ := s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(mysql_global_status_slow_queries{host_id="%s"}[5m])`, machineID), timeSec)
-			if slowQ != nil && *slowQ > 0.5 {
-				issues = append(issues, TopIssue{
-					MachineID: machineID,
-					Hostname:  hostname,
-					Service:   "mariadb",
-					Issue:     "Slow queries detected on MariaDB",
-					Value:     fmt.Sprintf("%.1f/s", *slowQ),
-					Severity:  "warning",
-					Age:       "just now",
-				})
-			}
-		case "postgres":
-			slowQ := s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(pg_stat_database_conflicts_total{host_id="%s"}[5m])`, machineID), timeSec)
-			if slowQ != nil && *slowQ > 0.5 {
-				issues = append(issues, TopIssue{
-					MachineID: machineID,
-					Hostname:  hostname,
-					Service:   "postgres",
-					Issue:     "Slow queries detected on PostgreSQL",
-					Value:     fmt.Sprintf("%.1f/s", *slowQ),
-					Severity:  "warning",
-					Age:       "just now",
-				})
-			}
-		case "redis":
-			hit := s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(redis_keyspace_hits_total{host_id="%s"}[5m]) / (rate(redis_keyspace_hits_total{host_id="%s"}[5m]) + rate(redis_keyspace_misses_total{host_id="%s"}[5m])) * 100`, machineID, machineID, machineID), timeSec)
-			if hit != nil && *hit < 90 {
-				issues = append(issues, TopIssue{
-					MachineID: machineID,
-					Hostname:  hostname,
-					Service:   "redis",
-					Issue:     "Redis cache hit ratio low",
-					Value:     fmt.Sprintf("%.1f%%", *hit),
-					Severity:  "warning",
-					Age:       "just now",
-				})
-			}
-		}
+// ruleToEdgeStatus maps correlation rule IDs to dep graph edge status colors.
+func ruleToEdgeStatus(ruleID string) string {
+	switch ruleID {
+	case "web_app_exhaustion", "auth_brute_force", "mariadb_deadlock_spike":
+		return "critical"
+	case "app_db_bottleneck", "db_disk_bottleneck", "cache_miss_cascade":
+		return "warning"
+	case "host_exhaustion":
+		return "critical"
+	case "http_4xx_high", "postgres_replication_lag":
+		return "warning"
 	}
-
-	return issues
+	return "warning"
 }
 
-// ─── Correlation rules engine ─────────────────────────────────────────────────
-
-func (s *OverviewService) evaluateCorrelationRules(
-	ctx context.Context, tenantID uint, tenantUUID, machineID, hostname string,
-	svcs []serviceBrief, timeSec int64, startNs, endNs int64,
-) []FindingVO {
-	var findings []FindingVO
-
-	svcMap := map[string]serviceBrief{}
-	for _, svc := range svcs {
-		svcMap[svc.Name] = svc
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Rule 1: Web → App — nginx/apache 5xx + phpfpm saturation
-	if s.hasAny(svcMap, "nginx", "apache") && s.hasAny(svcMap, "phpfpm") {
-		web5xx := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`rate(nginx_http_requests_total{host_id="%s",status=~"5.."}[5m]) / rate(nginx_http_requests_total{host_id="%s"}[5m]) > 0.05`, machineID, machineID), timeSec)
-		if web5xx == nil {
-			web5xx = s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(httpd_requests_total{host_id="%s",status=~"5.."}[5m]) / rate(httpd_requests_total{host_id="%s"}[5m]) > 0.05`, machineID, machineID), timeSec)
-		}
-		phpSat := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`phpfpm_active_workers{host_id="%s"} / phpfpm_total_workers{host_id="%s"} > 0.85`, machineID, machineID), timeSec)
-		if web5xx != nil && *web5xx > 0.05 && phpSat != nil && *phpSat > 0.85 {
-			findings = append(findings, FindingVO{
-				RuleID:   "web_to_app",
-				Severity: "critical",
-				Title:    "Web tier errors correlate with PHP-FPM pool exhaustion",
-				Message:  fmt.Sprintf("On %s, web server 5xx errors (%.1f%%) are firing alongside PHP-FPM worker saturation (%.0f%%). This suggests the application pool cannot keep up with request volume.", hostname, *web5xx*100, *phpSat*100),
-				Evidence: []EvidenceItem{
-					{Metric: "Web 5xx rate", Value: fmt.Sprintf("%.1f%%", *web5xx*100), Status: "critical"},
-					{Metric: "PHP-FPM saturation", Value: fmt.Sprintf("%.0f%%", *phpSat*100), Status: "warning"},
-				},
-				FiredAt:  now,
-				Hostname: hostname,
-			})
-		}
-	}
-
-	// Rule 2: App → DB — phpfpm slow + DB slow queries
-	if s.hasAny(svcMap, "phpfpm") && (s.hasAny(svcMap, "mariadb") || s.hasAny(svcMap, "postgres")) {
-		phpSlow := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`phpfpm_request_duration_seconds{host_id="%s",quantile="0.95"} > 1`, machineID), timeSec)
-		var dbSlow *float64
-		if s.hasAny(svcMap, "mariadb") {
-			dbSlow = s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(mysql_global_status_slow_queries{host_id="%s"}[5m]) > 0.5`, machineID), timeSec)
-		} else {
-			dbSlow = s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(pg_stat_database_conflicts_total{host_id="%s"}[5m]) > 0.5`, machineID), timeSec)
-		}
-		if phpSlow != nil && *phpSlow > 1 && dbSlow != nil && *dbSlow > 0.5 {
-			findings = append(findings, FindingVO{
-				RuleID:   "app_to_db",
-				Severity: "warning",
-				Title:    "Slow PHP requests correlate with database slow queries",
-				Message:  fmt.Sprintf("On %s, PHP-FPM p95 response time is %.1fs and the database is reporting elevated slow queries. The application is likely DB-bound.", hostname, *phpSlow),
-				Evidence: []EvidenceItem{
-					{Metric: "PHP-FPM p95 RT", Value: fmt.Sprintf("%.1fs", *phpSlow), Status: "warning"},
-					{Metric: "DB slow queries", Value: fmt.Sprintf("%.1f/s", *dbSlow), Status: "warning"},
-				},
-				FiredAt:  now,
-				Hostname: hostname,
-			})
-		}
-	}
-
-	// Rule 3: DB → Host — buffer pool pressure + disk I/O
-	if s.hasAny(svcMap, "mariadb") {
-		bp := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`mysql_global_status_innodb_buffer_pool_hit_ratio{host_id="%s"} < 0.95`, machineID), timeSec)
-		ioWait := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`rate(node_disk_read_time_seconds_total{host_id="%s"}[5m]) > 0.1`, machineID), timeSec)
-		if bp != nil && *bp < 0.95 && ioWait != nil && *ioWait > 0.1 {
-			findings = append(findings, FindingVO{
-				RuleID:   "db_to_host",
-				Severity: "warning",
-				Title:    "Buffer pool pressure correlates with disk I/O saturation",
-				Message:  fmt.Sprintf("On %s, InnoDB buffer pool hit ratio is %.1f%% and disk read I/O is elevated (%.1f/s). Consider increasing innodb_buffer_pool_size or checking disk health.", hostname, *bp*100, *ioWait),
-				Evidence: []EvidenceItem{
-					{Metric: "Buffer pool hit ratio", Value: fmt.Sprintf("%.1f%%", *bp*100), Status: "warning"},
-					{Metric: "Disk read I/O", Value: fmt.Sprintf("%.1f/s", *ioWait), Status: "warning"},
-				},
-				FiredAt:  now,
-				Hostname: hostname,
-			})
-		}
-	}
-
-	// Rule 4: Cache miss cascade — redis miss + DB load
-	if s.hasAny(svcMap, "redis") && (s.hasAny(svcMap, "mariadb") || s.hasAny(svcMap, "postgres")) {
-		cacheHit := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`rate(redis_keyspace_hits_total{host_id="%s"}[5m]) / (rate(redis_keyspace_hits_total{host_id="%s"}[5m]) + rate(redis_keyspace_misses_total{host_id="%s"}[5m])) < 0.9`, machineID, machineID, machineID), timeSec)
-		var dbQueryRate *float64
-		if s.hasAny(svcMap, "mariadb") {
-			dbQueryRate = s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(mysql_global_status_queries{host_id="%s"}[5m])`, machineID), timeSec)
-		} else {
-			dbQueryRate = s.queryVMInstantSafe(ctx, tenantID,
-				fmt.Sprintf(`rate(pg_stat_database_tup_fetched{host_id="%s"}[5m])`, machineID), timeSec)
-		}
-		if cacheHit != nil && *cacheHit < 0.9 && dbQueryRate != nil && *dbQueryRate > 100 {
-			findings = append(findings, FindingVO{
-				RuleID:   "cache_miss_cascade",
-				Severity: "warning",
-				Title:    "Falling cache hit ratio correlates with rising DB load",
-				Message:  fmt.Sprintf("On %s, Redis cache hit ratio is %.1f%% while database query rate is high (%.0f/s). The cache may be undersized or evicting too aggressively.", hostname, *cacheHit*100, *dbQueryRate),
-				Evidence: []EvidenceItem{
-					{Metric: "Cache hit ratio", Value: fmt.Sprintf("%.1f%%", *cacheHit*100), Status: "warning"},
-					{Metric: "DB query rate", Value: fmt.Sprintf("%.0f/s", *dbQueryRate), Status: "info"},
-				},
-				FiredAt:  now,
-				Hostname: hostname,
-			})
-		}
-	}
-
-	// Rule 5: Host-wide exhaustion — CPU/mem + multiple degraded services
-	if len(svcMap) >= 2 {
-		cpuSat := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`(1 - avg(system_cpu_utilization_ratio{host_id="%s",state="idle"}) > 0) * 100 > 90`, machineID), timeSec)
-		memSat := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`sum(system_memory_usage_bytes{host_id="%s",state="used"}) / sum(system_memory_usage_bytes{host_id="%s",state=~"used|free|buffered|cached"}) * 100 > 90`, machineID, machineID), timeSec)
-		if (cpuSat != nil && *cpuSat > 0) || (memSat != nil && *memSat > 0) {
-			degradedCount := 0
-			for _, svc := range svcMap {
-				if !supportedServices[svc.Name] || !svc.MetricColl {
-					continue
-				}
-				h := s.getServiceHealth(ctx, tenantID, tenantUUID, machineID, svc, timeSec, startNs, endNs)
-				if h == "degraded" || h == "down" {
-					degradedCount++
-				}
-			}
-			if degradedCount >= 2 {
-				findings = append(findings, FindingVO{
-					RuleID:   "host_exhaustion",
-					Severity: "critical",
-					Title:    "Host resource exhaustion affecting multiple services",
-					Message:  fmt.Sprintf("On %s, system resources are saturated (CPU >90%% or memory >90%%) and %d services are degraded. This is a host-level issue, not individual service bugs.", hostname, degradedCount),
-					Evidence: []EvidenceItem{
-						{Metric: "CPU saturation", Value: ">90%", Status: "critical"},
-						{Metric: "Memory saturation", Value: ">90%", Status: "critical"},
-						{Metric: "Degraded services", Value: fmt.Sprintf("%d", degradedCount), Status: "critical"},
-					},
-					FiredAt:  now,
-					Hostname: hostname,
-				})
-			}
-		}
-	}
-
-	return findings
-}
-
-// ─── Dependency graph ────────────────────────────────────────────────────────
-
-func (s *OverviewService) buildDepGraph(machineID, hostname string, chips []ServiceChip) ([]DepNode, []DepEdge) {
+func (s *OverviewService) buildDepGraph(machineID, hostname string, chips []ServiceChip, findings []domainFindingBrief) ([]DepNode, []DepEdge) {
 	nodes := []DepNode{
 		{ID: machineID + ":host", Label: hostname, Status: "healthy", Type: "host"},
 	}
@@ -723,51 +518,149 @@ func (s *OverviewService) buildDepGraph(machineID, hostname string, chips []Serv
 	hasDB := false
 	hasCache := false
 
+	// Collect edge status overrides from findings.
+	edgeOverrides := map[string]string{} // "source:target" -> status
+
+	// Helper to register finding impact on an edge.
+	applyFinding := func(source, target, ruleID string) {
+		key := source + ":" + target
+		status := ruleToEdgeStatus(ruleID)
+		if existing, ok := edgeOverrides[key]; ok {
+			if severityWeight(status) > severityWeight(existing) {
+				edgeOverrides[key] = status
+			}
+		} else {
+			edgeOverrides[key] = status
+		}
+	}
+
+	// First pass: determine which service types exist.
 	for _, c := range chips {
 		switch c.Name {
 		case "nginx", "apache":
 			hasWeb = true
-			webID := machineID + ":web"
-			nodes = append(nodes, DepNode{ID: webID, Label: c.Name, Status: c.Status, Type: "web"})
-			edges = append(edges, DepEdge{Source: webID, Target: machineID + ":host", Status: c.Status})
 		case "phpfpm":
 			hasApp = true
-			appID := machineID + ":app"
-			nodes = append(nodes, DepNode{ID: appID, Label: c.Name, Status: c.Status, Type: "app"})
-			edges = append(edges, DepEdge{Source: appID, Target: machineID + ":host", Status: c.Status})
 		case "mariadb", "postgres":
 			hasDB = true
-			dbID := machineID + ":db"
-			nodes = append(nodes, DepNode{ID: dbID, Label: c.Name, Status: c.Status, Type: "db"})
-			edges = append(edges, DepEdge{Source: dbID, Target: machineID + ":host", Status: c.Status})
 		case "redis":
 			hasCache = true
-			cacheID := machineID + ":cache"
-			nodes = append(nodes, DepNode{ID: cacheID, Label: c.Name, Status: c.Status, Type: "cache"})
-			edges = append(edges, DepEdge{Source: cacheID, Target: machineID + ":host", Status: c.Status})
 		}
 	}
 
-	// Add dependency edges between services.
+	// Apply edge overrides from findings now that flags are set.
+	for _, f := range findings {
+		switch f.ruleID {
+		case "web_app_exhaustion", "auth_brute_force", "http_4xx_high":
+			if hasWeb && hasApp {
+				applyFinding(machineID+":web", machineID+":app", f.ruleID)
+			}
+		case "app_db_bottleneck":
+			if hasApp && hasDB {
+				applyFinding(machineID+":app", machineID+":db", f.ruleID)
+			}
+		case "cache_miss_cascade":
+			if hasApp && hasCache {
+				applyFinding(machineID+":app", machineID+":cache", f.ruleID)
+			}
+		case "db_disk_bottleneck", "mariadb_deadlock_spike":
+			if hasDB {
+				applyFinding(machineID+":db", machineID+":host", f.ruleID)
+			}
+		case "postgres_replication_lag":
+			if hasDB {
+				applyFinding(machineID+":db", machineID+":host", f.ruleID)
+			}
+		case "host_exhaustion":
+			for _, c := range chips {
+				nodeID := ""
+				switch c.Name {
+				case "nginx", "apache":
+					nodeID = machineID + ":web"
+				case "phpfpm":
+					nodeID = machineID + ":app"
+				case "mariadb", "postgres":
+					nodeID = machineID + ":db"
+				case "redis":
+					nodeID = machineID + ":cache"
+				}
+				if nodeID != "" {
+					applyFinding(nodeID, machineID+":host", f.ruleID)
+				}
+			}
+		}
+	}
+
+	// Second pass: build nodes and edges with overrides.
+	for _, c := range chips {
+		switch c.Name {
+		case "nginx", "apache":
+			webID := machineID + ":web"
+			nodes = append(nodes, DepNode{ID: webID, Label: c.Name, Status: c.Status, Type: "web"})
+			status := c.Status
+			if s, ok := edgeOverrides[webID+":"+machineID+":host"]; ok {
+				status = s
+			}
+			edges = append(edges, DepEdge{Source: webID, Target: machineID + ":host", Status: status})
+		case "phpfpm":
+			appID := machineID + ":app"
+			nodes = append(nodes, DepNode{ID: appID, Label: c.Name, Status: c.Status, Type: "app"})
+			status := c.Status
+			if s, ok := edgeOverrides[appID+":"+machineID+":host"]; ok {
+				status = s
+			}
+			edges = append(edges, DepEdge{Source: appID, Target: machineID + ":host", Status: status})
+		case "mariadb", "postgres":
+			dbID := machineID + ":db"
+			nodes = append(nodes, DepNode{ID: dbID, Label: c.Name, Status: c.Status, Type: "db"})
+			status := c.Status
+			if s, ok := edgeOverrides[dbID+":"+machineID+":host"]; ok {
+				status = s
+			}
+			edges = append(edges, DepEdge{Source: dbID, Target: machineID + ":host", Status: status})
+		case "redis":
+			cacheID := machineID + ":cache"
+			nodes = append(nodes, DepNode{ID: cacheID, Label: c.Name, Status: c.Status, Type: "cache"})
+			status := c.Status
+			if s, ok := edgeOverrides[cacheID+":"+machineID+":host"]; ok {
+				status = s
+			}
+			edges = append(edges, DepEdge{Source: cacheID, Target: machineID + ":host", Status: status})
+		}
+	}
+
+	// Add dependency edges between services (with overrides).
 	if hasWeb && hasApp {
+		status := "healthy"
+		if s, ok := edgeOverrides[machineID+":web:"+machineID+":app"]; ok {
+			status = s
+		}
 		edges = append(edges, DepEdge{
 			Source: machineID + ":web",
 			Target: machineID + ":app",
-			Status: "healthy",
+			Status: status,
 		})
 	}
 	if hasApp && hasDB {
+		status := "healthy"
+		if s, ok := edgeOverrides[machineID+":app:"+machineID+":db"]; ok {
+			status = s
+		}
 		edges = append(edges, DepEdge{
 			Source: machineID + ":app",
 			Target: machineID + ":db",
-			Status: "healthy",
+			Status: status,
 		})
 	}
 	if hasApp && hasCache {
+		status := "healthy"
+		if s, ok := edgeOverrides[machineID+":app:"+machineID+":cache"]; ok {
+			status = s
+		}
 		edges = append(edges, DepEdge{
 			Source: machineID + ":app",
 			Target: machineID + ":cache",
-			Status: "healthy",
+			Status: status,
 		})
 	}
 
@@ -905,15 +798,6 @@ func (s *OverviewService) lokiQueryLogEntries(ctx context.Context, tenantUUID, q
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-func (s *OverviewService) hasAny(m map[string]serviceBrief, names ...string) bool {
-	for _, n := range names {
-		if _, ok := m[n]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 func truncateString(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -931,4 +815,106 @@ func severityWeight(s string) int {
 		return 1
 	}
 	return 0
+}
+
+func computeDuration(firedAt time.Time) string {
+	d := time.Since(firedAt)
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", m)
+	}
+	h := int(d.Hours())
+	if h == 1 {
+		return "1 hour ago"
+	}
+	return fmt.Sprintf("%d hours ago", h)
+}
+
+func buildInvestigationLinks(machineID, ruleID string) []LinkVO {
+	switch ruleID {
+	case "web_app_exhaustion":
+		return []LinkVO{
+			{Label: "Nginx Dashboard", URL: fmt.Sprintf("/nginx/%s/dashboard", machineID)},
+			{Label: "PHP-FPM Dashboard", URL: fmt.Sprintf("/phpfpm/%s/dashboard", machineID)},
+		}
+	case "app_db_bottleneck":
+		return []LinkVO{
+			{Label: "PHP-FPM Slow Logs", URL: fmt.Sprintf("/phpfpm/%s/logs", machineID)},
+			{Label: "MariaDB Slow Queries", URL: fmt.Sprintf("/mariadb/%s/slow-query-logs", machineID)},
+		}
+	case "db_disk_bottleneck":
+		return []LinkVO{
+			{Label: "MariaDB Dashboard", URL: fmt.Sprintf("/mariadb/%s/dashboard", machineID)},
+			{Label: "Host Disk Dashboard", URL: fmt.Sprintf("/hosts/%s/dashboard/disk", machineID)},
+		}
+	case "cache_miss_cascade":
+		return []LinkVO{
+			{Label: "Redis Dashboard", URL: fmt.Sprintf("/redis/%s/dashboard", machineID)},
+			{Label: "DB Dashboard", URL: fmt.Sprintf("/mariadb/%s/dashboard", machineID)},
+		}
+	case "host_exhaustion":
+		return []LinkVO{
+			{Label: "Host CPU", URL: fmt.Sprintf("/hosts/%s/dashboard/cpu", machineID)},
+			{Label: "Host Memory", URL: fmt.Sprintf("/hosts/%s/dashboard/memory", machineID)},
+		}
+	case "auth_brute_force":
+		return []LinkVO{
+			{Label: "Nginx IP Investigation", URL: fmt.Sprintf("/nginx/%s/ip-investigation", machineID)},
+		}
+	case "http_4xx_high":
+		return []LinkVO{
+			{Label: "Nginx Explorer", URL: fmt.Sprintf("/nginx/%s/explorer", machineID)},
+		}
+	case "mariadb_deadlock_spike":
+		return []LinkVO{
+			{Label: "MariaDB Dashboard", URL: fmt.Sprintf("/mariadb/%s/dashboard", machineID)},
+		}
+	case "postgres_replication_lag":
+		return []LinkVO{
+			{Label: "PostgreSQL Dashboard", URL: fmt.Sprintf("/postgres/%s/dashboard", machineID)},
+		}
+	}
+	return nil
+}
+
+func parseEvidenceJSON(evidence string) []EvidenceItem {
+	if evidence == "" || evidence == "null" {
+		return nil
+	}
+	// For now, return a single item with the raw JSON as value.
+	// The evidence JSON is structured as flat key-value pairs.
+	var items []EvidenceItem
+	// Simple parser for evidence JSON like `{"key": value, ...}`
+	// Strip braces and split by comma.
+	inner := strings.TrimSpace(evidence)
+	inner = strings.TrimPrefix(inner, "{")
+	inner = strings.TrimSuffix(inner, "}")
+	parts := strings.Split(inner, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, ":", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.Trim(strings.TrimSpace(kv[0]), `"`)
+		val := strings.TrimSpace(kv[1])
+		items = append(items, EvidenceItem{
+			Metric: key,
+			Value:  val,
+			Status: "info",
+		})
+	}
+	if len(items) == 0 {
+		items = []EvidenceItem{{Metric: "details", Value: evidence, Status: "info"}}
+	}
+	return items
 }

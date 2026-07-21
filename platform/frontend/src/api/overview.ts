@@ -29,20 +29,32 @@ export type HostOverview = {
   services: ServiceChip[]
 }
 
-export type TopIssue = {
-  machine_id: string
-  hostname: string
-  service: string
-  issue: string
-  value: string
-  severity: string
-  age: string
+export type InvestigationLink = {
+  label: string
+  url: string
 }
 
 export type EvidenceItem = {
   metric: string
   value: string
   status: string
+}
+
+export type DiagnosedIssue = {
+  id: string
+  machine_id: string
+  hostname: string
+  service: string
+  severity: string
+  diagnosis: string
+  what: string
+  why: string
+  impact: string
+  action: string
+  evidence: EvidenceItem[]
+  log_snippet?: string
+  fired_at: string
+  duration: string
 }
 
 export type Finding = {
@@ -52,8 +64,13 @@ export type Finding = {
   title: string
   message: string
   evidence: EvidenceItem[]
-  fired_at: string
+  recommended_action?: string
+  dashboard_link?: string
+  service_name?: string
+  investigation_links?: InvestigationLink[]
   hostname: string
+  fired_at: string
+  duration: string
 }
 
 export type TimelineEvent = {
@@ -89,13 +106,16 @@ export type DepGraphData = {
 export type OverviewResponse = {
   global: GlobalHealth
   hosts: HostOverview[]
-  top_issues: TopIssue[]
+  issues: DiagnosedIssue[]
   findings: Finding[]
   timeline: TimelineData
   dep_graph: DepGraphData
 }
 
-export async function getOverview(): Promise<OverviewResponse> {
-  const { data } = await client.get<OverviewResponse>("/api/overview")
+export async function getOverview(timelineStart?: number, timelineEnd?: number): Promise<OverviewResponse> {
+  const params: Record<string, string> = {}
+  if (timelineStart !== undefined) params.timeline_start = String(timelineStart)
+  if (timelineEnd !== undefined) params.timeline_end = String(timelineEnd)
+  const { data } = await client.get<OverviewResponse>("/api/overview", { params })
   return data
 }

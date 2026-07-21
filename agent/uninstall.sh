@@ -1,30 +1,30 @@
 #!/bin/bash
 # ============================================
-# OBSERVABILITY PLATFORM - Agent Uninstaller
+# OBSERVABILITY PLATFORM — Agent Uninstaller
+# ============================================
 # Usage:
+#   curl -sSL https://platform/uninstall.sh | sudo bash
 #   sudo bash uninstall.sh
 #   sudo bash uninstall.sh --auto-yes
 #   sudo bash uninstall.sh --purge --auto-yes
+# ============================================
 # Flags:
-#   --auto-yes / -y / --force  Skip prompts
-#   --purge                  Also remove /var/lib/otelcol and agent rediscover log
-#   --no-journal             Don't vacuum journald logs
-# Or:    curl -sSL https://platform/uninstall.sh | bash
+#   --auto-yes / -y / --force  Skip all prompts
+#   --purge                    Remove /var/lib/otelcol and agent rediscover log
+#   --no-journal               Do not vacuum journald logs
 # ============================================
 
 set -euo pipefail
 
 # ---- Colors ----
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 log()     { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
 error()   { echo -e "${RED}[✗]${NC} $1"; exit 1; }
-section() { echo -e "\n${BLUE}==>${NC} $1"; }
+section() { echo -e "\n${BOLD}${BLUE}━━━ $1 ━━━${NC}"; }
+step()    { echo -e "\n${BOLD}${BLUE}◆ $1${NC}"; }
 
 # ---- Flags ----
 AUTO_YES=false
@@ -103,26 +103,25 @@ remove_dir() {
 # ============================================
 # CHECKS
 # ============================================
-if [ "$EUID" -ne 0 ]; then
-  error "Please run as root or with sudo"
-fi
+section "Checking requirements"
+
+[ "$EUID" -ne 0 ] && error "Please run as root or with sudo"
 
 echo ""
-echo -e "${RED}============================================${NC}"
-echo -e "${RED}  Observability Agent - Uninstaller${NC}"
-echo -e "${RED}============================================${NC}"
+echo -e "${BOLD}${RED}  ⚠  Agent Uninstaller${NC}"
+echo -e "${BOLD}  This will remove the observability agent from this host${NC}"
 echo ""
-echo "  This will remove:"
-echo "    - otelcol systemd service + config"
-echo "    - /usr/local/bin/otelcol binary"
-echo "    - helper services: docker log tailer/metrics/watcher, prom file server, heartbeat"
-echo "    - helper scripts in /usr/local/bin/"
-echo "    - cron: /etc/cron.d/observability-agent"
-echo "    - /etc/otelcol/ config directory"
+echo "  Components to remove:"
+echo "    ${BOLD}•${NC} otelcol binary and systemd service"
+echo "    ${BOLD}•${NC} All agent helper services: docker log tailer, metrics,"
+echo "      event watcher, prometheus file server, heartbeat"
+echo "    ${BOLD}•${NC} /etc/otelcol/ configuration and /usr/local/bin/agent-* scripts"
+echo "    ${BOLD}•${NC} /etc/cron.d/observability-agent (daily rediscovery)"
 echo ""
-echo "  Optional (--purge):"
-echo "    - /var/lib/otelcol/ (docker-logs, docker-log-state, docker-metrics.prom)"
-echo "    - /var/log/agent-rediscover.log"
+echo "  ${YELLOW}Does NOT delete your telemetry data in VictoriaMetrics,${NC}"
+echo "  ${YELLOW}Loki, or Tempo — only the agent on this machine.${NC}"
+echo ""
+echo "  ${YELLOW}Optional (--purge):${NC} removes /var/lib/otelcol/ and logs${NC}"
 echo ""
 
 if ! ask "Are you sure you want to uninstall the agent?"; then
@@ -249,18 +248,19 @@ fi
 # ============================================
 # DONE
 # ============================================
+section "Uninstall Complete"
+log "Agent removed successfully from ${HOSTNAME_FQDN:-$(hostname)}"
 echo ""
-echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}  Agent uninstalled successfully!${NC}"
-echo -e "${GREEN}============================================${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}  ✓  Agent has been removed. Host is no longer monitored.${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "  Note: Your data in VictoriaMetrics, Loki, and Tempo"
-echo "  is NOT deleted — only the agent on this machine."
-echo "  Note: Uninstaller does not revert any service config"
-echo "  changes made during install (e.g. PostgreSQL logging_collector, redis logfile)."
+echo "  ${YELLOW}Note:${NC} Your telemetry data in VictoriaMetrics, Loki, and Tempo"
+echo "  is preserved. Only the agent on this machine was removed."
 echo ""
-echo "  To reinstall:"
-echo "    (future) : curl -sSL https://platform/install.sh | API_KEY=your_key bash"
-echo "    (now) sudo API_KEY=obs_test123 PLATFORM_HOST=localhost bash install.sh"
-
+echo "  ${YELLOW}Note:${NC} The uninstaller does not revert service config changes"
+echo "  made during install (PostgreSQL logging_collector, redis logfile, etc.)."
+echo ""
+echo "  ${BOLD}To reinstall:${NC}"
+echo "    curl -sSL https://<platform>/install.sh | API_KEY=<your-key> sudo bash"
 echo ""

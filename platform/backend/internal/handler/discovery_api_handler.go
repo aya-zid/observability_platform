@@ -80,6 +80,40 @@ func (h *DiscoveryAPIHandler) GetService(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+func (h *DiscoveryAPIHandler) ListContainers(c echo.Context) error {
+	claims, ok := h.claims(c)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+	}
+
+	containers, err := h.discoveryService.ListContainerServices(c.Request().Context(), claims.TenantID, c.QueryParam("machine_id"))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load containers"})
+	}
+	return c.JSON(http.StatusOK, containers)
+}
+
+func (h *DiscoveryAPIHandler) GetContainer(c echo.Context) error {
+	claims, ok := h.claims(c)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+	}
+
+	containerID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid container id"})
+	}
+
+	resp, err := h.discoveryService.GetContainerServiceDetail(c.Request().Context(), claims.TenantID, uint(containerID))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to load container"})
+	}
+	if resp == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "container not found"})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
 func (h *DiscoveryAPIHandler) UpdateCollection(c echo.Context) error {
 	claims, ok := h.claims(c)
 	if !ok {

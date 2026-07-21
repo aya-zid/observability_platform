@@ -61,6 +61,12 @@ func (r *TenantRepository) UpdateOrgSettingsCtx(ctx context.Context, tenantID ui
 }
 
 // FindByAPIKey resolves a raw API key to a full Tenant record.
+func (r *TenantRepository) FindAllCtx(ctx context.Context) ([]domain.Tenant, error) {
+	var tenants []domain.Tenant
+	err := r.db.WithContext(ctx).Find(&tenants).Error
+	return tenants, err
+}
+
 func (r *TenantRepository) FindByAPIKey(ctx context.Context, apiKey string) (*domain.Tenant, error) {
 	var tenant domain.Tenant
 	err := r.db.WithContext(ctx).

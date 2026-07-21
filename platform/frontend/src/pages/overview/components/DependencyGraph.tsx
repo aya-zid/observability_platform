@@ -14,6 +14,7 @@ const STATUS_COLORS: Record<string, string> = {
   healthy: "#22c55e",
   degraded: "#f59e0b",
   down: "#ef4444",
+  critical: "#ef4444",
   absent: "#9ca3af",
 }
 

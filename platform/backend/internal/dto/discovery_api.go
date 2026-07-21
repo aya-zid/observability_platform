@@ -95,6 +95,28 @@ type ServiceVulnerabilityItem struct {
 	FixedInVersion string  `json:"fixed_in_version"`
 }
 
+type ContainerServiceListItem struct {
+	ID                 uint   `json:"id"`
+	MachineID          string `json:"machine_id"`
+	ContainerName      string `json:"container_name"`
+	ServiceName        string `json:"service_name"`
+	ContainerImage     string `json:"container_image,omitempty"`
+	LogCollectionOn    bool   `json:"log_collection_on"`
+	MetricCollectionOn bool   `json:"metric_collection_on"`
+	Hostname           string `json:"hostname,omitempty"`
+}
+
+type ContainerServiceDetailResponse struct {
+	ID                 uint   `json:"id"`
+	MachineID          string `json:"machine_id"`
+	Hostname           string `json:"hostname,omitempty"`
+	ContainerName      string `json:"container_name"`
+	ServiceName        string `json:"service_name"`
+	ContainerImage     string `json:"container_image,omitempty"`
+	LogCollectionOn    bool   `json:"log_collection_on"`
+	MetricCollectionOn bool   `json:"metric_collection_on"`
+}
+
 type UpdateCollectionRequest struct {
 	LogCollectionOn    bool `json:"log_collection_on"`
 	MetricCollectionOn bool `json:"metric_collection_on"`

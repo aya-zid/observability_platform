@@ -23,10 +23,10 @@ export function AIInsightPanel({ overview }: { overview: OverviewResponse }) {
         hostname: f.hostname,
         message: f.message,
       })),
-      issues: (overview.top_issues ?? []).map((i) => ({
+      issues: (overview.diagnosed_issues ?? []).map((i) => ({
         hostname: i.hostname,
         service: i.service,
-        issue: i.issue,
+        issue: i.diagnosis,
         severity: i.severity,
       })),
     }

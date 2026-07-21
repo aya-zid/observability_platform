@@ -1,3 +1,5 @@
+import { ExternalLink, Lightbulb } from "lucide-react"
+
 import type { Finding } from "@/api/overview"
 import { cn } from "@/lib/utils"
 
@@ -53,6 +55,9 @@ export function CorrelationFindings({ findings }: { findings: Finding[] | null |
                   <span className="text-xs text-muted-foreground">
                     {f.hostname} · {f.rule_id}
                   </span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    {f.duration}
+                  </span>
                 </div>
                 <h4 className="mt-1.5 text-sm font-medium">{f.title}</h4>
                 <p className="mt-1 text-xs text-muted-foreground">{f.message}</p>
@@ -77,6 +82,27 @@ export function CorrelationFindings({ findings }: { findings: Finding[] | null |
                     <span className="font-medium">{e.value}</span>
                   </span>
                 ))}
+              </div>
+            ) : null}
+
+            {/* Recommended action */}
+            {f.recommended_action ? (
+              <div className="mt-3 flex items-start gap-2 rounded-md border border-border bg-background/50 p-2 text-xs">
+                <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <span className="text-muted-foreground">{f.recommended_action}</span>
+              </div>
+            ) : null}
+
+            {/* Investigation link */}
+            {f.dashboard_link ? (
+              <div className="mt-2">
+                <a
+                  href={f.dashboard_link}
+                  className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Investigate in dashboard
+                </a>
               </div>
             ) : null}
           </div>

@@ -561,6 +561,68 @@ func vulnerabilityStatusMessage(supported bool, status domain.VulnScanStatus, la
 	}
 }
 
+func (s *DiscoveryService) ListContainerServices(ctx context.Context, tenantID uint, machineID string) ([]dto.ContainerServiceListItem, error) {
+	var (
+		rows []domain.DiscoveredContainerService
+		err  error
+	)
+	if machineID != "" {
+		rows, err = s.discoveryRepo.ListContainerServicesByTenantMachineCtx(ctx, tenantID, machineID)
+	} else {
+		rows, err = s.discoveryRepo.ListContainerServicesByTenantCtx(ctx, tenantID)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]dto.ContainerServiceListItem, 0, len(rows))
+	for _, row := range rows {
+		hostname := ""
+		host, err2 := s.hostRepo.FindByTenantMachineCtx(ctx, tenantID, row.MachineID)
+		if err2 == nil && host != nil {
+			hostname = host.Hostname
+		}
+		out = append(out, dto.ContainerServiceListItem{
+			ID:                 row.ID,
+			MachineID:          row.MachineID,
+			ContainerName:      row.ContainerName,
+			ServiceName:        row.ServiceName,
+			ContainerImage:     row.ContainerImage,
+			LogCollectionOn:    row.LogCollectionOn,
+			MetricCollectionOn: row.MetricCollectionOn,
+			Hostname:           hostname,
+		})
+	}
+	return out, nil
+}
+
+func (s *DiscoveryService) GetContainerServiceDetail(ctx context.Context, tenantID uint, serviceID uint) (*dto.ContainerServiceDetailResponse, error) {
+	svc, err := s.discoveryRepo.FindContainerServiceByIDTenantCtx(ctx, tenantID, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	if svc == nil {
+		return nil, nil
+	}
+
+	hostname := ""
+	host, err := s.hostRepo.FindByTenantMachineCtx(ctx, tenantID, svc.MachineID)
+	if err == nil && host != nil {
+		hostname = host.Hostname
+	}
+
+	return &dto.ContainerServiceDetailResponse{
+		ID:                 svc.ID,
+		MachineID:          svc.MachineID,
+		Hostname:           hostname,
+		ContainerName:      svc.ContainerName,
+		ServiceName:        svc.ServiceName,
+		ContainerImage:     svc.ContainerImage,
+		LogCollectionOn:    svc.LogCollectionOn,
+		MetricCollectionOn: svc.MetricCollectionOn,
+	}, nil
+}
+
 func formatTimePtr(t *time.Time) string {
 	if t == nil {
 		return ""

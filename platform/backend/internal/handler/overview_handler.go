@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 
@@ -30,7 +31,16 @@ func (h *OverviewHandler) GetOverview(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "tenant not found"})
 	}
 
-	overview, err := h.svc.GetOverview(c.Request().Context(), claims.TenantID, tenant.UUID)
+	// Optional timeline window params (nanosecond epoch).
+	var timelineStartNs, timelineEndNs int64
+	if startStr := c.QueryParam("timeline_start"); startStr != "" {
+		timelineStartNs, _ = strconv.ParseInt(startStr, 10, 64)
+	}
+	if endStr := c.QueryParam("timeline_end"); endStr != "" {
+		timelineEndNs, _ = strconv.ParseInt(endStr, 10, 64)
+	}
+
+	overview, err := h.svc.GetOverview(c.Request().Context(), claims.TenantID, tenant.UUID, timelineStartNs, timelineEndNs)
 	if err != nil {
 		c.Logger().Errorf("[overview] failed: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch overview data"})

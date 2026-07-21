@@ -131,6 +131,38 @@ func (r *DiscoveryRepository) UpsertContainerServiceCtx(ctx context.Context, rec
 		Create(&rec).Error
 }
 
+func (r *DiscoveryRepository) ListContainerServicesByTenantMachineCtx(ctx context.Context, tenantID uint, machineID string) ([]domain.DiscoveredContainerService, error) {
+	var rows []domain.DiscoveredContainerService
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND machine_id = ?", tenantID, machineID).
+		Order("container_name ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *DiscoveryRepository) ListContainerServicesByTenantCtx(ctx context.Context, tenantID uint) ([]domain.DiscoveredContainerService, error) {
+	var rows []domain.DiscoveredContainerService
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("machine_id ASC, container_name ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *DiscoveryRepository) FindContainerServiceByIDTenantCtx(ctx context.Context, tenantID uint, serviceID uint) (*domain.DiscoveredContainerService, error) {
+	var row domain.DiscoveredContainerService
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND tenant_id = ?", serviceID, tenantID).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func (r *DiscoveryRepository) ListServicesByTenantMachineCtx(ctx context.Context, tenantID uint, machineID string) ([]domain.DiscoveredService, error) {
 	var rows []domain.DiscoveredService
 	err := r.db.WithContext(ctx).

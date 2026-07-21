@@ -7,6 +7,17 @@ import { SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
 import { useAuthStore } from "@/store/authStore"
 
+import client from "@/api/client"
+
+function getPlatformHost(): string {
+  try {
+    const url = new URL(client.defaults.baseURL ?? "")
+    return `${url.hostname}:${url.port || "8080"}`
+  } catch {
+    return `${window.location.hostname}:8080`
+  }
+}
+
 export default function ApiKeysPage() {
   const role = useAuthStore((s) => s.role)
   const isAdmin = role === "admin"
@@ -94,6 +105,60 @@ export default function ApiKeysPage() {
         {rotateError ? (
           <div className="mt-2 text-xs text-destructive">{rotateError}</div>
         ) : null}
+      </SectionCard>
+
+      <SectionCard
+        title="Agent Installation"
+        description="Run these commands on any host you want to monitor. Requires root/sudo access."
+      >
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-medium mb-1.5">Install agent</p>
+            <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all flex items-center justify-between">
+              <span className="min-w-0">
+                {q.isLoading
+                  ? "Loading…"
+                  : q.data?.api_key
+                    ? `curl -sSL http://${getPlatformHost()}/install.sh | sudo API_KEY=${q.data.api_key} bash`
+                    : "Load an API key first."}
+              </span>
+              {q.data?.api_key && (
+                <button
+                  onClick={() =>
+                    navigator.clipboard.writeText(
+                      `curl -sSL http://${getPlatformHost()}/install.sh | sudo API_KEY=${q.data!.api_key} bash`
+                    )
+                  }
+                  className="ml-2 text-xs text-primary hover:underline shrink-0"
+                >
+                  Copy
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium mb-1.5">Uninstall agent</p>
+            <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all flex items-center justify-between">
+              <span className="min-w-0">
+                {`curl -sSL http://${getPlatformHost()}/uninstall.sh | sudo bash`}
+              </span>
+              <button
+                onClick={() =>
+                  navigator.clipboard.writeText(
+                    `curl -sSL http://${getPlatformHost()}/uninstall.sh | sudo bash`
+                  )
+                }
+                className="ml-2 text-xs text-primary hover:underline shrink-0"
+              >
+                Copy
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Removes the agent from the host. Does not affect stored telemetry data.
+            </p>
+          </div>
+        </div>
       </SectionCard>
 
       {isAdmin && showConfirm && (

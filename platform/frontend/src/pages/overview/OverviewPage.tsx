@@ -1,27 +1,33 @@
+import { useState, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { RefreshCw, Server, Activity, GitBranch, Clock, Sparkles } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 
 import { getOverview } from "@/api/overview"
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
 import { GlobalHealthStrip } from "./components/GlobalHealthStrip"
 import { HostCard } from "./components/HostCard"
-import { TopIssuesFeed } from "./components/TopIssuesFeed"
+import { DiagnosedIssues } from "./components/DiagnosedIssues"
 import { CorrelationFindings } from "./components/CorrelationFindings"
 import { IncidentTimeline } from "./components/IncidentTimeline"
 import { DependencyGraph } from "./components/DependencyGraph"
-import { AIInsightPanel } from "./components/AIInsightPanel"
 
 export default function OverviewPage() {
+  const [timelineRange, setTimelineRange] = useState<{ start: number; end: number } | null>(null)
+
   const q = useQuery({
-    queryKey: ["overview"],
-    queryFn: getOverview,
+    queryKey: ["overview", timelineRange?.start, timelineRange?.end],
+    queryFn: () => getOverview(timelineRange?.start, timelineRange?.end),
     refetchInterval: 30_000,
     refetchOnWindowFocus: false,
   })
 
   const data = q.data
   const loading = q.isLoading
+
+  const handleTimeRangeChange = useCallback((start: number, end: number) => {
+    setTimelineRange({ start, end })
+  }, [])
 
   return (
     <Page>
@@ -43,14 +49,14 @@ export default function OverviewPage() {
         }
       />
 
-      {/* Zone A — Overview */}
+      {/* Zone A — Live Fleet Health */}
       <SectionCard title="Fleet Health" description="Global health snapshot across all hosts and services">
         {loading ? (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-lg border border-border bg-card p-4 animate-pulse">
+          <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-border bg-card p-3 animate-pulse">
                 <div className="h-3 w-16 bg-muted rounded" />
-                <div className="mt-2 h-7 w-12 bg-muted rounded" />
+                <div className="mt-2 h-6 w-10 bg-muted rounded" />
               </div>
             ))}
           </div>
@@ -79,10 +85,10 @@ export default function OverviewPage() {
                   <div className="h-5 w-14 bg-muted rounded" />
                   <div className="h-5 w-14 bg-muted rounded" />
                 </div>
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div className="h-3 bg-muted rounded" />
-                  <div className="h-3 bg-muted rounded" />
-                  <div className="h-3 bg-muted rounded" />
+                <div className="mt-3 space-y-2">
+                  <div className="h-4 bg-muted rounded" />
+                  <div className="h-4 bg-muted rounded" />
+                  <div className="h-4 bg-muted rounded" />
                 </div>
               </div>
             ))}
@@ -96,25 +102,26 @@ export default function OverviewPage() {
         ) : null}
       </SectionCard>
 
+      {/* Diagnosed Issues + Incident Timeline side by side */}
       <div className="grid gap-6 md:grid-cols-2">
         <SectionCard
-          title="Top Issues"
-          description="Ranked cross-service issues requiring attention"
+          title="Diagnosed Issues"
+          description="Live-detected issues with what/why/impact/action for each service"
         >
           {loading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-12 bg-muted rounded animate-pulse" />
+                <div key={i} className="h-16 bg-muted rounded animate-pulse" />
               ))}
             </div>
           ) : data ? (
-            <TopIssuesFeed issues={data.top_issues} />
+            <DiagnosedIssues issues={data.issues} />
           ) : null}
         </SectionCard>
 
         <SectionCard
           title="Incident Timeline"
-          description="Recent log events across all services"
+          description="Recent log events across all services (adjustable window)"
         >
           {loading ? (
             <div className="space-y-2">
@@ -123,15 +130,18 @@ export default function OverviewPage() {
               ))}
             </div>
           ) : data ? (
-            <IncidentTimeline events={data.timeline?.events ?? null} />
+            <IncidentTimeline
+              events={data.timeline?.events ?? null}
+              onTimeRangeChange={handleTimeRangeChange}
+            />
           ) : null}
         </SectionCard>
       </div>
 
-      {/* Zone B — Correlation */}
+      {/* Zone B — Persisted Correlation Findings */}
       <SectionCard
         title="Correlation Findings"
-        description="Automated cross-service correlation rules detecting dependency chain issues"
+        description="Persisted cross-service correlation rules detecting dependency chain issues"
       >
         {loading ? (
           <div className="space-y-3">
@@ -146,7 +156,7 @@ export default function OverviewPage() {
 
       <SectionCard
         title="Dependency Graph"
-        description="Service dependency topology with live health overlay"
+        description="Service dependency topology with live health overlay and edge coloring from findings"
       >
         {loading ? (
           <div className="h-48 bg-muted rounded animate-pulse" />
@@ -154,9 +164,6 @@ export default function OverviewPage() {
           <DependencyGraph data={data.dep_graph} />
         ) : null}
       </SectionCard>
-
-      {/* AI Insight (on-demand) */}
-      {data ? <AIInsightPanel overview={data} /> : null}
     </Page>
   )
 }

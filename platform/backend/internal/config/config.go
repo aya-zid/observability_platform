@@ -70,7 +70,8 @@ type Config struct {
 	GrafanaURL   string // e.g. "http://localhost:3000"
 
 	// ── Agent installer script ─────────────────────────────────
-	AgentInstallScriptPath string
+	AgentInstallScriptPath   string
+	AgentUninstallScriptPath string
 
 	// ── Vulnerability scanning ─────────────────────────────────
 	NVDAPIKey                    string
@@ -149,7 +150,8 @@ func Load() *Config {
 		GrafanaURL:   getEnv("GRAFANA_URL", "http://localhost:3000"),
 
 		// Agent installer script path inside backend runtime
-		AgentInstallScriptPath: getEnv("AGENT_INSTALL_SCRIPT_PATH", "/opt/agent/install.sh"),
+		AgentInstallScriptPath:   getEnv("AGENT_INSTALL_SCRIPT_PATH", "/opt/agent/install.sh"),
+		AgentUninstallScriptPath: getEnv("AGENT_UNINSTALL_SCRIPT_PATH", "/opt/agent/uninstall.sh"),
 
 		// Vulnerability scanning
 		NVDAPIKey:                    getEnv("NVD_API_KEY", ""),

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useParams, useNavigate } from "react-router-dom"
 import {
@@ -7,6 +7,7 @@ import {
   updateDiscoveryServiceConfig,
   updateDiscoveryServiceCollection,
 } from "@/api/discovery"
+import { getVulnerabilityAlerts } from "@/api/alerts"
 import WebServerVirtualHostsSection, { type VirtualHostEntry } from "@/pages/service/components/WebServerVirtualHostsSection"
 import CollapsibleGuide from "@/pages/service/components/CollapsibleGuide"
 import {
@@ -22,12 +23,15 @@ import {
   Check,
   BookOpen,
   Shield,
+  ShieldAlert,
   CheckCircle,
   Activity,
   FileText,
   Server,
   Globe,
   Zap,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react"
 
 export default function ServiceConfigPage() {
@@ -50,8 +54,32 @@ export default function ServiceConfigPage() {
   const [nginxVirtualHosts, setNginxVirtualHosts] = useState<VirtualHostEntry[]>([])
   const [apacheVirtualHosts, setApacheVirtualHosts] = useState<VirtualHostEntry[]>([])
   const [configSaved, setConfigSaved] = useState(false)
+  const [vulnExpandedHosts, setVulnExpandedHosts] = useState<Record<string, boolean>>({})
 
   const data = serviceQuery.data
+
+  const vulnAlertsQuery = useQuery({
+    queryKey: ["vulnerability-alerts"],
+    queryFn: getVulnerabilityAlerts,
+  })
+
+  const serviceVulnsByHost = useMemo(() => {
+    const all = vulnAlertsQuery.data ?? []
+    const filtered = data?.service_name
+      ? all.filter(v => v.service_name === data.service_name)
+      : []
+    const grouped: Record<string, { hostname: string; total: number; critical: number; warning: number; alerts: typeof all }> = {}
+    for (const v of filtered) {
+      if (!grouped[v.machine_id]) {
+        grouped[v.machine_id] = { hostname: v.hostname, total: 0, critical: 0, warning: 0, alerts: [] }
+      }
+      grouped[v.machine_id].total++
+      if (v.alert_level === "alert") grouped[v.machine_id].critical++
+      else grouped[v.machine_id].warning++
+      grouped[v.machine_id].alerts.push(v)
+    }
+    return Object.entries(grouped)
+  }, [vulnAlertsQuery.data, data?.service_name])
 
   useEffect(() => {
     if (data) {
@@ -380,11 +408,21 @@ export default function ServiceConfigPage() {
           )}
         </div>
 
-        {/* Vulnerability Scan Status + CVE */}
+        {/* Vulnerability Scan Status + CVE Alerts */}
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Shield className="w-4 h-4 text-primary" />
-            Version Security
+            CVE Alerts
+            {serviceVulnsByHost.length > 0 && (
+              <span className="ml-auto flex items-center gap-2 text-xs font-normal">
+                {serviceVulnsByHost.reduce((s, [, g]) => s + g.critical, 0) > 0 && (
+                  <span className="text-red-600 dark:text-red-400 font-semibold">{serviceVulnsByHost.reduce((s, [, g]) => s + g.critical, 0)} critical</span>
+                )}
+                {serviceVulnsByHost.reduce((s, [, g]) => s + g.warning, 0) > 0 && (
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold">{serviceVulnsByHost.reduce((s, [, g]) => s + g.warning, 0)} warnings</span>
+                )}
+              </span>
+            )}
           </h2>
 
           {/* Scan status */}
@@ -404,48 +442,62 @@ export default function ServiceConfigPage() {
             )}
           </div>
 
-          {/* Vulnerabilities list */}
-          {data.vulnerabilities && data.vulnerabilities.length > 0 ? (
+          {/* Per-host grouped CVE alerts */}
+          {serviceVulnsByHost.length > 0 ? (
             <div className="space-y-3">
-              {data.vulnerabilities.map((cve) => {
-                const isHigh = cve.alert_level === "alert"
+              {serviceVulnsByHost.map(([machineId, group]) => {
+                const expanded = vulnExpandedHosts[machineId]
                 return (
-                  <div
-                    key={cve.cve_id}
-                    className={`rounded-lg p-4 border-l-4 ${
-                      isHigh
-                        ? "border-l-red-600 bg-red-600/[0.04]"
-                        : "border-l-amber-600 bg-amber-600/[0.04]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono text-sm text-primary font-bold">{cve.cve_id}</span>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`text-xs font-bold uppercase px-2.5 py-1 rounded-full ${
-                            isHigh
-                              ? "bg-red-600/15 text-red-600 dark:text-red-400"
-                              : "bg-amber-600/15 text-amber-600 dark:text-amber-400"
-                          }`}
-                        >
-                          {cve.alert_level}
-                        </span>
-                        <span className={`text-xs font-bold ${isHigh ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>
-                          CVSS {cve.cvss_score.toFixed(1)}
-                        </span>
-                        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-                          Fix {cve.fixed_in_version || "-"}
-                        </span>
+                  <div key={machineId} className="rounded-lg border border-border overflow-hidden">
+                    <button
+                      onClick={() => setVulnExpandedHosts(p => ({ ...p, [machineId]: !p[machineId] }))}
+                      className="w-full flex items-center gap-3 px-4 py-3 bg-background/50 hover:bg-muted/50 transition-colors text-left"
+                    >
+                      <ShieldAlert className={cn("w-4 h-4 shrink-0", group.critical > 0 ? "text-red-500" : "text-amber-500")} />
+                      <span className="text-sm font-semibold text-foreground flex-1">{group.hostname}</span>
+                      <div className="flex items-center gap-2 text-xs">
+                        {group.critical > 0 && (
+                          <span className="text-red-600 dark:text-red-400 font-bold">{group.critical} critical</span>
+                        )}
+                        {group.warning > 0 && (
+                          <span className="text-amber-600 dark:text-amber-400 font-bold">{group.warning} warning</span>
+                        )}
+                        <span className="text-muted-foreground">({group.total})</span>
                       </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{cve.description || "No description available."}</p>
+                      {expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                    </button>
+                    {expanded && (
+                      <div className="border-t border-border divide-y divide-border">
+                        {group.alerts.map((v) => {
+                          const isAlert = v.alert_level === "alert"
+                          return (
+                            <div key={v.id} className={`p-4 border-l-4 ${isAlert ? "border-l-red-500" : "border-l-amber-500"}`}>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="font-mono text-sm text-foreground font-bold">{v.cve_id}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full ${isAlert ? "bg-red-500/15 text-red-600 dark:text-red-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
+                                    {v.alert_level}
+                                  </span>
+                                  <span className={`text-xs font-bold ${isAlert ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>
+                                    CVSS {v.cvss_score.toFixed(1)}
+                                  </span>
+                                </div>
+                              </div>
+                              <p className="text-xs text-muted-foreground leading-relaxed">{v.description || "No description available."}</p>
+                              <p className="text-xs mt-1.5">
+                                <span className="text-muted-foreground">Version {v.service_version} → </span>
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Upgrade to {v.fixed_in_version || "-"}</span>
+                              </p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 )
               })}
             </div>
-          ) : null}
-
-          {data.vuln_scan_status === "scanned" && (!data.vulnerabilities || data.vulnerabilities.length === 0) ? (
+          ) : data.vuln_scan_status === "scanned" ? (
             <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-sm font-semibold bg-emerald-600/10 rounded-lg px-4 py-3">
               <CheckCircle className="w-4 h-4" />
               No known vulnerabilities found for v{data.version}

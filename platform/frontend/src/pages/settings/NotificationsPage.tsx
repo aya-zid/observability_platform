@@ -49,7 +49,14 @@ export default function NotificationsPage() {
   })
 
   return (
-    <div className="grid gap-6">
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Notifications</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure where to send alert notifications.
+        </p>
+      </div>
+
       <SectionCard title="Notification Channels" description="Configure where to send alert notifications.">
         {query.isLoading ? (
           <div className="text-sm text-muted-foreground">Loading...</div>

@@ -42,10 +42,11 @@ backup_file() {
 }
 
 # ---- Startup banner ----
+_bcenter() { local t="$1" c="$2" p=$((56 - ${#t})) l=$((p / 2)) r=$((p - l)); printf "${c}  ║${NC}%*s%s%*s${c}║${NC}\n" "$l" "" "$t" "$r" ""; }
 echo ""
 echo -e "${BOLD}${BLUE}  ╔══════════════════════════════════════════════════════════╗${NC}"
-printf "${BOLD}${BLUE}  ║${NC}  Observability Platform — Agent Installer%14s${BOLD}${BLUE}║${NC}\n" ""
-printf "${BOLD}${BLUE}  ║${NC}  Version ${AGENT_VERSION:-1.0.0}%39s${BOLD}${BLUE}║${NC}\n" ""
+_bcenter "Observability Platform - Agent Installer" "${BOLD}${BLUE}"
+_bcenter "Version ${AGENT_VERSION:-1.0.0}" "${BOLD}${BLUE}"
 echo -e "${BOLD}${BLUE}  ╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -2900,12 +2901,10 @@ fi
 # INSTALLATION COMPLETE
 # ============================================
 echo ""
-_BANNER_LN() { local T="$1"; local P=$((54 - 2 - ${#T})); printf "${GREEN}  ║${NC}  %s%${P}s${GREEN}║${NC}\n" "$T" ""; }
 echo -e "${GREEN}  ╔══════════════════════════════════════════════════════════╗${NC}"
-_BANNER_LN "✓  Installation Complete"
-_BANNER_LN "Agent v${AGENT_VERSION} — ${HOSTNAME_FQDN}"
+_bcenter "✓  Installation Complete" "${GREEN}"
+_bcenter "Agent v${AGENT_VERSION} — ${HOSTNAME_FQDN}" "${GREEN}"
 echo -e "${GREEN}  ╚══════════════════════════════════════════════════════════╝${NC}"
-unset -f _BANNER_LN
 echo ""
 log "Agent v${AGENT_VERSION} installed successfully on ${HOSTNAME_FQDN}"
 log "Platform: ${PLATFORM_HOST}:${PLATFORM_PORT}"

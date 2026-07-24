@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { getBilling, changePlan, getUsageHistory, type BillingOverview, type DailyUsage } from "@/api/billing"
+import { getBilling, changePlan, getUsageHistory } from "@/api/billing"
 import { SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -34,9 +34,16 @@ export default function BillingPage() {
   const billing = billingQuery.data
 
   return (
-    <div className="grid gap-6">
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Billing</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Manage your subscription plan, usage, and invoices.
+        </p>
+      </div>
+
       {billingQuery.isLoading ? (
-        <div className="text-sm text-muted-foreground">Loading billing info...</div>
+        <div className="text-sm text-muted-foreground py-8 text-center">Loading billing info...</div>
       ) : billing ? (
         <>
           <SectionCard title="Current Plan" description="Your active subscription plan.">
@@ -103,7 +110,7 @@ export default function BillingPage() {
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis tickFormatter={(v) => formatBytes(v)} tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => formatBytes(v)} />
+                    <Tooltip formatter={(v) => formatBytes(Number(v))} />
                     <Bar dataKey="log_bytes" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

@@ -1,10 +1,10 @@
 import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
-import { getDiscoveryHosts, getDiscoveryServices } from "@/api/discovery"
+import { getDiscoveryServices } from "@/api/discovery"
 import type { DiscoveryHost } from "@/api/discovery"
 import { cn } from "@/lib/utils"
-import { ArrowLeft, Server, Activity } from "lucide-react"
+import { Server, Activity } from "lucide-react"
 
 function statusColor(status: DiscoveryHost["status"]) {
   switch (status) {

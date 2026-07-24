@@ -1,9 +1,8 @@
 import { useState, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, LayoutDashboard, Server, AlertTriangle, AlertCircle, Activity, Zap, Link2 } from "lucide-react"
 
 import { getOverview } from "@/api/overview"
-import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
 import { GlobalHealthStrip } from "./components/GlobalHealthStrip"
 import { HostCard } from "./components/HostCard"
@@ -30,27 +29,47 @@ export default function OverviewPage() {
   }, [])
 
   return (
-    <Page>
-      <PageHeader
-        title="Overview & Correlation"
-        description="Cross-service observability: fleet health, dependency correlation, and incident timeline in one place."
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => q.refetch()}
-            disabled={q.isRefetching}
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${q.isRefetching ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-        }
-      />
+    <div className="space-y-8 animate-fade-in">
+      {/* Gradient header */}
+      <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-primary/10 via-card to-card/80 p-6 md:p-8">
+        <div className="absolute inset-0 bg-grid opacity-[0.03]" />
+        <div className="relative">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-accent-glow">
+                  <LayoutDashboard className="w-5 h-5 text-primary-foreground" />
+                </div>
+                <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">
+                  <span className="text-gradient-brand">Overview</span>
+                </h1>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                Cross-service observability: fleet health, dependency correlation, and incident timeline in one place.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => q.refetch()}
+              disabled={q.isRefetching}
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${q.isRefetching ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
+          </div>
+        </div>
+      </div>
 
       {/* Zone A — Live Fleet Health */}
-      <SectionCard title="Fleet Health" description="Global health snapshot across all hosts and services">
+      <section className="rounded-xl border border-border bg-card shadow-card p-4 md:p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Activity className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-semibold text-foreground">Fleet Health</h2>
+          <span className="text-[10px] text-muted-foreground ml-auto uppercase tracking-wider">Live</span>
+        </div>
         {loading ? (
           <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -67,12 +86,14 @@ export default function OverviewPage() {
             Unable to load fleet health data.
           </div>
         )}
-      </SectionCard>
+      </section>
 
-      <SectionCard
-        title="Hosts"
-        description="Per-host status, resource usage, and installed services"
-      >
+      <section className="rounded-xl border border-border bg-card shadow-card p-4 md:p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Server className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-semibold text-foreground">Hosts</h2>
+          <span className="text-[10px] text-muted-foreground ml-auto uppercase tracking-wider">Per-host status</span>
+        </div>
         {loading ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -100,14 +121,15 @@ export default function OverviewPage() {
             ))}
           </div>
         ) : null}
-      </SectionCard>
+      </section>
 
       {/* Diagnosed Issues + Incident Timeline side by side */}
       <div className="grid gap-6 md:grid-cols-2">
-        <SectionCard
-          title="Diagnosed Issues"
-          description="Live-detected issues with what/why/impact/action for each service"
-        >
+        <section className="rounded-xl border border-border bg-card shadow-card p-4 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            <h2 className="text-sm font-semibold text-foreground">Diagnosed Issues</h2>
+          </div>
           {loading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -117,12 +139,13 @@ export default function OverviewPage() {
           ) : data ? (
             <DiagnosedIssues issues={data.issues} />
           ) : null}
-        </SectionCard>
+        </section>
 
-        <SectionCard
-          title="Incident Timeline"
-          description="Recent log events across all services (adjustable window)"
-        >
+        <section className="rounded-xl border border-border bg-card shadow-card p-4 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">Incident Timeline</h2>
+          </div>
           {loading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -135,14 +158,16 @@ export default function OverviewPage() {
               onTimeRangeChange={handleTimeRangeChange}
             />
           ) : null}
-        </SectionCard>
+        </section>
       </div>
 
       {/* Zone B — Persisted Correlation Findings */}
-      <SectionCard
-        title="Correlation Findings"
-        description="Persisted cross-service correlation rules detecting dependency chain issues"
-      >
+      <section className="rounded-xl border border-border bg-card shadow-card p-4 md:p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Link2 className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-semibold text-foreground">Correlation Findings</h2>
+          <span className="text-[10px] text-muted-foreground ml-auto uppercase tracking-wider">Persisted</span>
+        </div>
         {loading ? (
           <div className="space-y-3">
             {Array.from({ length: 2 }).map((_, i) => (
@@ -152,18 +177,19 @@ export default function OverviewPage() {
         ) : data ? (
           <CorrelationFindings findings={data.findings} />
         ) : null}
-      </SectionCard>
+      </section>
 
-      <SectionCard
-        title="Dependency Graph"
-        description="Service dependency topology with live health overlay and edge coloring from findings"
-      >
+      <section className="rounded-xl border border-border bg-card shadow-card p-4 md:p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Zap className="w-4 h-4 text-amber-500" />
+          <h2 className="text-sm font-semibold text-foreground">Dependency Graph</h2>
+        </div>
         {loading ? (
           <div className="h-48 bg-muted rounded animate-pulse" />
         ) : data ? (
           <DependencyGraph data={data.dep_graph} />
         ) : null}
-      </SectionCard>
-    </Page>
+      </section>
+    </div>
   )
 }

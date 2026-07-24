@@ -1,9 +1,10 @@
+import React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
-import { Bell, AlertTriangle, ListChecks, Clock, CheckCircle2, Eye, Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react"
+import { useState, useMemo } from "react"
+import { Bell, AlertTriangle, ListChecks, CheckCircle2, Eye, Trash2, Plus, ChevronDown, ChevronRight, Search, ShieldAlert, ShieldCheck, Server } from "lucide-react"
 
 import { getVulnerabilityAlerts, getAlertRules, getAlertEvents, updateAlertRule, deleteAlertRule, acknowledgeAlertEvent } from "@/api/alerts"
-import type { AlertRule, AlertEvent } from "@/api/alerts"
+import type { AlertRule, AlertEvent, VulnerabilityAlert } from "@/api/alerts"
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -43,98 +44,43 @@ function scopeLabel(rule: AlertRule): string {
 }
 
 const severityColors: Record<string, string> = {
-  critical: "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30",
-  warning: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
-  info: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30",
+  critical: "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/30",
+  warning: "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30",
+  info: "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/30",
 }
 
-const statusConfig: Record<string, { icon: typeof Bell; label: string; bg: string; dot: string }> = {
-  firing: { icon: AlertTriangle, label: "Firing", bg: "bg-red-500/10 text-red-600 dark:text-red-400", dot: "bg-red-500" },
-  resolved: { icon: CheckCircle2, label: "Resolved", bg: "bg-green-500/10 text-green-600 dark:text-green-400", dot: "bg-green-500" },
-  acknowledged: { icon: Eye, label: "Acknowledged", bg: "bg-amber-500/10 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
+const statusConfig: Record<string, { icon: typeof Bell; label: string; className: string; dot: string }> = {
+  firing: { icon: AlertTriangle, label: "Firing", className: "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/30", dot: "bg-red-500" },
+  resolved: { icon: CheckCircle2, label: "Resolved", className: "text-green-600 dark:text-green-400 bg-green-500/10 border-green-500/30", dot: "bg-green-500" },
+  acknowledged: { icon: Eye, label: "Acknowledged", className: "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30", dot: "bg-amber-500" },
 }
 
-function StatCard({ icon: Icon, label, value, accent }: { icon: typeof Bell; label: string; value: string | number; accent: string }) {
+function StatCard({ label, value, tone }: { label: string; value: number; tone: "red" | "amber" | "accent" | "muted" }) {
+  const tones = {
+    red: "text-red-600 dark:text-red-400 border-red-500/20 bg-red-500/5",
+    amber: "text-amber-600 dark:text-amber-400 border-amber-500/20 bg-amber-500/5",
+    accent: "text-primary border-primary/20 bg-primary/5",
+    muted: "text-foreground border-border bg-card",
+  }
   return (
-    <div className="rounded-xl border border-border bg-card/70 backdrop-blur p-4 flex items-center gap-4">
-      <div className={cn("rounded-lg p-2.5", accent)}>
-        <Icon className="h-5 w-5" />
-      </div>
-      <div>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-2xl font-bold mt-0.5">{value}</p>
-      </div>
+    <div className={cn("rounded-xl border p-5", tones[tone])}>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">{label}</div>
+      <div className="text-3xl font-bold mt-1.5 tabular-nums">{value}</div>
     </div>
   )
 }
 
 function Badge({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border", className)}>
+    <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium", className)}>
       {children}
     </span>
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const cfg = statusConfig[status]
-  if (!cfg) return <span className="text-xs text-muted-foreground">{status}</span>
-  const Icon = cfg.icon
-  return (
-    <Badge className={cfg.bg}>
-      <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot)} />
-      <Icon className="h-3 w-3" />
-      {cfg.label}
-    </Badge>
-  )
-}
-
 function SeverityBadge({ severity }: { severity: string }) {
-  const color = severityColors[severity] || "bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30"
+  const color = severityColors[severity] || "text-gray-600 dark:text-gray-400 bg-gray-500/10 border-gray-500/30"
   return <Badge className={color}>{severity}</Badge>
-}
-
-function ExpandedEventDetail({ event }: { event: AlertEvent }) {
-  return (
-    <div className="px-2 pb-3 pt-1">
-      <div className="bg-muted/30 rounded-lg p-3 text-xs space-y-2 border border-border/50">
-        {event.metric_string && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Metric</span>
-            <span className="font-medium">{event.metric_string}</span>
-          </div>
-        )}
-        {event.actual_value !== null && event.actual_value !== undefined && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Value</span>
-            <span className="font-medium">{event.actual_value.toFixed(2)}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span>
-          </div>
-        )}
-        {event.threshold && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Threshold</span>
-            <span className="font-medium">{event.threshold.threshold}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span>
-          </div>
-        )}
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Host</span>
-          <span className="font-medium font-mono">{event.host_machine_id}</span>
-        </div>
-        {event.resolved_at && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Resolved</span>
-            <span className="font-medium">{timeAgo(event.resolved_at)}</span>
-          </div>
-        )}
-        {event.acknowledged_by && (
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Acknowledged by</span>
-            <span className="font-medium">User #{event.acknowledged_by}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }
 
 export default function AlertsPage() {
@@ -147,6 +93,7 @@ export default function AlertsPage() {
   const [filterStatus, setFilterStatus] = useState("")
   const [filterSeverity, setFilterSeverity] = useState("")
   const [filterRule, setFilterRule] = useState("")
+  const [expandedVulnService, setExpandedVulnService] = useState<string | null>(null)
 
   const alertsQuery = useQuery({
     queryKey: ["vulnerability-alerts"],
@@ -161,6 +108,7 @@ export default function AlertsPage() {
   const eventsQuery = useQuery({
     queryKey: ["alert-events"],
     queryFn: () => getAlertEvents(50),
+    refetchInterval: 30_000,
   })
 
   const toggleRuleMutation = useMutation({
@@ -183,13 +131,16 @@ export default function AlertsPage() {
   const rules = rulesQuery.data ?? []
   const vulnerabilities = alertsQuery.data ?? []
 
-  const firingCount = events.filter((e) => e.status === "firing").length
-  const acknowledgedCount = events.filter((e) => e.status === "acknowledged").length
-  const todayCount = events.filter((e) => {
-    const d = new Date(e.triggered_at)
-    const now = new Date()
-    return d.toDateString() === now.toDateString()
-  }).length
+  const counts = useMemo(() => ({
+    firing: events.filter((e) => e.status === "firing").length,
+    unack: events.filter((e) => e.status === "firing" && !e.acknowledged_by).length,
+    rules: rules.length,
+    today: events.filter((e) => {
+      const d = new Date(e.triggered_at)
+      const now = new Date()
+      return d.toDateString() === now.toDateString()
+    }).length,
+  }), [events, rules])
 
   const filteredEvents = events.filter((e) => {
     if (filterStatus && e.status !== filterStatus) return false
@@ -202,51 +153,79 @@ export default function AlertsPage() {
     return true
   })
 
-  const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "events", label: "Alert Events", count: filteredEvents.length },
+  const tabs: { key: Tab; label: string; count: number }[] = [
+    { key: "events", label: "Alert Events", count: events.length },
     { key: "rules", label: "Alert Rules", count: rules.length },
     { key: "vulnerabilities", label: "Vulnerability Alerts", count: vulnerabilities.length },
   ]
+
+  // Group CVEs by host → service → severity
+  const groupedVulns = useMemo(() => {
+    type ServiceGroup = { serviceKey: string; serviceName: string; version: string; alerts: VulnerabilityAlert[] }
+    type HostGroup = { hostname: string; machineId: string; services: ServiceGroup[]; totalCves: number; critCount: number; warnCount: number }
+    const hostMap: Record<string, HostGroup> = {}
+    for (const v of vulnerabilities) {
+      if (!hostMap[v.machine_id]) {
+        hostMap[v.machine_id] = { hostname: v.hostname || "-", machineId: v.machine_id, services: [], totalCves: 0, critCount: 0, warnCount: 0 }
+      }
+      const host = hostMap[v.machine_id]
+      host.totalCves++
+      if (v.alert_level === "alert") host.critCount++
+      else host.warnCount++
+      const serviceKey = `${v.service_name} ${v.service_version}`
+      let svc = host.services.find(s => s.serviceKey === serviceKey)
+      if (!svc) {
+        svc = { serviceKey, serviceName: v.service_name, version: v.service_version, alerts: [] }
+        host.services.push(svc)
+      }
+      svc.alerts.push(v)
+    }
+    for (const host of Object.values(hostMap)) {
+      for (const svc of host.services) {
+        svc.alerts.sort((a, b) => {
+          const order = ["critical", "high", "medium", "low"]
+          return order.indexOf(a.severity) - order.indexOf(b.severity)
+        })
+      }
+    }
+    return Object.values(hostMap)
+  }, [vulnerabilities])
 
   return (
     <Page>
       <PageHeader
         title="Alerts"
         description="Monitor and manage alert rules, events, and vulnerability findings."
+        icon={Bell}
       />
 
       {/* Stats bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard icon={AlertTriangle} label="Firing" value={firingCount} accent="bg-red-500/15 text-red-600 dark:text-red-400" />
-        <StatCard icon={Bell} label="Unacknowledged" value={events.length - acknowledgedCount} accent="bg-amber-500/15 text-amber-600 dark:text-amber-400" />
-        <StatCard icon={ListChecks} label="Rules" value={rules.length} accent="bg-blue-500/15 text-blue-600 dark:text-blue-400" />
-        <StatCard icon={Clock} label="Triggered Today" value={todayCount} accent="bg-purple-500/15 text-purple-600 dark:text-purple-400" />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Firing" value={counts.firing} tone="red" />
+        <StatCard label="Unacknowledged" value={counts.unack} tone="amber" />
+        <StatCard label="Rules" value={counts.rules} tone="accent" />
+        <StatCard label="Triggered Today" value={counts.today} tone="muted" />
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-border">
+      <div className="flex items-center gap-1 border-b border-border">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-[1px] transition-colors flex items-center gap-2",
-              tab === t.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+              "relative px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2",
+              tab === t.key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
             )}
           >
             {t.label}
-            {t.count !== undefined && t.count > 0 && (
-              <span className={cn(
-                "text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center",
-                tab === t.key
-                  ? "bg-primary/15 text-primary"
-                  : "bg-muted text-muted-foreground"
-              )}>
-                {t.count}
-              </span>
-            )}
+            <span className={cn(
+              "text-xs px-1.5 py-0.5 rounded-md",
+              tab === t.key ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground"
+            )}>
+              {t.count}
+            </span>
+            {tab === t.key && <span className="absolute -bottom-px left-0 right-0 h-0.5 bg-primary rounded-full" />}
           </button>
         ))}
       </div>
@@ -261,141 +240,154 @@ export default function AlertsPage() {
               ))}
             </div>
           ) : events.length === 0 ? (
-            <div className="py-12 text-center">
-              <Bell className="h-10 w-10 mx-auto text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No alert events yet.</p>
-              <p className="text-xs text-muted-foreground/60 mt-1">Events appear when a metric exceeds a configured threshold.</p>
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <Bell className="w-10 h-10 mb-3 opacity-30" />
+              <p className="text-sm font-medium text-foreground">No alert events yet.</p>
+              <p className="text-xs mt-1">Events appear when a metric exceeds a configured threshold.</p>
             </div>
           ) : (
-            <>
+            <div className="space-y-4">
               {/* Filter bar */}
-              <div className="flex flex-wrap gap-2 mb-4 pb-4 border-b border-border">
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className="h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary"
-                >
+              <div className="flex flex-wrap items-center gap-3">
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+                  className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50">
                   <option value="">All statuses</option>
                   <option value="firing">Firing</option>
                   <option value="resolved">Resolved</option>
                   <option value="acknowledged">Acknowledged</option>
                 </select>
-                <select
-                  value={filterSeverity}
-                  onChange={(e) => setFilterSeverity(e.target.value)}
-                  className="h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary"
-                >
+                <select value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)}
+                  className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50">
                   <option value="">All severities</option>
                   <option value="critical">Critical</option>
                   <option value="warning">Warning</option>
                   <option value="info">Info</option>
                 </select>
-                <input
-                  type="text"
-                  placeholder="Search rule name..."
-                  value={filterRule}
-                  onChange={(e) => setFilterRule(e.target.value)}
-                  className="h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary w-44"
-                />
+                <div className="relative flex-1 min-w-[200px] max-w-md">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input type="text" placeholder="Search by rule name…" value={filterRule} onChange={(e) => setFilterRule(e.target.value)}
+                    className="w-full bg-secondary border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50" />
+                </div>
                 {(filterStatus || filterSeverity || filterRule) && (
-                  <button
-                    onClick={() => { setFilterStatus(""); setFilterSeverity(""); setFilterRule("") }}
-                    className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Clear filters
-                  </button>
+                  <button onClick={() => { setFilterStatus(""); setFilterSeverity(""); setFilterRule("") }}
+                    className="text-sm text-primary hover:underline">Clear</button>
                 )}
               </div>
-              {filteredEvents.length === 0 ? (
-                <div className="py-8 text-center text-sm text-muted-foreground">No events match the selected filters.</div>
-              ) : (
-              <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-muted-foreground">
-                    <th className="pb-2.5 font-medium w-5"></th>
-                    <th className="pb-2.5 font-medium">Status</th>
-                    <th className="pb-2.5 font-medium">Rule</th>
-                    <th className="pb-2.5 font-medium">Severity</th>
-                    <th className="pb-2.5 font-medium">Scope</th>
-                    <th className="pb-2.5 font-medium">Value</th>
-                    <th className="pb-2.5 font-medium">Triggered</th>
-                    <th className="pb-2.5 font-medium"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredEvents.flatMap((event) => {
-                    const expanded = expandedEvent === event.id
-                    const severity = event.threshold?.severity || event.rule?.default_severity || "-"
-                    const isFiring = event.status === "firing"
-                    const row = (
-                      <tr key={event.id} className={cn("border-b border-border/40 transition-colors", isFiring && "bg-red-500/[0.02]")}>
-                        <td className="py-2.5">
-                          <button
-                            onClick={() => setExpandedEvent(expanded ? null : event.id)}
-                            className="text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                          </button>
-                        </td>
-                        <td className="py-2.5">
-                          <StatusBadge status={event.status} />
-                        </td>
-                        <td className="py-2.5 font-medium">
-                          {event.rule?.template_name || `Rule #${event.rule_id}`}
-                        </td>
-                        <td className="py-2.5">
-                          <SeverityBadge severity={severity} />
-                        </td>
-                        <td className="py-2.5 text-muted-foreground text-xs max-w-[180px] truncate" title={event.rule ? scopeLabel(event.rule) : "—"}>
-                          {event.rule ? scopeLabel(event.rule) : "—"}
-                        </td>
-                        <td className="py-2.5 font-mono text-xs">
-                          {event.actual_value !== null && event.actual_value !== undefined
-                            ? `${event.actual_value.toFixed(1)}${event.rule?.unit ? event.rule.unit : ""}`
-                            : "—"}
-                        </td>
-                        <td className="py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                          <span title={new Date(event.triggered_at).toLocaleString()}>
-                            {timeAgo(event.triggered_at)}
-                          </span>
-                        </td>
-                        <td className="py-2.5">
-                          {isAdmin && isFiring && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs"
-                              onClick={() => acknowledgeMutation.mutate(event.id)}
+
+              {/* Events table */}
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                {filteredEvents.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                    <Bell className="w-10 h-10 mb-3 opacity-30" />
+                    <p className="text-sm">No events match the selected filters.</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
+                      <tr>
+                        <th className="w-8 px-0" />
+                        <th className="text-left px-3 py-3 font-semibold">Status</th>
+                        <th className="text-left px-3 py-3 font-semibold">Rule</th>
+                        <th className="text-left px-3 py-3 font-semibold">Severity</th>
+                        <th className="text-left px-3 py-3 font-semibold">Scope</th>
+                        <th className="text-right px-3 py-3 font-semibold">Value</th>
+                        <th className="text-left px-3 py-3 font-semibold">Triggered</th>
+                        <th className="w-32 px-0" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredEvents.map((event) => {
+                        const expanded = expandedEvent === event.id
+                        const severity = event.threshold?.severity || event.rule?.default_severity || "-"
+                        const isFiring = event.status === "firing"
+                        const S = statusConfig[event.status]
+                        return (
+                          <React.Fragment key={event.id}>
+                            <tr
+                              className={cn(
+                                "border-t border-border hover:bg-surface-hover cursor-pointer transition-colors",
+                                isFiring && "bg-red-500/[0.02]"
+                              )}
+                              onClick={() => setExpandedEvent(expanded ? null : event.id)}
                             >
-                              <Eye className="h-3 w-3 mr-1" />
-                              Acknowledge
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                    if (!expanded) return [row]
-                    return [row, (
-                      <tr key={`detail-${event.id}`}>
-                        <td colSpan={8} className="p-0">
-                          <ExpandedEventDetail event={event} />
-                        </td>
-                      </tr>
-                    )]
-                  })}
-                </tbody>
-              </table>
+                              <td className="pl-4 py-3">
+                                {expanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                              </td>
+                              <td className="px-3 py-3">
+                                {S ? (
+                                  <Badge className={S.className}>
+                                    <span className={cn("w-1.5 h-1.5 rounded-full", S.dot)} />
+                                    <S.icon className="w-3.5 h-3.5" />
+                                    {S.label}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">{event.status}</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-3 font-medium text-foreground">{event.rule?.template_name || `Rule #${event.rule_id}`}</td>
+                              <td className="px-3 py-3">
+                                <SeverityBadge severity={severity} />
+                              </td>
+                              <td className="px-3 py-3 text-xs text-muted-foreground max-w-[200px] truncate" title={event.rule ? scopeLabel(event.rule) : "—"}>
+                                {event.rule ? scopeLabel(event.rule) : "—"}
+                              </td>
+                              <td className="px-3 py-3 text-right font-mono tabular-nums text-foreground">
+                                {event.actual_value !== null && event.actual_value !== undefined
+                                  ? `${event.actual_value.toFixed(1)}${event.rule?.unit || ""}`
+                                  : "—"}
+                              </td>
+                              <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                                <span title={new Date(event.triggered_at).toLocaleString()}>{timeAgo(event.triggered_at)}</span>
+                              </td>
+                              <td className="px-3 py-3">
+                                {isAdmin && isFiring && (
+                                  <button onClick={(ev) => { ev.stopPropagation(); acknowledgeMutation.mutate(event.id) }}
+                                    className="text-xs px-2.5 py-1.5 rounded-md bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-colors font-medium">
+                                    <Eye className="w-3 h-3 inline mr-1" /> Acknowledge
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            {expanded && (
+                              <tr key={`detail-${event.id}`} className="bg-secondary/30 border-t border-border">
+                                <td />
+                                <td colSpan={7} className="px-3 py-4">
+                                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-2 text-xs">
+                                    {event.metric_string && (
+                                      <div><span className="text-muted-foreground">Metric:</span> <span className="font-mono text-foreground">{event.metric_string}</span></div>
+                                    )}
+                                    {event.actual_value !== null && event.actual_value !== undefined && (
+                                      <div><span className="text-muted-foreground">Actual:</span> <span className={cn("font-mono", isFiring ? "text-red-600 dark:text-red-400" : "text-foreground")}>{event.actual_value.toFixed(2)}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span></div>
+                                    )}
+                                    {event.threshold && (
+                                      <div><span className="text-muted-foreground">Threshold:</span> <span className="font-mono text-foreground">{event.threshold.threshold}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span></div>
+                                    )}
+                                    <div><span className="text-muted-foreground">Host:</span> <span className="font-mono text-foreground">{event.host_machine_id}</span></div>
+                                    {event.resolved_at && (
+                                      <div><span className="text-muted-foreground">Resolved:</span> <span className="text-green-600 dark:text-green-400">{new Date(event.resolved_at).toLocaleString()}</span></div>
+                                    )}
+                                    {event.acknowledged_by && (
+                                      <div><span className="text-muted-foreground">Acknowledged by:</span> <span className="text-foreground">User #{event.acknowledged_by}</span></div>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </div>
           )}
-        </>
-      )}
         </SectionCard>
       )}
 
       {/* ───────────── Alert Rules Tab ───────────── */}
       {tab === "rules" && (
-        <>
+        <div className="space-y-4">
           <SectionCard>
             {rulesQuery.isLoading ? (
               <div className="space-y-3">
@@ -404,95 +396,69 @@ export default function AlertsPage() {
                 ))}
               </div>
             ) : rules.length === 0 ? (
-              <div className="py-12 text-center">
-                <ListChecks className="h-10 w-10 mx-auto text-muted-foreground/40" />
-                <p className="mt-3 text-sm text-muted-foreground">No alert rules configured.</p>
-                <p className="text-xs text-muted-foreground/60 mt-1">Create a rule to start monitoring your infrastructure.</p>
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                <ListChecks className="w-10 h-10 opacity-30" />
+                <div className="text-center">
+                  <p className="text-sm font-medium text-foreground">No alert rules configured.</p>
+                  <p className="text-xs mt-1">Create your first rule to start receiving alerts.</p>
+                </div>
                 {isAdmin && (
-                  <Button className="mt-4" size="sm" onClick={() => setShowCreateModal(true)}>
-                    <Plus className="h-4 w-4 mr-1" /> Add Alert Rule
+                  <Button size="sm" onClick={() => setShowCreateModal(true)}>
+                    <Plus className="w-4 h-4 mr-1" /> Add Alert Rule
                   </Button>
                 )}
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-muted-foreground">
-                      <th className="pb-2.5 font-medium">Name</th>
-                      <th className="pb-2.5 font-medium">Scope / Domain</th>
-                      <th className="pb-2.5 font-medium">Thresholds</th>
-                      <th className="pb-2.5 font-medium">Duration</th>
-                      <th className="pb-2.5 font-medium">Status</th>
-                      <th className="pb-2.5 font-medium"></th>
+                  <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-semibold">Rule</th>
+                      <th className="text-left px-3 py-3 font-semibold">Scope / Domain</th>
+                      <th className="text-left px-3 py-3 font-semibold">Thresholds</th>
+                      <th className="text-left px-3 py-3 font-semibold">Duration</th>
+                      <th className="text-center px-3 py-3 font-semibold">Enabled</th>
+                      <th className="w-16 px-0" />
                     </tr>
                   </thead>
                   <tbody>
                     {rules.map((rule) => (
-                      <tr key={rule.id} className="border-b border-border/40">
-                        <td className="py-2.5">
-                          <div className="font-medium">{rule.template_name}</div>
+                      <tr key={rule.id} className="border-t border-border hover:bg-surface-hover transition-colors">
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-foreground">{rule.template_name}</div>
                           <div className="text-xs text-muted-foreground mt-0.5">{rule.description}</div>
                         </td>
-                        <td className="py-2.5">
-                          <div className="text-xs">
-                            {rule.domain ? (
-                              <span className="flex items-center gap-1">
-                                <span className="text-muted-foreground">Domain:</span>
-                                <span className="font-mono">{rule.domain}</span>
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">{formatScope(rule.scopes)}</span>
-                            )}
-                          </div>
+                        <td className="px-3 py-3 text-xs text-muted-foreground">
+                          {rule.domain ? <span><span className="text-muted-foreground">Domain:</span> <span className="font-mono">{rule.domain}</span></span> : <span>{formatScope(rule.scopes)}</span>}
                         </td>
-                        <td className="py-2.5">
-                          <div className="flex flex-col gap-1">
+                        <td className="px-3 py-3">
+                          <div className="flex flex-wrap gap-1.5">
                             {rule.thresholds.map((t, i) => (
-                              <span key={i} className="inline-flex items-center gap-1.5 text-xs">
-                                <SeverityBadge severity={t.severity} />
-                                <span className="font-mono">{t.threshold}{rule.unit}</span>
-                                {t.label && <span className="text-muted-foreground">· {t.label}</span>}
+                              <span key={i} className={cn("text-xs px-2 py-0.5 rounded-md border font-mono", severityColors[t.severity] || "")}>
+                                {t.label || t.severity}: {t.threshold}{rule.unit}
                               </span>
                             ))}
                           </div>
                         </td>
-                        <td className="py-2.5 text-xs text-muted-foreground">
-                          {rule.for_duration || "5m"}
-                        </td>
-                        <td className="py-2.5">
+                        <td className="px-3 py-3 font-mono text-xs text-muted-foreground">{rule.for_duration || "5m"}</td>
+                        <td className="px-3 py-3 text-center">
                           {isAdmin ? (
-                            <button
-                              onClick={() => toggleRuleMutation.mutate({ id: rule.id, isEnabled: rule.is_enabled })}
-                              className={cn(
-                                "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-                                rule.is_enabled ? "bg-green-500" : "bg-muted-foreground/30"
-                              )}
-                            >
-                              <span className={cn(
-                                "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
-                                rule.is_enabled ? "translate-x-[18px]" : "translate-x-[3px]"
-                              )} />
+                            <button onClick={() => toggleRuleMutation.mutate({ id: rule.id, isEnabled: rule.is_enabled })}
+                              className={cn("w-10 h-5 rounded-full relative transition-colors", rule.is_enabled ? "bg-primary" : "bg-secondary border border-border")}>
+                              <span className={cn("absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform bg-white", rule.is_enabled ? "translate-x-5" : "")} />
                             </button>
                           ) : (
-                            <span className={cn(
-                              "text-xs font-medium",
-                              rule.is_enabled ? "text-green-500" : "text-muted-foreground"
-                            )}>
+                            <span className={cn("text-xs font-medium", rule.is_enabled ? "text-primary" : "text-muted-foreground")}>
                               {rule.is_enabled ? "Enabled" : "Disabled"}
                             </span>
                           )}
                         </td>
-                        <td className="py-2.5">
+                        <td className="px-3 py-3">
                           {isAdmin && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-muted-foreground hover:text-destructive h-7 w-7 p-0"
-                              onClick={() => deleteRuleMutation.mutate(rule.id)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <button onClick={() => deleteRuleMutation.mutate(rule.id)}
+                              className="p-1.5 rounded-md text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -502,23 +468,25 @@ export default function AlertsPage() {
               </div>
             )}
             {isAdmin && rules.length > 0 && (
-              <div className="mt-4">
+              <div className="flex justify-end">
                 <Button size="sm" onClick={() => setShowCreateModal(true)}>
-                  <Plus className="h-4 w-4 mr-1" /> Add Alert Rule
+                  <Plus className="w-4 h-4 mr-1" /> Add Alert Rule
                 </Button>
               </div>
             )}
           </SectionCard>
           {isAdmin && showCreateModal && <CreateAlertRuleModal onClose={() => setShowCreateModal(false)} />}
-        </>
+        </div>
       )}
 
       {/* ───────────── Vulnerability Alerts Tab ───────────── */}
       {tab === "vulnerabilities" && (
-        <SectionCard>
-          <div className="mb-4">
-            <p className="text-sm text-muted-foreground">Medium findings show as warnings. High and critical findings show as alerts.</p>
+        <div className="space-y-4">
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+            <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>Medium and below show as <strong>warning</strong> (amber). High and critical show as <strong>alert</strong> (red).</span>
           </div>
+
           {alertsQuery.isLoading ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -526,64 +494,118 @@ export default function AlertsPage() {
               ))}
             </div>
           ) : vulnerabilities.length === 0 ? (
-            <div className="py-12 text-center">
-              <ShieldCheck className="h-10 w-10 mx-auto text-muted-foreground/40" />
-              <p className="mt-3 text-sm text-muted-foreground">No active vulnerability alerts right now.</p>
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground rounded-xl border border-border bg-card">
+              <ShieldCheck className="w-10 h-10 mb-3 opacity-30 text-green-500" />
+              <p className="text-sm font-medium text-foreground">No active vulnerability alerts right now.</p>
             </div>
           ) : (
-            <div className="grid gap-3">
-              {vulnerabilities.map((alert) => (
-                <div key={alert.id} className="rounded-xl border border-border bg-card/40 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="font-medium">
-                      {alert.cve_id} · {alert.service_name} {alert.service_version || ""}
+            <div className="space-y-3">
+              {groupedVulns.map((host) => (
+                <div key={host.machineId} className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="flex items-center gap-3 px-5 py-3.5 bg-card">
+                    <Server className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="text-sm font-semibold text-foreground">{host.hostname}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">· {host.machineId.slice(0, 12)}…</span>
                     </div>
-                    <Badge className={cn(
-                      alert.alert_level === "alert"
-                        ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30"
-                        : "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                    )}>
-                      {alert.alert_level === "alert" ? <AlertTriangle className="h-3 w-3" /> : <Bell className="h-3 w-3" />}
-                      {alert.alert_level}
-                    </Badge>
+                    <div className="flex items-center gap-3 text-xs shrink-0">
+                      {host.critCount > 0 && (
+                        <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-red-500" />
+                          {host.critCount} critical
+                        </span>
+                      )}
+                      {host.warnCount > 0 && (
+                        <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-amber-500" />
+                          {host.warnCount} warnings
+                        </span>
+                      )}
+                      <span className="text-muted-foreground">({host.totalCves})</span>
+                    </div>
                   </div>
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    Host: {alert.hostname || "-"} ({alert.machine_id})
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-4 text-xs">
-                    <span>Severity {alert.severity}</span>
-                    <span>CVSS {alert.cvss_score.toFixed(1)}</span>
-                    <span>Fix {alert.fixed_in_version || "-"}</span>
-                  </div>
-                  <div className="mt-3 text-sm text-muted-foreground">
-                    {alert.description || "No description available."}
+                  <div className="border-t border-border divide-y divide-border">
+                    {host.services.map((svc) => {
+                      const svcCrit = svc.alerts.filter(a => a.alert_level === "alert").length
+                      const svcWarn = svc.alerts.filter(a => a.alert_level !== "alert").length
+                      const svcKey = `${host.machineId}-${svc.serviceKey}`
+                      const svcOpen = expandedVulnService === svcKey
+                      return (
+                        <div key={svc.serviceKey}>
+                          <button
+                            onClick={() => setExpandedVulnService(svcOpen ? null : svcKey)}
+                            className="w-full flex items-center gap-3 px-5 py-2.5 bg-secondary/20 hover:bg-muted/30 transition-colors text-left"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs font-semibold text-foreground">{svc.serviceName}</span>
+                              <span className="text-[10px] font-mono text-muted-foreground ml-1.5">v{svc.version}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs">
+                              {svcCrit > 0 && <span className="text-red-600 dark:text-red-400 font-semibold">{svcCrit} critical</span>}
+                              {svcWarn > 0 && <span className="text-amber-600 dark:text-amber-400 font-semibold">{svcWarn} warning</span>}
+                            </div>
+                            {svcOpen ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
+                          </button>
+                          {svcOpen && (
+                            <div className="px-5 py-3 space-y-2 bg-card">
+                              {svc.alerts.map((alert) => {
+                                const isAlert = alert.alert_level === "alert"
+                                return (
+                                  <div key={alert.id}
+                                    className={cn(
+                                      "rounded-lg p-3.5 border-l-4 border border-border/60",
+                                      isAlert ? "border-l-red-500 bg-red-500/[0.03]" : "border-l-amber-500 bg-amber-500/[0.03]"
+                                    )}
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="font-mono font-bold text-foreground text-sm">{alert.cve_id}</span>
+                                          <span className={cn(
+                                            "px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wider",
+                                            isAlert
+                                              ? "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/30"
+                                              : "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30"
+                                          )}>
+                                            {alert.severity}
+                                          </span>
+                                          <span className={cn(
+                                            "text-xs font-semibold",
+                                            isAlert ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"
+                                          )}>
+                                            CVSS {alert.cvss_score.toFixed(1)}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{alert.description || "No description available."}</p>
+                                      </div>
+                                      <span className={cn(
+                                        "shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider",
+                                        isAlert
+                                          ? "text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/30"
+                                          : "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30"
+                                      )}>
+                                        {isAlert ? <AlertTriangle className="w-3 h-3" /> : <Bell className="w-3 h-3" />}
+                                        {alert.alert_level}
+                                      </span>
+                                    </div>
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                      Fix ≥ <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{alert.fixed_in_version || "-"}</span>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </SectionCard>
+        </div>
       )}
     </Page>
-  )
-}
-
-function ShieldCheck(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <path d="m9 12 2 2 4-4" />
-    </svg>
   )
 }

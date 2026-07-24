@@ -18,17 +18,22 @@ export function PageHeader({
   title,
   description,
   actions,
+  icon: Icon,
 }: {
   title: string
   description?: string
   actions?: React.ReactNode
+  icon?: React.ComponentType<{ className?: string }>
 }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
-          {title}
-        </h1>
+        <div className="flex items-center gap-2.5">
+          {Icon && <Icon className="w-6 h-6 text-accent shrink-0" />}
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">
+            {title}
+          </h1>
+        </div>
         {description ? (
           <p className="mt-1 text-sm text-muted-foreground max-w-2xl">
             {description}
@@ -54,13 +59,13 @@ export function SectionCard({
   return (
     <section
       className={cn(
-        "rounded-2xl border border-border bg-card/70 backdrop-blur p-4 md:p-6",
+        "rounded-xl border border-border bg-card shadow-card p-4 md:p-6",
         className
       )}
     >
       {title ? (
         <div className="mb-4">
-          <div className="font-medium">{title}</div>
+          <div className="font-semibold text-foreground">{title}</div>
           {description ? (
             <div className="mt-1 text-sm text-muted-foreground">{description}</div>
           ) : null}
@@ -70,4 +75,3 @@ export function SectionCard({
     </section>
   )
 }
-

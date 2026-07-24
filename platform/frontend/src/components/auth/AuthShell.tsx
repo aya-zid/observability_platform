@@ -1,92 +1,72 @@
-import { Link } from "react-router-dom"
-
-import ThemeToggle from "@/components/shared/ThemeToggle"
-
-function RequiredMark() {
-  return <span className="text-destructive"> *</span>
-}
-
-export function AuthLabel({
-  children,
-  required,
-}: {
-  children: React.ReactNode
-  required?: boolean
-}) {
-  return (
-    <span className="text-sm font-medium">
-      {children}
-      {required ? <RequiredMark /> : null}
-    </span>
-  )
-}
+import { Activity } from "lucide-react"
 
 export default function AuthShell({
-  title,
-  subtitle,
   children,
-  footer,
+  mode = "login",
 }: {
-  title: string
-  subtitle: string
+  title?: string
+  subtitle?: string
   children: React.ReactNode
-  footer: React.ReactNode
+  footer?: React.ReactNode
+  mode?: "login" | "signup"
 }) {
   return (
-    <div className="auth-bg min-h-dvh grid place-items-center p-4">
-      <div className="w-full max-w-5xl">
-        <div className="mb-4 flex items-center justify-between">
-          <Link to="/" className="text-xs text-white/70 hover:text-white">
-            Back to home
-          </Link>
-          <ThemeToggle variant="ghost" />
-        </div>
-
-        <div className="grid gap-6 md:grid-cols-2 md:gap-0 rounded-3xl border border-white/10 bg-black/20 backdrop-blur-xl overflow-hidden shadow-sm">
-          <div className="hidden md:block p-10">
-            <div className="flex items-center gap-3">
-              <div className="size-12 rounded-2xl bg-white/10 grid place-items-center text-white font-semibold">
-                OP
-              </div>
-              <div className="text-white">
-                <div className="font-semibold tracking-tight">Observability Platform</div>
-                <div className="text-xs text-white/70">Metrics. Logs. Traces.</div>
-              </div>
-            </div>
-
-            <div className="mt-10 text-white">
-              <div className="text-2xl font-semibold tracking-tight">
-                Cloud-grade,
-                <span className="text-white/70"> human-friendly</span>.
-              </div>
-              <div className="mt-2 text-sm text-white/70 max-w-sm">
-                Multi-tenant platform with cookie-based auth and agent API keys.
-                Built to demo well, and scale further.
-              </div>
-            </div>
-
-            <div className="mt-10 grid gap-3 text-sm text-white/70">
-              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                Per-tenant isolation (VM, Loki, Tempo)
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                Secure sessions (HttpOnly cookies + refresh)
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                Fast UX (React Query + sensible routing)
-              </div>
-            </div>
+    <div className="min-h-screen flex bg-background">
+      {/* Left brand panel */}
+      <div className="hidden lg:flex flex-col justify-between w-1/2 p-10 bg-sidebar text-sidebar-foreground relative overflow-hidden">
+        <div className="absolute inset-0 bg-grid opacity-40" />
+        <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-sidebar-primary/20 blur-3xl" />
+        <div className="absolute bottom-0 right-0 w-96 h-96 rounded-full bg-sidebar-accent/20 blur-3xl" />
+        <div className="relative flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-md bg-sidebar-primary/15 flex items-center justify-center ring-1 ring-sidebar-primary/30">
+            <Activity className="w-4 h-4 text-sidebar-primary" />
           </div>
-
-          <div className="p-6 md:p-10 bg-background/70 backdrop-blur">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-            <div className="mt-6">{children}</div>
-            <div className="mt-5 text-sm text-muted-foreground">{footer}</div>
+          <div className="leading-tight">
+            <div className="text-[15px] font-bold tracking-tight">
+               <span className="text-sidebar-accent">Media</span><span className="text-sidebar-primary">net</span>
+            </div>
+            <div className="text-[10px] uppercase tracking-widest text-sidebar-foreground/70">Observability</div>
           </div>
         </div>
+        <div className="relative space-y-4 max-w-md">
+          {mode === "login" ? (
+            <>
+              <h2 className="text-3xl font-bold leading-tight">
+                One platform for <span className="text-gradient-brand">hosts, containers &amp; services</span>.
+              </h2>
+              <p className="text-sm text-sidebar-foreground/80">
+                Real-time metrics, logs and correlated insights across your entire fleet.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-3xl font-bold leading-tight">
+                Get end-to-end visibility in <span className="text-gradient-brand">under 5 minutes</span>.
+              </h2>
+              <ul className="space-y-2.5">
+                {[
+                  "Auto-discovered hosts, containers & services",
+                  "Real-time metrics, logs and CVE scanning",
+                  "Correlated insights across your fleet",
+                ].map((b) => (
+                  <li key={b} className="flex items-center gap-2.5 text-sm text-sidebar-foreground/80">
+                    <span className="w-5 h-5 rounded-full bg-sidebar-primary/20 flex items-center justify-center">
+                      <span className="text-sidebar-primary text-xs">✓</span>
+                    </span>
+                    {b}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+        <div className="relative text-xs text-sidebar-foreground/65">© 2026 Medianet Observability</div>
+      </div>
+
+      {/* Right panel */}
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-md">{children}</div>
       </div>
     </div>
   )
 }
-

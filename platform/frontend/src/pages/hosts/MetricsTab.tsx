@@ -1,5 +1,4 @@
 import { useState, useMemo } from "react"
-import { Link } from "react-router-dom"
 import { getNowSeconds, dateTimeInputToSeconds, getStep } from "@/lib/queryHelpers"
 import { TimeRangeSelector, TIME_RANGES } from "@/components/shared/TimeRangeSelector"
 import type { TimeSelection } from "@/components/shared/TimeRangeSelector"
@@ -46,15 +45,7 @@ export function MetricsTab({ machineId }: { machineId: string }) {
 
   return (
     <div className="grid gap-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
-        <Link
-          to={`/hosts/${machineId}/logs`}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 transition-colors"
-        >
-          View Logs &rarr;
-        </Link>
-      </div>
+      <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
 
       <SummaryCards machineId={machineId} />
 

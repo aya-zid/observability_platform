@@ -58,9 +58,9 @@ export default function ApiKeysPage() {
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold">API Keys</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">API Keys</h1>
         <p className="text-sm text-muted-foreground mt-1">Manage keys used by agents and services to send telemetry.</p>
       </div>
 
@@ -114,45 +114,49 @@ export default function ApiKeysPage() {
         <div className="space-y-4">
           <div>
             <p className="text-sm font-medium mb-1.5">Install agent</p>
-            <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all flex items-center justify-between">
-              <span className="min-w-0">
-                {q.isLoading
-                  ? "Loading…"
-                  : q.data?.api_key
-                    ? `curl -sSL http://${getPlatformHost()}/install.sh | sudo API_KEY=${q.data.api_key} bash`
-                    : "Load an API key first."}
-              </span>
-              {q.data?.api_key && (
+            <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm overflow-x-auto">
+              <div className="flex items-center justify-between whitespace-nowrap">
+                <span>
+                  {q.isLoading
+                    ? "Loading…"
+                    : q.data?.api_key
+                      ? `curl -sSL http://${getPlatformHost()}/install.sh | sudo API_KEY=${q.data.api_key} bash`
+                      : "Load an API key first."}
+                </span>
+                {q.data?.api_key && (
+                  <button
+                    onClick={() =>
+                      navigator.clipboard.writeText(
+                        `curl -sSL http://${getPlatformHost()}/install.sh | sudo API_KEY=${q.data!.api_key} bash`
+                      )
+                    }
+                    className="ml-2 text-xs text-primary hover:underline shrink-0"
+                  >
+                    Copy
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium mb-1.5">Uninstall agent</p>
+            <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm overflow-x-auto">
+              <div className="flex items-center justify-between whitespace-nowrap">
+                <span>
+                  {`curl -sSL http://${getPlatformHost()}/uninstall.sh | sudo bash`}
+                </span>
                 <button
                   onClick={() =>
                     navigator.clipboard.writeText(
-                      `curl -sSL http://${getPlatformHost()}/install.sh | sudo API_KEY=${q.data!.api_key} bash`
+                      `curl -sSL http://${getPlatformHost()}/uninstall.sh | sudo bash`
                     )
                   }
                   className="ml-2 text-xs text-primary hover:underline shrink-0"
                 >
                   Copy
                 </button>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <p className="text-sm font-medium mb-1.5">Uninstall agent</p>
-            <div className="rounded-md border border-border bg-background/70 px-3 py-2 font-mono text-sm break-all flex items-center justify-between">
-              <span className="min-w-0">
-                {`curl -sSL http://${getPlatformHost()}/uninstall.sh | sudo bash`}
-              </span>
-              <button
-                onClick={() =>
-                  navigator.clipboard.writeText(
-                    `curl -sSL http://${getPlatformHost()}/uninstall.sh | sudo bash`
-                  )
-                }
-                className="ml-2 text-xs text-primary hover:underline shrink-0"
-              >
-                Copy
-              </button>
+              </div>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Removes the agent from the host. Does not affect stored telemetry data.

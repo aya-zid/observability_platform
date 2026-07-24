@@ -47,7 +47,14 @@ export default function TeamPage() {
   const team = teamQuery.data
 
   return (
-    <div className="grid gap-6">
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">Team</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Manage your team members, roles, and invitations.
+        </p>
+      </div>
+
       <SectionCard title="Team Members" description="Manage your team members and their roles.">
         {teamQuery.isLoading ? (
           <div className="text-sm text-muted-foreground">Loading team...</div>

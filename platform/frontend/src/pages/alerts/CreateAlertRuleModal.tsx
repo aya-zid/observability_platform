@@ -5,6 +5,7 @@ import { getAlertTemplatesByService, createAlertRule, type AlertTemplate, type S
 import { getDiscoveryHosts, getDiscoveryServices, type DiscoveryHost, type DiscoveryService } from "@/api/discovery"
 import { getNginxDomains } from "@/api/nginx"
 import { getApacheDomains } from "@/api/apache"
+import { getContainerServices, type ContainerService } from "@/api/container"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -16,6 +17,7 @@ const serviceTypes = [
   { key: "mariadb", label: "MariaDB" },
   { key: "phpfpm", label: "PHP-FPM" },
   { key: "redis", label: "Redis" },
+  { key: "container", label: "Container" },
 ]
 
 type Step = "pick-service" | "pick-template" | "configure"
@@ -28,6 +30,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
 
   const [selectedHostIds, setSelectedHostIds] = useState<number[]>([])
   const [selectedServiceIds, setSelectedServiceIds] = useState<number[]>([])
+  const [selectedContainerIds, setSelectedContainerIds] = useState<number[]>([])
   const [selectedDomain, setSelectedDomain] = useState("")
   const [thresholds, setThresholds] = useState<ThresholdInput[]>([{ label: "", threshold: 0, severity: "warning" }])
   const [forDuration, setForDuration] = useState("5m")
@@ -56,6 +59,11 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
 
   const isWebService = serviceType === "nginx" || serviceType === "apache"
 
+  const containersQuery = useQuery({
+    queryKey: ["container-services"],
+    queryFn: () => getContainerServices(),
+  })
+
   const domainsQuery = useQuery({
     queryKey: [serviceType === "nginx" ? "nginx-domains" : "apache-domains"],
     queryFn: () => {
@@ -76,6 +84,12 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
       }
       if (selectedServiceIds.length > 0) {
         selectedServiceIds.forEach((id) => scopes.push({ scope_type: "service", scope_id: id }))
+      } else if (serviceType === "container") {
+        if (selectedContainerIds.length > 0) {
+          selectedContainerIds.forEach((id) => scopes.push({ scope_type: "container", scope_id: id }))
+        } else {
+          scopes.push({ scope_type: "all_containers" })
+        }
       } else if (serviceType !== "host") {
         scopes.push({ scope_type: "all_services_of_type" })
       }
@@ -118,6 +132,12 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
   function toggleService(serviceId: number) {
     setSelectedServiceIds((prev) =>
       prev.includes(serviceId) ? prev.filter((id) => id !== serviceId) : [...prev, serviceId]
+    )
+  }
+
+  function toggleContainer(containerId: number) {
+    setSelectedContainerIds((prev) =>
+      prev.includes(containerId) ? prev.filter((id) => id !== containerId) : [...prev, containerId]
     )
   }
 
@@ -184,7 +204,12 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                 >
                   <div className="font-medium">{tpl.name}</div>
                   <div className="text-sm text-muted-foreground mt-1">{tpl.description}</div>
-                  <div className="text-xs text-muted-foreground mt-1">
+                  {tpl.explanation && (
+                    <div className="text-xs text-muted-foreground/70 mt-1.5 italic border-l-2 border-border pl-2">
+                      {tpl.explanation}
+                    </div>
+                  )}
+                  <div className="text-xs text-muted-foreground mt-1.5">
                     Default threshold: {tpl.default_threshold}{tpl.unit}
                   </div>
                 </button>
@@ -205,9 +230,14 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         <div className="bg-card rounded-2xl border border-border p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto">
           <h3 className="font-semibold text-lg mb-1">Configure Alert</h3>
-          <p className="text-sm text-muted-foreground mb-4">
+          <p className="text-sm text-muted-foreground mb-1">
             {selectedTemplate.name} &middot; {selectedTemplate.description}
           </p>
+          {selectedTemplate.explanation && (
+            <p className="text-xs text-muted-foreground/70 mb-4 italic border-l-2 border-border pl-2">
+              {selectedTemplate.explanation}
+            </p>
+          )}
 
           <div className="grid gap-5">
             {/* Hosts */}
@@ -270,8 +300,72 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
               </div>
             </div>
 
-            {/* Services (not for host service type) */}
-            {serviceType !== "host" && (
+            {/* Container picker (container service type) */}
+            {serviceType === "container" && (
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Containers</label>
+                <div className="mt-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowServicePicker(!showServicePicker)}
+                  >
+                    {selectedContainerIds.length === 0
+                      ? "All containers (click to select specific)"
+                      : `Selected ${selectedContainerIds.length} container(s)`}
+                  </Button>
+                  {showServicePicker && (
+                    <div className="mt-2 border border-border rounded-xl p-3 max-h-48 overflow-y-auto bg-background">
+                      {containersQuery.isLoading ? (
+                        <div className="text-sm text-muted-foreground">Loading containers...</div>
+                      ) : containersQuery.data?.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">No containers found.</div>
+                      ) : (
+                        <div className="grid gap-1">
+                          <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedContainerIds.length === 0}
+                              onChange={() => setSelectedContainerIds([])}
+                            />
+                            All Containers
+                          </label>
+                          {containersQuery.data?.map((c) => (
+                            <label
+                              key={c.id}
+                              className="flex items-center gap-2 text-sm cursor-pointer pl-4"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedContainerIds.includes(c.id)}
+                                onChange={() => toggleContainer(c.id)}
+                              />
+                              {c.container_name} ({c.machine_id})
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {selectedContainerIds.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {containersQuery.data?.filter((c) => selectedContainerIds.includes(c.id)).map((c) => (
+                        <span
+                          key={c.id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-xs"
+                        >
+                          {c.container_name}
+                          <button onClick={() => toggleContainer(c.id)} className="text-muted-foreground hover:text-foreground">&times;</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Services (not for host or container service type) */}
+            {serviceType !== "host" && serviceType !== "container" && (
               <div>
                 <label className="text-sm font-medium text-muted-foreground">Services</label>
                 <div className="mt-1.5">
@@ -281,7 +375,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                     onClick={() => setShowServicePicker(!showServicePicker)}
                   >
                     {selectedServiceIds.length === 0
-                      ? `All ${selectedTemplate.name} services (click to select specific)`
+                      ? `All ${serviceType} services (click to select specific)`
                       : `Selected ${selectedServiceIds.length} service(s)`}
                   </Button>
                   {showServicePicker && (

@@ -1,6 +1,6 @@
 .landing {
   position: relative;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .landing::before {
@@ -8,13 +8,14 @@
   position: absolute;
   inset: -20%;
   background:
-    radial-gradient(800px 500px at 20% 20%, rgba(99, 102, 241, 0.35), transparent 60%),
-    radial-gradient(700px 450px at 80% 15%, rgba(168, 85, 247, 0.25), transparent 60%),
-    radial-gradient(900px 600px at 65% 80%, rgba(59, 130, 246, 0.20), transparent 60%);
-  filter: blur(22px);
+    radial-gradient(900px 550px at 20% 15%, rgba(99, 102, 241, 0.30), transparent 60%),
+    radial-gradient(750px 480px at 80% 10%, rgba(168, 85, 247, 0.20), transparent 60%),
+    radial-gradient(1000px 650px at 60% 75%, rgba(59, 130, 246, 0.18), transparent 60%),
+    radial-gradient(600px 400px at 30% 60%, rgba(251, 146, 60, 0.10), transparent 60%);
+  filter: blur(24px);
   opacity: 0.9;
   transform: translate3d(0, 0, 0);
-  animation: landing-float 14s ease-in-out infinite;
+  animation: landing-float 16s ease-in-out infinite;
   pointer-events: none;
 }
 
@@ -22,27 +23,36 @@
   content: "";
   position: absolute;
   inset: 0;
-  background-image: linear-gradient(to right, rgba(148, 163, 184, 0.22) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.18) 1px, transparent 1px);
+  background-image: linear-gradient(to right, rgba(148, 163, 184, 0.20) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.16) 1px, transparent 1px);
   background-size: 48px 48px;
-  opacity: 0.18;
+  opacity: 0.15;
   mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.85), transparent 68%);
   pointer-events: none;
 }
 
 .dark .landing::after {
-  opacity: 0.12;
+  opacity: 0.10;
 }
 
 @keyframes landing-float {
-  0% {
-    transform: translate3d(-1%, -1%, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(1%, 0%, 0) scale(1.03);
-  }
-  100% {
-    transform: translate3d(-1%, -1%, 0) scale(1);
-  }
+  0% { transform: translate3d(-1%, -1%, 0) scale(1); }
+  33% { transform: translate3d(0.5%, 0.5%, 0) scale(1.02); }
+  66% { transform: translate3d(-0.5%, 1%, 0) scale(0.98); }
+  100% { transform: translate3d(-1%, -1%, 0) scale(1); }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px hsl(var(--primary) / 0.3); }
+  50% { box-shadow: 0 0 20px hsl(var(--primary) / 0.5); }
+}

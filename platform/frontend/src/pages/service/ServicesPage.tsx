@@ -273,8 +273,16 @@ const logsRoutes: Record<string, string> = {
 
 function ServiceQuickLinks({ serviceId, serviceName }: { serviceId: number; serviceName: string }) {
   const name = serviceName.toLowerCase()
-  const dashPath = dashboardRoutes[name]
-  const logsPath = logsRoutes[name]
+  const matchRoute = (routes: Record<string, string>) =>
+    Object.entries(routes).find(([key]) => {
+      if (name === key) return true
+      if (name.startsWith(key + "-")) return true
+      if (name.startsWith(key + "_")) return true
+      if (name.startsWith(key) && name.length > key.length && /^\d+$/.test(name.slice(key.length))) return true
+      return false
+    })?.[1]
+  const dashPath = matchRoute(dashboardRoutes)
+  const logsPath = matchRoute(logsRoutes)
   return (
     <>
       {dashPath && (

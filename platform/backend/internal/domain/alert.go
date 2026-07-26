@@ -11,6 +11,7 @@ type AlertRule struct {
 	ServiceType     string `gorm:"type:varchar(30);not null;index" json:"service_type"`
 	TemplateName    string `gorm:"type:varchar(255);not null" json:"template_name"`
 	Description     string `gorm:"type:text" json:"description"`
+	Explanation     string `gorm:"type:text" json:"explanation"`
 	Unit            string `gorm:"type:varchar(20)" json:"unit"`
 	ComparisonOp    string `gorm:"type:varchar(5);default:'>'" json:"comparison_op"`
 	DefaultSeverity string `gorm:"type:varchar(20);default:'warning'" json:"default_severity"`
@@ -22,6 +23,9 @@ type AlertRule struct {
 	// (used by nginx/apache rules that target a single vhost).
 	// Empty means all domains / not applicable.
 	Domain string `gorm:"type:varchar(255)" json:"domain"`
+	// Pool restricts this rule to a specific PHP-FPM pool.
+	// Empty means all pools / not applicable.
+	Pool string `gorm:"type:varchar(255)" json:"pool"`
 
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
@@ -66,6 +70,9 @@ type AlertEvent struct {
 	// Domain stores the virtual-host domain this event is associated with
 	// (empty for host-level rules or rules that target all domains).
 	Domain string `gorm:"type:varchar(255)" json:"domain"`
+	// Pool stores the PHP-FPM pool this event is associated with
+	// (empty for host-level rules or rules that target all pools).
+	Pool string `gorm:"type:varchar(255)" json:"pool"`
 	// MetricString is a human-readable description of the metric (host, service, domain, etc.)
 	MetricString string `gorm:"type:text" json:"metric_string"`
 

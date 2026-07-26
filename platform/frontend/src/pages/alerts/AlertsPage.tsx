@@ -352,23 +352,30 @@ export default function AlertsPage() {
                               <tr key={`detail-${event.id}`} className="bg-secondary/30 border-t border-border">
                                 <td />
                                 <td colSpan={7} className="px-3 py-4">
-                                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-2 text-xs">
-                                    {event.metric_string && (
-                                      <div><span className="text-muted-foreground">Metric:</span> <span className="font-mono text-foreground">{event.metric_string}</span></div>
+                                  <div className="space-y-3">
+                                    {event.rule?.explanation && (
+                                      <div className="text-xs text-muted-foreground/80 italic border-l-2 border-border pl-2.5">
+                                        {event.rule.explanation}
+                                      </div>
                                     )}
-                                    {event.actual_value !== null && event.actual_value !== undefined && (
-                                      <div><span className="text-muted-foreground">Actual:</span> <span className={cn("font-mono", isFiring ? "text-red-600 dark:text-red-400" : "text-foreground")}>{event.actual_value.toFixed(2)}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span></div>
-                                    )}
-                                    {event.threshold && (
-                                      <div><span className="text-muted-foreground">Threshold:</span> <span className="font-mono text-foreground">{event.threshold.threshold}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span></div>
-                                    )}
-                                    <div><span className="text-muted-foreground">Host:</span> <span className="font-mono text-foreground">{event.host_machine_id}</span></div>
-                                    {event.resolved_at && (
-                                      <div><span className="text-muted-foreground">Resolved:</span> <span className="text-green-600 dark:text-green-400">{new Date(event.resolved_at).toLocaleString()}</span></div>
-                                    )}
-                                    {event.acknowledged_by && (
-                                      <div><span className="text-muted-foreground">Acknowledged by:</span> <span className="text-foreground">User #{event.acknowledged_by}</span></div>
-                                    )}
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-2 text-xs">
+                                      {event.metric_string && (
+                                        <div><span className="text-muted-foreground">Metric:</span> <span className="font-mono text-foreground">{event.metric_string}</span></div>
+                                      )}
+                                      {event.actual_value !== null && event.actual_value !== undefined && (
+                                        <div><span className="text-muted-foreground">Actual:</span> <span className={cn("font-mono", isFiring ? "text-red-600 dark:text-red-400" : "text-foreground")}>{event.actual_value.toFixed(2)}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span></div>
+                                      )}
+                                      {event.threshold && (
+                                        <div><span className="text-muted-foreground">Threshold:</span> <span className="font-mono text-foreground">{event.threshold.threshold}{event.rule?.unit ? ` ${event.rule.unit}` : ""}</span></div>
+                                      )}
+                                      <div><span className="text-muted-foreground">Host:</span> <span className="font-mono text-foreground">{event.host_machine_id}</span></div>
+                                      {event.resolved_at && (
+                                        <div><span className="text-muted-foreground">Resolved:</span> <span className="text-green-600 dark:text-green-400">{new Date(event.resolved_at).toLocaleString()}</span></div>
+                                      )}
+                                      {event.acknowledged_by && (
+                                        <div><span className="text-muted-foreground">Acknowledged by:</span> <span className="text-foreground">User #{event.acknowledged_by}</span></div>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
                               </tr>
@@ -427,6 +434,11 @@ export default function AlertsPage() {
                         <td className="px-4 py-3">
                           <div className="font-medium text-foreground">{rule.template_name}</div>
                           <div className="text-xs text-muted-foreground mt-0.5">{rule.description}</div>
+                          {rule.explanation && (
+                            <div className="text-[11px] text-muted-foreground/60 mt-1 italic border-l-2 border-border/50 pl-2 leading-relaxed">
+                              {rule.explanation}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">
                           {rule.domain ? <span><span className="text-muted-foreground">Domain:</span> <span className="font-mono">{rule.domain}</span></span> : <span>{formatScope(rule.scopes)}</span>}

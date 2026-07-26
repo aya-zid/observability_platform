@@ -10,13 +10,15 @@ import (
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/repository"
 )
 
-// evalContext holds a resolved (host, service, domain) tuple for a single evaluation.
+// evalContext holds a resolved (host, service, domain, pool, containerName) tuple for a single evaluation.
 type evalContext struct {
 	hostMachineID string
 	hostname      string
 	serviceID     *uint
 	serviceName   string
 	domain        string
+	pool          string
+	containerName string
 }
 
 // breachKey uniquely identifies a firing condition for dedup & resolution.
@@ -26,23 +28,45 @@ type breachKey struct {
 	hostMachineID string
 	serviceID     uint // 0 means nil
 	domain        string
+	pool          string
+}
+
+var domainScopedTemplates = map[string]bool{
+	"nginx_5xx":             true,
+	"nginx_4xx":             true,
+	"nginx_p99":             true,
+	"nginx_auth_brute_force": true,
+	"nginx_traffic_drop":    true,
+	"apache_5xx":            true,
+	"apache_4xx":            true,
+	"apache_p99":            true,
+}
+
+var poolScopedTemplates = map[string]bool{
+	"phpfpm_processes":           true,
+	"phpfpm_queue_saturation":    true,
+	"phpfpm_slow_requests":       true,
+	"phpfpm_max_children_reached": true,
 }
 
 type AlertEngineService struct {
 	alertRuleRepo *repository.AlertRuleRepository
 	queryBuilder  *AlertQueryBuilder
 	tenantRepo    *repository.TenantRepository
+	discoveryRepo *repository.DiscoveryRepository
 }
 
 func NewAlertEngineService(
 	alertRuleRepo *repository.AlertRuleRepository,
 	queryBuilder *AlertQueryBuilder,
 	tenantRepo *repository.TenantRepository,
+	discoveryRepo *repository.DiscoveryRepository,
 ) *AlertEngineService {
 	return &AlertEngineService{
 		alertRuleRepo: alertRuleRepo,
 		queryBuilder:  queryBuilder,
 		tenantRepo:    tenantRepo,
+		discoveryRepo: discoveryRepo,
 	}
 }
 
@@ -117,13 +141,15 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 		return
 	}
 
-	// Group candidates by (host_machine_id, service_id, domain) so we fetch the
+	// Group candidates by (host_machine_id, service_id, domain, pool) so we fetch the
 	// metric once per host and pick a single winner across all rules.
 	// Domain is critical for nginx/apache rules where each virtual host has its own metric.
+	// Pool is critical for PHP-FPM rules where each pool has its own metric.
 	type hostKey struct {
 		machineID string
 		serviceID uint
 		domain    string
+		pool      string
 	}
 	hostGroups := make(map[hostKey][]evalCandidate)
 	for _, c := range candidates {
@@ -131,7 +157,7 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 		if c.ec.serviceID != nil {
 			svcID = *c.ec.serviceID
 		}
-		key := hostKey{machineID: c.ec.hostMachineID, serviceID: svcID, domain: c.ec.domain}
+		key := hostKey{machineID: c.ec.hostMachineID, serviceID: svcID, domain: c.ec.domain, pool: c.ec.pool}
 		hostGroups[key] = append(hostGroups[key], c)
 	}
 
@@ -205,6 +231,10 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 				if !matchesDomain {
 					continue
 				}
+				matchesPool := fe.Pool == first.ec.pool
+				if !matchesPool {
+					continue
+				}
 
 				if isWinningRule && fe.ThresholdID != nil && *fe.ThresholdID == winner.threshold.ID {
 					// This IS the winning event — keep it alive.
@@ -229,6 +259,7 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 				hostMachineID: first.ec.hostMachineID,
 				serviceID:     svcIDVal,
 				domain:        first.ec.domain,
+				pool:          first.ec.pool,
 			}
 			activeBreaches[key] = true
 
@@ -244,6 +275,9 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 							continue
 						}
 						if fe.Domain != first.ec.domain {
+							continue
+						}
+						if fe.Pool != first.ec.pool {
 							continue
 						}
 						if fe.ThresholdID != nil && *fe.ThresholdID == winner.threshold.ID {
@@ -263,6 +297,7 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 					HostMachineID: first.ec.hostMachineID,
 					ServiceID:     first.ec.serviceID,
 					Domain:        first.ec.domain,
+					Pool:          first.ec.pool,
 					Status:        "firing",
 					TriggeredAt:   time.Now(),
 					ActualValue:   currentValue,
@@ -271,9 +306,9 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 				if err := s.alertRuleRepo.CreateAlertEventCtx(ctx, event); err != nil {
 					log.Printf("[alert-engine] failed to create event for rule %d: %v", winner.rule.ID, err)
 				} else {
-					log.Printf("[alert-engine] FIRED rule=%q template=%q threshold=%.2f value=%.2f host=%s service=%s domain=%s",
+					log.Printf("[alert-engine] FIRED rule=%q template=%q threshold=%.2f value=%.2f host=%s service=%s domain=%s pool=%s",
 						winner.rule.TemplateName, winner.rule.TemplateID, winner.threshold.Threshold,
-						*currentValue, first.ec.hostname, first.ec.serviceName, first.ec.domain)
+						*currentValue, first.ec.hostname, first.ec.serviceName, first.ec.domain, first.ec.pool)
 				}
 			}
 		}
@@ -282,8 +317,92 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 	}
 }
 
+// expandEvalContexts returns the evalContexts for a service,
+// expanding by domain or pool when the rule has no specific value.
+func (s *AlertEngineService) expandEvalContexts(ctx context.Context, rule *domain.AlertRule, svc *domain.DiscoveredService) []evalContext {
+	host, _ := s.alertRuleRepo.FindHostByMachineIDCtx(ctx, svc.MachineID, rule.TenantID)
+	hostname := ""
+	if host != nil {
+		hostname = host.Hostname
+	}
+	svcID := svc.ID
+
+	// Base context: domain & pool come from rule (could be "" meaning "all")
+	base := evalContext{
+		hostMachineID: svc.MachineID,
+		hostname:      hostname,
+		serviceID:     &svcID,
+		serviceName:   svc.ServiceName,
+	}
+
+	if domainScopedTemplates[rule.TemplateID] && rule.Domain == "" {
+		// "All domains" — enumerate enabled vhosts from DB.
+		var domains []string
+		if svc.ServiceName == "nginx" {
+			rows, err := s.discoveryRepo.ListVirtualHostsByServiceCtx(ctx, rule.TenantID, svc.ID)
+			if err == nil {
+				seen := map[string]bool{}
+				for _, row := range rows {
+					if row.Enabled {
+						seen[row.Domain] = true
+					}
+				}
+				for d := range seen {
+					domains = append(domains, d)
+				}
+			}
+		} else if svc.ServiceName == "apache" {
+			rows, err := s.discoveryRepo.ListApacheVirtualHostsByServiceCtx(ctx, rule.TenantID, svc.ID)
+			if err == nil {
+				seen := map[string]bool{}
+				for _, row := range rows {
+					if row.Enabled {
+						seen[row.Domain] = true
+					}
+				}
+				for d := range seen {
+					domains = append(domains, d)
+				}
+			}
+		}
+		if len(domains) == 0 {
+			log.Printf("[alert-engine] no enabled vhosts for rule %d service %q — skipping domain expansion",
+				rule.ID, svc.ServiceName)
+			return nil
+		}
+		result := make([]evalContext, 0, len(domains))
+		for _, d := range domains {
+			ec := base
+			ec.domain = d
+			result = append(result, ec)
+		}
+		return result
+	}
+
+	if poolScopedTemplates[rule.TemplateID] && rule.Pool == "" {
+		// "All pools" — discover pools from VM metrics.
+		pools, err := s.queryBuilder.DiscoverPHPFPMPools(ctx, rule.TenantID, svc.MachineID)
+		if err != nil || len(pools) == 0 {
+			log.Printf("[alert-engine] no pools discovered for rule %d service %q (err=%v) — skipping pool expansion",
+				rule.ID, svc.ServiceName, err)
+			return nil
+		}
+		result := make([]evalContext, 0, len(pools))
+		for _, p := range pools {
+			ec := base
+			ec.pool = p
+			result = append(result, ec)
+		}
+		return result
+	}
+
+	// No expansion needed — use rule.Domain/rule.Pool directly.
+	base.domain = rule.Domain
+	base.pool = rule.Pool
+	return []evalContext{base}
+}
+
 // resolveContexts expands the rule's scopes into concrete evalContexts.
-// For host templates it resolves host scopes; for service templates it resolves service scopes.
 func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.AlertRule) []evalContext {
 	isHostTemplate := rule.ServiceType == "host"
 	var contexts []evalContext
@@ -336,19 +455,7 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 				continue
 			}
 			for _, svc := range services {
-				host, _ := s.alertRuleRepo.FindHostByMachineIDCtx(ctx, svc.MachineID, rule.TenantID)
-				hostname := ""
-				if host != nil {
-					hostname = host.Hostname
-				}
-				svcID := svc.ID
-				contexts = append(contexts, evalContext{
-					hostMachineID: svc.MachineID,
-					hostname:      hostname,
-					serviceID:     &svcID,
-					serviceName:   svc.ServiceName,
-					domain:        rule.Domain,
-				})
+				contexts = append(contexts, s.expandEvalContexts(ctx, rule, &svc)...)
 			}
 
 		case "service":
@@ -366,18 +473,54 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 			if svc == nil {
 				continue
 			}
-			host, _ := s.alertRuleRepo.FindHostByMachineIDCtx(ctx, svc.MachineID, rule.TenantID)
+			contexts = append(contexts, s.expandEvalContexts(ctx, rule, svc)...)
+
+		case "all_containers":
+			if isHostTemplate {
+				continue
+			}
+			containers, err := s.discoveryRepo.ListContainerServicesByTenantCtx(ctx, rule.TenantID)
+			if err != nil {
+				log.Printf("[alert-engine] list containers for tenant %d: %v", rule.TenantID, err)
+				continue
+			}
+			for _, c := range containers {
+				host, _ := s.alertRuleRepo.FindHostByMachineIDCtx(ctx, c.MachineID, rule.TenantID)
+				hostname := ""
+				if host != nil {
+					hostname = host.Hostname
+				}
+				contexts = append(contexts, evalContext{
+					hostMachineID: c.MachineID,
+					hostname:      hostname,
+					containerName: c.ContainerName,
+				})
+			}
+
+		case "container":
+			if isHostTemplate {
+				continue
+			}
+			if scope.ScopeID == nil {
+				continue
+			}
+			container, err := s.discoveryRepo.FindContainerServiceByIDTenantCtx(ctx, rule.TenantID, *scope.ScopeID)
+			if err != nil {
+				log.Printf("[alert-engine] find container %d: %v", *scope.ScopeID, err)
+				continue
+			}
+			if container == nil {
+				continue
+			}
+			host, _ := s.alertRuleRepo.FindHostByMachineIDCtx(ctx, container.MachineID, rule.TenantID)
 			hostname := ""
 			if host != nil {
 				hostname = host.Hostname
 			}
-			svcID := svc.ID
 			contexts = append(contexts, evalContext{
-				hostMachineID: svc.MachineID,
+				hostMachineID: container.MachineID,
 				hostname:      hostname,
-				serviceID:     &svcID,
-				serviceName:   svc.ServiceName,
-				domain:        rule.Domain,
+				containerName: container.ContainerName,
 			})
 		}
 	}
@@ -387,7 +530,7 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 // fetchMetric builds the appropriate query and executes it, returning the
 // current metric value and a human-readable description string.
 func (s *AlertEngineService) fetchMetric(ctx context.Context, rule *domain.AlertRule, ec *evalContext, forDuration string) (*float64, string) {
-	bq, err := s.queryBuilder.BuildQuery(rule.TemplateID, ec.hostMachineID, ec.serviceName, ec.domain, forDuration)
+	bq, err := s.queryBuilder.BuildQuery(rule.TemplateID, ec.hostMachineID, ec.serviceName, ec.domain, ec.pool, ec.containerName, forDuration)
 	if err != nil {
 		log.Printf("[alert-engine] build query for rule %d: %v", rule.ID, err)
 		return nil, ""
@@ -421,6 +564,12 @@ func (s *AlertEngineService) fetchMetric(ctx context.Context, rule *domain.Alert
 	}
 	if ec.domain != "" {
 		metricString += fmt.Sprintf(" domain=%s", ec.domain)
+	}
+	if ec.pool != "" {
+		metricString += fmt.Sprintf(" pool=%s", ec.pool)
+	}
+	if ec.containerName != "" {
+		metricString += fmt.Sprintf(" container=%s", ec.containerName)
 	}
 	metricString += fmt.Sprintf(" value=%.2f%s", *value, rule.Unit)
 
@@ -472,6 +621,7 @@ func (s *AlertEngineService) resolveRecovered(ctx context.Context, activeBreache
 				hostMachineID: ev.HostMachineID,
 				serviceID:     svcID,
 				domain:        ev.Domain,
+				pool:          ev.Pool,
 			}
 			if !activeBreaches[key] {
 				if err := s.alertRuleRepo.ResolveEventCtx(ctx, ev.ID); err != nil {

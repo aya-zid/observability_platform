@@ -56,7 +56,6 @@ export const router = createBrowserRouter([
       {
         element: <AppLayout />,
         children: [
-          { index: true, element: <Navigate to="/overview" replace /> },
           { path: "/overview", element: <OverviewPage /> },
           { path: "/get-started", element: <GetStartedPage /> },
           { path: "/alerts", element: <AlertsPage /> },

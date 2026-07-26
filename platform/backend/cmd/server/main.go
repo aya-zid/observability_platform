@@ -36,7 +36,6 @@ func main() {
 		&domain.ServiceVulnerability{},
 		&domain.NginxVirtualHost{},
 		&domain.ApacheVirtualHost{},
-		&domain.CorrelationFinding{},
 		&domain.Invitation{},
 		&domain.NotificationChannel{},
 		&domain.Plan{},
@@ -46,6 +45,8 @@ func main() {
 		&domain.AlertRuleScope{},
 		&domain.AlertThreshold{},
 		&domain.AlertEvent{},
+		&domain.Incident{},
+		&domain.IncidentSignal{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
@@ -85,16 +86,10 @@ func main() {
 	// ── Alert engine ─────────────────────────────────────────────────────────
 	alertRuleRepo := repository.NewAlertRuleRepository(infrastructure.DB)
 	tenantRepo := repository.NewTenantRepository(infrastructure.DB)
+	discoveryRepo := repository.NewDiscoveryRepository(infrastructure.DB)
 	queryBuilder := service.NewAlertQueryBuilder(cfg)
-	alertEngine := service.NewAlertEngineService(alertRuleRepo, queryBuilder, tenantRepo)
+	alertEngine := service.NewAlertEngineService(alertRuleRepo, queryBuilder, tenantRepo, discoveryRepo)
 	go alertEngine.StartEvaluator(context.Background())
-
-	// ── Correlation worker ────────────────────────────────────────────────────
-	hostRepo := repository.NewHostRepository(infrastructure.DB)
-	discRepo := repository.NewDiscoveryRepository(infrastructure.DB)
-	correlationFindingRepo := repository.NewCorrelationFindingRepository(infrastructure.DB)
-	correlationWorker := service.NewCorrelationWorker(cfg, hostRepo, discRepo, tenantRepo, correlationFindingRepo)
-	go correlationWorker.StartEvaluator(context.Background())
 
 	// ── Start notification dispatcher ─────────────────────────────────────────
 	notifRepo := repository.NewNotificationChannelRepository(infrastructure.DB)

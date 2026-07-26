@@ -26,6 +26,7 @@ type templateDTO struct {
 	ServiceType        string  `json:"service_type"`
 	Name               string  `json:"name"`
 	Description        string  `json:"description"`
+	Explanation        string  `json:"explanation"`
 	Unit               string  `json:"unit"`
 	DefaultThreshold   float64 `json:"default_threshold"`
 	ComparisonOp       string  `json:"comparison_op"`
@@ -39,6 +40,7 @@ func toTemplateDTO(t domain.AlertTemplate) templateDTO {
 		ServiceType:        t.ServiceType,
 		Name:               t.Name,
 		Description:        t.Description,
+		Explanation:        t.Explanation,
 		Unit:               t.Unit,
 		DefaultThreshold:   t.DefaultThreshold,
 		ComparisonOp:       t.ComparisonOp,
@@ -90,6 +92,7 @@ type createRuleRequest struct {
 
 	ForDuration string `json:"for_duration"`
 	Domain      string `json:"domain"`
+	Pool        string `json:"pool"`
 }
 
 func (h *AlertRulesHandler) CreateRule(c echo.Context) error {
@@ -142,12 +145,14 @@ func (h *AlertRulesHandler) CreateRule(c echo.Context) error {
 		ServiceType:     tpl.ServiceType,
 		TemplateName:    tpl.Name,
 		Description:     tpl.Description,
+		Explanation:     tpl.Explanation,
 		Unit:            tpl.Unit,
 		ComparisonOp:    tpl.ComparisonOp,
 		DefaultSeverity: tpl.DefaultSeverity,
 		ForDuration:     req.ForDuration,
 		IsEnabled:       true,
 		Domain:          req.Domain,
+		Pool:            req.Pool,
 		Scopes:          scopes,
 		Thresholds:      thresholds,
 	}
@@ -183,6 +188,7 @@ type updateRuleRequest struct {
 	IsEnabled   *bool                `json:"is_enabled"`
 	ForDuration *string              `json:"for_duration"`
 	Domain      *string              `json:"domain"`
+	Pool        *string              `json:"pool"`
 }
 
 func (h *AlertRulesHandler) UpdateRule(c echo.Context) error {
@@ -207,6 +213,9 @@ func (h *AlertRulesHandler) UpdateRule(c echo.Context) error {
 	}
 	if req.Domain != nil {
 		updates["domain"] = *req.Domain
+	}
+	if req.Pool != nil {
+		updates["pool"] = *req.Pool
 	}
 
 	if len(updates) > 0 {

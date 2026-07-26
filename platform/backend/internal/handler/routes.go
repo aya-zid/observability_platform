@@ -122,9 +122,7 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 		tenantRepo,
 	)
 
-	correlationFindingRepo := repository.NewCorrelationFindingRepository(infrastructure.DB)
-	issueDetectionService := service.NewIssueDetectionService(cfg)
-	overviewService := service.NewOverviewService(cfg, infrastructure.Redis, hostRepo, discoveryRepo, correlationFindingRepo, issueDetectionService)
+	overviewService := service.NewOverviewService(cfg, infrastructure.Redis, hostRepo, discoveryRepo)
 	overviewHandler := NewOverviewHandler(overviewService, tenantRepo)
 
 	hostDashboardService := service.NewHostDashboardService(cfg, infrastructure.Redis)

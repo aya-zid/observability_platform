@@ -20,6 +20,7 @@ export type AlertTemplate = {
   service_type: string
   name: string
   description: string
+  explanation: string
   unit: string
   default_threshold: number
   comparison_op: string
@@ -50,6 +51,7 @@ export type AlertRule = {
   service_type: string
   template_name: string
   description: string
+  explanation: string
   unit: string
   comparison_op: string
   default_severity: string

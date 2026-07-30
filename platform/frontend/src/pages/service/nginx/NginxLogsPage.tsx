@@ -290,15 +290,13 @@ export function NginxLogsPage() {
   if (!serviceQuery.data) return <div className="p-6 text-sm text-red-600">Nginx service not found for id {id}.</div>
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">Nginx Logs</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Service: <span className="font-mono font-semibold">{serviceName}</span>
-          </p>
+    <div className="space-y-3 p-4 md:p-6">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold">Nginx Logs</h1>
+          <span className="text-xs text-muted-foreground">· {serviceName}</span>
         </div>
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <TimeRangeSelector selected={timeRange} onChange={(r) => {
             setTimeRange(r)
             setPages([])
@@ -308,74 +306,58 @@ export function NginxLogsPage() {
           }} />
           <Link
             to={buildDomainHref(`/services/nginx-dashboard/${id}`, selectedDomain || null)}
-            className="inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+            className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
           >
-            ← Back to Dashboard
+            Dashboard
           </Link>
           <button
             type="button"
             onClick={() => refetch()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-muted px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted/80"
+            className="inline-flex items-center gap-1 rounded-md bg-muted px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted/80"
           >
-            <RefreshCw className={`h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3 w-3 ${isRefetching ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex flex-col gap-3">
-          <div>
-            <p className="text-sm font-semibold">Domains</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Switch tabs to inspect logs for one Nginx domain at a time.
-            </p>
-          </div>
-          {domainsQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading domains...</p>
-          ) : domains.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No enabled Nginx domains found yet.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {domains.map((domain) => {
-                const active = domain === selectedDomain
-                return (
-                  <button
-                    key={domain}
-                    type="button"
-                    onClick={() => setSearchParams({ domain })}
-                    className={cn(
-                      'rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
-                      active
-                        ? 'border-blue-600 bg-blue-600 text-white'
-                        : 'border-border bg-muted/50 text-foreground hover:bg-muted',
-                    )}
-                  >
-                    <span className="font-mono">{domain}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
+      {domains.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {domains.map((domain) => {
+            const active = domain === selectedDomain
+            return (
+              <button
+                key={domain}
+                type="button"
+                onClick={() => setSearchParams({ domain })}
+                className={cn(
+                  'rounded-md border px-2 py-0.5 text-xs font-medium transition-colors',
+                  active
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-muted/50 text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <span className="font-mono">{domain}</span>
+              </button>
+            )
+          })}
         </div>
-      </div>
+      ) : domainsQuery.isLoading ? (
+        <p className="text-xs text-muted-foreground">Loading domains...</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">No enabled Nginx domains found yet.</p>
+      )}
 
-      {selectedDomain ? (
-        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          Active domain: <span className="font-mono font-semibold text-foreground">{selectedDomain}</span>
-        </div>
-      ) : null}
-
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">Log type:</span>
-        <div className="flex gap-1 rounded-lg border border-border bg-muted p-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">Log type:</span>
+        <div className="flex gap-0.5 rounded-md border border-border bg-muted p-0.5">
           {(['access', 'error'] as const).map((type) => (
             <button
               key={type}
               type="button"
               onClick={() => setLogType(type)}
               className={cn(
-                'px-4 py-1.5 rounded text-sm font-medium transition-colors capitalize',
+                'px-2.5 py-0.5 rounded text-xs font-medium transition-colors capitalize',
                 logType === type
                   ? type === 'error'
                     ? 'bg-red-600 text-white'
@@ -383,50 +365,43 @@ export function NginxLogsPage() {
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              {type === 'access' ? '📋 Access Logs' : '🔴 Error Logs'}
+              {type === 'access' ? 'Access Logs' : 'Error Logs'}
             </button>
           ))}
         </div>
       </div>
 
       {logType === 'error' && (
-        <div className="space-y-4">
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-            <p className="font-semibold">🔴 Nginx Error Logs</p>
-            <p className="mt-0.5 text-xs">
-              Raw unstructured error log lines — upstream failures, connection errors, config issues.
-              Newest first · auto-refresh 30s · up to 200 lines shown.
-            </p>
-          </div>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Raw error log lines — newest first · auto-refresh 30s · up to 200 lines.
+          </p>
 
           {errorLogsQuery.isFetching ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+            <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
               Loading error logs...
             </div>
           ) : errorLogsQuery.isError ? (
-            <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-700">
               Failed to load error logs. The error log collection may not be enabled for this domain yet.
             </div>
           ) : !errorLogsQuery.data?.lines?.length ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-              No error logs found for this time range — that's a good sign! 🎉
+            <div className="flex items-center justify-center py-6 text-xs text-muted-foreground">
+              No error logs found for this time range.
             </div>
           ) : (
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="border-b border-border p-4 flex items-center justify-between">
-                <h3 className="font-semibold">
-                  Error Log Lines ({errorLogsQuery.data.lines.length} most recent)
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  Last updated {new Date().toLocaleTimeString()}
-                </p>
+              <div className="border-b border-border px-3 py-1.5 flex items-center justify-between">
+                <span className="text-xs font-semibold">
+                  Error Log Lines ({errorLogsQuery.data.lines.length})
+                </span>
               </div>
-              <div className="max-h-[600px] overflow-y-auto">
+              <div className="max-h-[400px] overflow-y-auto">
                 {errorLogsQuery.data.lines.map((line, idx) => (
                   <div
                     key={idx}
                     className={cn(
-                      'border-b border-border/50 px-4 py-2 font-mono text-xs leading-relaxed',
+                      'border-b border-border/50 px-3 py-1 font-mono text-xs leading-relaxed',
                       line.includes('[error]') || line.includes('[crit]') || line.includes('[alert]') || line.includes('[emerg]')
                         ? 'text-red-700 dark:text-red-400 bg-red-50/30 dark:bg-red-900/10'
                         : line.includes('[warn]')
@@ -460,25 +435,22 @@ export function NginxLogsPage() {
           />
 
           <div className="rounded-lg border border-border bg-card">
-            <div className="border-b border-b-border p-4 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold">
-                  Log Entries ({filteredEntries.length} of {totalLoaded} loaded) — newest first
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">Click a row to expand and view full details</p>
-              </div>
+            <div className="border-b border-b-border px-3 py-1.5 flex items-center justify-between">
+              <span className="text-xs font-semibold">
+                Log Entries ({filteredEntries.length} of {totalLoaded} loaded)
+              </span>
               {pages.length > 1 && (
-                <p className="text-xs text-muted-foreground">{pages.length} pages × {PAGE_SIZE} entries</p>
+                <span className="text-xs text-muted-foreground">{pages.length} pages × {PAGE_SIZE} entries</span>
               )}
             </div>
 
-            <div className="space-y-0 max-h-[600px] overflow-y-auto">
+            <div className="space-y-0 max-h-[500px] overflow-y-auto">
               {initialLoading ? (
-                <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+                <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
                   Loading logs...
                 </div>
               ) : filteredEntries.length === 0 ? (
-                <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+                <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
                   No logs match the selected filters
                 </div>
               ) : (
@@ -495,36 +467,24 @@ export function NginxLogsPage() {
             </div>
 
             {!initialLoading && totalLoaded > 0 && (
-              <div className="border-t border-t-border p-4 flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">
+              <div className="border-t border-t-border px-3 py-1.5 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
                   {hasMore
-                    ? `Showing ${totalLoaded} most recent entries. Click to load older entries.`
-                    : `All ${totalLoaded} entries loaded for this time range.`}
-                </p>
+                    ? `Showing ${totalLoaded} most recent entries.`
+                    : `All ${totalLoaded} entries loaded.`}
+                </span>
                 {hasMore && olderCursor !== null && (
                   <button
                     type="button"
                     onClick={loadOlder}
                     disabled={isLoadingOlder}
-                    className="rounded-md bg-muted px-4 py-2 text-sm font-semibold hover:bg-muted/80 disabled:opacity-50"
+                    className="rounded-md bg-muted px-2.5 py-1 text-xs font-semibold hover:bg-muted/80 disabled:opacity-50"
                   >
-                    {isLoadingOlder ? 'Loading...' : `Load ${PAGE_SIZE} older entries`}
+                    {isLoadingOlder ? 'Loading...' : `Load ${PAGE_SIZE} older`}
                   </button>
                 )}
               </div>
             )}
-          </div>
-
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
-            <p className="mb-1 font-semibold">💡 Filter Tips</p>
-            <ul className="list-inside space-y-1 text-xs">
-              <li>• Logs are shown newest-first. Use "Load older entries" to page backward in time.</li>
-              <li>• Select HTTP method to filter by GET, POST, PUT, DELETE, etc.</li>
-              <li>• Filter by status code to find errors (4xx, 5xx) or successes (2xx)</li>
-              <li>• Use path search to find requests to specific endpoints</li>
-              <li>• Use IP search to filter by client IP address or subnet prefix</li>
-              <li>• Logs auto-refresh every 15 seconds (newest entries only)</li>
-            </ul>
           </div>
         </>
       )}

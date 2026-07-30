@@ -23,7 +23,7 @@ export function AIInsightPanel({ overview }: { overview: OverviewResponse }) {
         hostname: f.hostname,
         message: f.message,
       })),
-      issues: (overview.diagnosed_issues ?? []).map((i) => ({
+      issues: (overview.issues ?? []).map((i) => ({
         hostname: i.hostname,
         service: i.service,
         issue: i.diagnosis,
@@ -74,7 +74,7 @@ export function AIInsightPanel({ overview }: { overview: OverviewResponse }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="font-medium">AI Insight</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p className="mt-0.5 text-sm text-muted-foreground">
             Generate an operational summary from current telemetry data
           </p>
         </div>
@@ -95,7 +95,7 @@ export function AIInsightPanel({ overview }: { overview: OverviewResponse }) {
       ) : null}
 
       {error ? (
-        <div className="mt-4 rounded-md border border-red-200 bg-red-50/50 p-3 text-xs text-red-600 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-400">
+        <div className="mt-4 rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-400">
           {error}
         </div>
       ) : null}

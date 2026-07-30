@@ -33,7 +33,7 @@ export function ChartError({ title, message }: { title: string; message: string 
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20 p-4 h-[270px] flex flex-col">
       <h3 className="mb-2 font-semibold text-sm">{title}</h3>
-      <p className="text-xs text-red-600 dark:text-red-400">{message}</p>
+      <p className="text-sm text-red-600 dark:text-red-400">{message}</p>
     </div>
   )
 }

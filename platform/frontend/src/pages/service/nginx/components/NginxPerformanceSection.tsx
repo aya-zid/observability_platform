@@ -136,7 +136,7 @@ function SectionCard({
     <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
       <div className="mb-4 flex flex-col gap-1">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        {subtitle ? <p className="text-xs text-muted-foreground">{subtitle}</p> : null}
+        {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
       </div>
       {children}
     </div>
@@ -195,7 +195,7 @@ function HeatmapChart({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
         <span>Click a path row to highlight it.</span>
         {selectedPath ? (
           <button
@@ -215,7 +215,7 @@ function HeatmapChart({
         >
           <div />
           {heatmap.buckets.map((bucket) => (
-            <div key={bucket} className="text-center text-[11px] text-muted-foreground">
+            <div key={bucket} className="text-center text-sm text-muted-foreground">
               {formatBucketLabel(bucket)}
             </div>
           ))}
@@ -228,7 +228,7 @@ function HeatmapChart({
                   type="button"
                   onClick={() => onSelectPath(isSelected ? null : path)}
                   className={cn(
-                    'truncate rounded-md px-3 py-2 text-left font-mono text-xs transition-colors',
+                    'truncate rounded-md px-3 py-2 text-left font-mono text-sm transition-colors',
                     isSelected ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'hover:bg-muted',
                   )}
                   title={path}
@@ -241,7 +241,7 @@ function HeatmapChart({
                   return (
                     <div
                       key={`${path}-${bucketIndex}`}
-                      className="flex h-11 flex-col items-center justify-center rounded-md text-[10px] font-semibold leading-tight text-slate-950"
+                      className="flex h-11 flex-col items-center justify-center rounded-md text-sm font-semibold leading-tight text-slate-950"
                       style={{ backgroundColor: heatColor(value, maxValue) }}
                       title={`${path}\n${heatmap.buckets[bucketIndex]}\nP95 ${value > 0 ? formatMs(value) : 'No data'}\nTotal requests in this bucket: ${formatNumber(count, 0)}\nRequests inside P95: ${formatNumber(p95Count, 0)}`}
                     >
@@ -260,7 +260,7 @@ function HeatmapChart({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
         <span className="font-medium">P95 RT scale</span>
         <div className="h-2 w-36 rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#f59e0b_50%,#ef4444_100%)]" />
         <span>0ms</span>
@@ -430,7 +430,7 @@ export function NginxRTDistributionChart({
         })}
       </svg>
 
-      <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
+      <div className="mt-3 flex flex-wrap gap-4 text-sm text-muted-foreground">
         <span>Each status group contains Avg, P50, P95, and P99 bars.</span>
         <span>Only percentile bars show request counts; Avg does not repeat the total.</span>
         <span>Shared Y-axis = response time in ms.</span>
@@ -452,16 +452,16 @@ export function NginxRTDistributionChart({
                 {group.breakdown.map(([code, count]) => (
                   <div key={`${group.key}-${code}`} className="rounded-md border border-border/50 bg-background/50 p-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-foreground">
+                      <span className="text-sm font-semibold text-foreground">
                         Status <span className="font-mono" style={{ color: group.color }}>{code}</span>
                       </span>
-                      <span className="text-xs font-medium text-muted-foreground">{formatNumber(count, 0)} req</span>
+                      <span className="text-sm font-medium text-muted-foreground">{formatNumber(count, 0)} req</span>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-xs text-muted-foreground">No status details</div>
+              <div className="text-sm text-muted-foreground">No status details</div>
             )}
           </div>
         ))}
@@ -535,7 +535,7 @@ export function NginxPerformanceSection({ id, domain }: Props) {
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <label className="flex flex-col gap-1 text-sm text-muted-foreground">
               <span>Performance date</span>
               <input
                 value={selectedDate}
@@ -547,7 +547,7 @@ export function NginxPerformanceSection({ id, domain }: Props) {
                 )}
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <label className="flex flex-col gap-1 text-sm text-muted-foreground">
               <span>Performance hour</span>
               <select
                 value={selectedHour?.value ?? ''}
@@ -562,7 +562,7 @@ export function NginxPerformanceSection({ id, domain }: Props) {
                 ))}
               </select>
             </label>
-            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
               Domain: <span className="font-mono text-foreground">{domain}</span>
             </div>
           </div>

@@ -63,7 +63,7 @@ export default function OrgSettingsPage() {
         ) : (
           <div className="grid gap-6 md:grid-cols-2">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <label className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 Company Name
               </label>
               <input
@@ -73,10 +73,10 @@ export default function OrgSettingsPage() {
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder="Your company"
               />
-              <p className="text-xs text-muted-foreground">Used for branding and notifications.</p>
+              <p className="text-sm text-muted-foreground">Used for branding and notifications.</p>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <label className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 Contact Email
               </label>
               <input
@@ -85,10 +85,10 @@ export default function OrgSettingsPage() {
                 disabled
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm opacity-60 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              <p className="text-xs text-muted-foreground">Primary contact for billing and alerts.</p>
+              <p className="text-sm text-muted-foreground">Primary contact for billing and alerts.</p>
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <label className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
                 Timezone
               </label>
               <select
@@ -100,7 +100,7 @@ export default function OrgSettingsPage() {
                   <option key={tz} value={tz}>{tz}</option>
                 ))}
               </select>
-              <p className="text-xs text-muted-foreground">Used for time displays across the platform.</p>
+              <p className="text-sm text-muted-foreground">Used for time displays across the platform.</p>
             </div>
           </div>
         )}
@@ -138,7 +138,7 @@ export default function OrgSettingsPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-medium text-foreground">Delete organization</div>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-sm text-muted-foreground mt-0.5">
               Permanently delete your organization and all associated data.
             </p>
           </div>
@@ -146,7 +146,7 @@ export default function OrgSettingsPage() {
             Delete
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground mt-2">Coming soon.</p>
+        <p className="text-sm text-muted-foreground mt-2">Coming soon.</p>
       </section>
     </div>
   )

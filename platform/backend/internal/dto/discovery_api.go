@@ -34,6 +34,8 @@ type DiscoveryServiceListItem struct {
 	VulnScanSupported  bool   `json:"vuln_scan_supported"`
 	VulnScanStatus     string `json:"vuln_scan_status"`
 	LastVulnScanAt     string `json:"last_vuln_scan_at,omitempty"`
+	LastSeenAt         string `json:"last_seen_at"`
+	Status             string `json:"status"`
 }
 
 type DiscoveryServiceDetailResponse struct {
@@ -67,6 +69,8 @@ type DiscoveryServiceDetailResponse struct {
 	Catalog                  *catalog.ServiceDef            `json:"catalog,omitempty"`
 	NginxVirtualHosts        []WebServerVirtualHostResponse `json:"nginx_virtual_hosts,omitempty"`
 	ApacheVirtualHosts       []WebServerVirtualHostResponse `json:"apache_virtual_hosts,omitempty"`
+	LastSeenAt               string                         `json:"last_seen_at"`
+	Status                   string                         `json:"status"`
 }
 
 // WebServerVirtualHostResponse represents a merged virtual host (one per domain)
@@ -104,6 +108,8 @@ type ContainerServiceListItem struct {
 	LogCollectionOn    bool   `json:"log_collection_on"`
 	MetricCollectionOn bool   `json:"metric_collection_on"`
 	Hostname           string `json:"hostname,omitempty"`
+	LastSeenAt         string `json:"last_seen_at"`
+	Status             string `json:"status"`
 }
 
 type ContainerServiceDetailResponse struct {
@@ -115,6 +121,8 @@ type ContainerServiceDetailResponse struct {
 	ContainerImage     string `json:"container_image,omitempty"`
 	LogCollectionOn    bool   `json:"log_collection_on"`
 	MetricCollectionOn bool   `json:"metric_collection_on"`
+	LastSeenAt         string `json:"last_seen_at"`
+	Status             string `json:"status"`
 }
 
 type UpdateCollectionRequest struct {

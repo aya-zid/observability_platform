@@ -7,7 +7,12 @@ export type GlobalHealth = {
   services_degraded: number
   services_down: number
   active_signals: number
-  open_findings: number
+  active_critical?: number
+  active_warning?: number
+  containers_healthy?: number
+  containers_total?: number
+  cve_exposure?: number
+  open_findings?: number
 }
 
 export type ServiceChip = {
@@ -73,6 +78,38 @@ export type Finding = {
   duration: string
 }
 
+export type IncidentMember = {
+  rule_id: number
+  template_id: string
+  rule_name: string
+  service_name?: string
+  domain?: string
+  pool?: string
+  role: "root" | "symptom" | "standalone"
+  severity: string
+  actual_value?: number
+  status: string
+  since: string
+  resolved_at?: string
+  investigate_url: string
+}
+
+export type IncidentCard = {
+  id: string
+  host_machine_id: string
+  hostname: string
+  category: "performance" | "security"
+  case_id: number
+  status: string
+  title: string
+  narrative: string
+  severity: string
+  members: IncidentMember[]
+  firing_since: string
+  resolved_at?: string
+  enrichments?: string[]
+}
+
 export type TimelineEvent = {
   timestamp: string
   hostname: string
@@ -85,31 +122,17 @@ export type TimelineData = {
   events: TimelineEvent[]
 }
 
-export type DepNode = {
-  id: string
-  label: string
-  status: string
-  type: string
-}
-
-export type DepEdge = {
-  source: string
-  target: string
-  status: string
-}
-
-export type DepGraphData = {
-  nodes: DepNode[]
-  edges: DepEdge[]
-}
-
 export type OverviewResponse = {
   global: GlobalHealth
+  incidents?: IncidentCard[]
   hosts: HostOverview[]
-  issues: DiagnosedIssue[]
-  findings: Finding[]
+  issues?: DiagnosedIssue[]
+  findings?: Finding[]
   timeline: TimelineData
-  dep_graph: DepGraphData
+}
+
+export async function dismissIncident(id: string): Promise<void> {
+  await client.post(`/api/incidents/${encodeURIComponent(id)}/dismiss`)
 }
 
 export async function getOverview(timelineStart?: number, timelineEnd?: number): Promise<OverviewResponse> {

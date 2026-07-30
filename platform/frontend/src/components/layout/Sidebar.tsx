@@ -3,16 +3,18 @@ import { NavLink, useLocation } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
   LayoutDashboard, Bell, Server, Compass, Box, Settings, User,
-  ChevronLeft, ChevronRight, Sun, Moon, Activity, Rocket,
+  ChevronLeft, ChevronRight, Sun, Moon, Activity, Rocket, Languages, BookOpen,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/store/themeStore"
+import { useTranslation } from "@/i18n/LanguageContext"
 import { getAlertEvents } from "@/api/alerts"
 
 const navItems = [
   { to: "/overview", icon: LayoutDashboard, label: "Overview", end: true },
   { to: "/get-started", icon: Rocket, label: "Get Started" },
+  { to: "/docs", icon: BookOpen, label: "Documentation" },
   { to: "/alerts", icon: Bell, label: "Alerts" },
   { to: "/hosts", icon: Server, label: "Hosts" },
   { to: "/services", icon: Compass, label: "Services" },
@@ -24,6 +26,7 @@ export default function Sidebar() {
   const location = useLocation()
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggle)
+  const { lang, setLang } = useTranslation()
 
   const firingCount = useQuery({
     queryKey: ["alert-events", "sidebar"],
@@ -56,10 +59,10 @@ export default function Sidebar() {
         </div>
         {!collapsed && (
           <div className="leading-tight">
-            <div className="text-[13px] font-bold text-sidebar-foreground tracking-tight">
-               <span className="text-sidebar-accent">Media</span><span className="text-sidebar-primary">net</span>
+            <div className="text-base font-bold text-sidebar-foreground tracking-tight">
+               <span className="text-sidebar-accent">Media</span><span className="text-sidebar-primary">Net</span>
             </div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/65">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/50 font-semibold">
               Observability
             </div>
           </div>
@@ -135,6 +138,16 @@ export default function Sidebar() {
           {theme === "dark" ? <Sun className="w-4 h-4 shrink-0" /> : <Moon className="w-4 h-4 shrink-0" />}
           {!collapsed && (
             <span className="font-medium">{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setLang(lang === "en" ? "fr" : "en")}
+          title={collapsed ? (lang === "en" ? "Français" : "English") : undefined}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/10 border-l-2 border-transparent transition-colors"
+        >
+          <Languages className="w-4 h-4 shrink-0" />
+          {!collapsed && (
+            <span className="font-medium">{lang === "en" ? "Français" : "English"}</span>
           )}
         </button>
       </div>

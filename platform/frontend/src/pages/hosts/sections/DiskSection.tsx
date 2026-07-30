@@ -51,16 +51,16 @@ export function DiskSection({ machineId, params }: Props) {
   }, [diskSpace])
 
   return (
-    <div className="grid gap-6">
-      <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
         <LineChartCard title="Disk Usage by Mountpoint" data={diskUtil} lines={diskUtilLines} loading={query.isLoading} />
         <LineChartCard title="Disk Queue Depth" data={diskQueue} lines={[{ dataKey: "value", color: "#f59e0b", name: "Pending Ops" }]} loading={query.isLoading} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         <StackedAreaCard title="Disk I/O Throughput" data={diskIO} areas={IO_DIR_AREAS} loading={query.isLoading} />
         <StackedAreaCard title="Disk I/O Operations" data={diskOps} areas={IO_DIR_AREAS} loading={query.isLoading} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-3">
         <LineChartCard title="Avg I/O Latency" data={diskLatency} lines={[
           { dataKey: "read", color: "#3b82f6", name: "Read (ms)" },
           { dataKey: "write", color: "#f59e0b", name: "Write (ms)" },

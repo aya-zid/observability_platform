@@ -38,16 +38,16 @@ export function MemorySection({ machineId, params }: Props) {
   const swapIO = useMemo(() => formatTimePoints(d?.swap_io), [d])
 
   return (
-    <div className="grid gap-6">
-      <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
         <StackedAreaCard title="Memory Usage" data={memUsage} areas={MEM_AREAS} loading={query.isLoading} />
         <LineChartCard title="Memory Used %" data={memPct} lines={[{ dataKey: "value", color: "#8b5cf6", name: "%" }]} loading={query.isLoading} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         <LineChartCard title="Available Memory" data={memAvail} lines={[{ dataKey: "value", color: "#22c55e", name: "Bytes" }]} loading={query.isLoading} />
         <StackedAreaCard title="Swap Usage" data={swapUsage} areas={SWAP_AREAS} loading={query.isLoading} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         <StackedAreaCard title="Page Faults" data={pageFaults} areas={FAULT_AREAS} loading={query.isLoading} />
         <LineChartCard title="Swap I/O (Major)" data={swapIO} lines={[
           { dataKey: "page_in", color: "#3b82f6", name: "Page In" },

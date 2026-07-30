@@ -8,7 +8,7 @@ export function Page({
   className?: string
 }) {
   return (
-    <div className={cn("mx-auto w-full max-w-6xl grid gap-6", className)}>
+    <div className={cn("mx-auto w-full max-w-6xl grid gap-5", className)}>
       {children}
     </div>
   )
@@ -29,8 +29,8 @@ export function PageHeader({
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
-          {Icon && <Icon className="w-6 h-6 text-accent shrink-0" />}
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">
+          {Icon && <Icon className="w-5 h-5 text-accent shrink-0" />}
+          <h1 className="text-xl font-bold text-foreground tracking-tight">
             {title}
           </h1>
         </div>
@@ -59,7 +59,7 @@ export function SectionCard({
   return (
     <section
       className={cn(
-        "rounded-xl border border-border bg-card shadow-card p-4 md:p-6",
+        "rounded-xl border border-border bg-card shadow-card p-3 md:p-4",
         className
       )}
     >

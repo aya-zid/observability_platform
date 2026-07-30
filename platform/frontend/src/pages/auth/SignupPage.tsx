@@ -97,7 +97,7 @@ export default function SignupPage() {
 
         <div>
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Password</label>
+            <label className="text-sm font-semibold text-foreground uppercase tracking-wider">Password</label>
           </div>
           <div className="relative mt-1.5">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -111,13 +111,13 @@ export default function SignupPage() {
               {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          <p className="text-[11px] text-muted-foreground mt-1">Use at least 8 characters with 1 uppercase, 1 lowercase, and 1 number.</p>
+          <p className="text-sm text-muted-foreground mt-1">Use at least 8 characters with 1 uppercase, 1 lowercase, and 1 number.</p>
           {form.formState.errors.password ? (
-            <p className="text-xs text-destructive mt-1">{form.formState.errors.password.message}</p>
+            <p className="text-sm text-destructive mt-1">{form.formState.errors.password.message}</p>
           ) : null}
         </div>
 
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
         <Button
           type="submit"
@@ -128,14 +128,14 @@ export default function SignupPage() {
           {!form.formState.isSubmitting && <ArrowRight className="w-4 h-4" />}
         </Button>
 
-        <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
+        <p className="text-sm text-muted-foreground text-center leading-relaxed">
           By creating an account you agree to our{" "}
           <a className="text-primary hover:underline" href="#">Terms</a> and{" "}
           <a className="text-primary hover:underline" href="#">Privacy Policy</a>.
         </p>
       </form>
 
-      <p className="text-xs text-muted-foreground text-center mt-6">
+      <p className="text-sm text-muted-foreground text-center mt-6">
         Already have an account?{" "}
         <Link to="/login" className="text-primary font-semibold hover:underline">Sign in</Link>
       </p>
@@ -152,8 +152,8 @@ function Field({
   return (
     <div>
       <div className="flex items-center justify-between">
-        <label className="text-xs font-semibold text-foreground uppercase tracking-wider">{label}</label>
-        {optional && <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Optional</span>}
+        <label className="text-sm font-semibold text-foreground uppercase tracking-wider">{label}</label>
+        {optional && <span className="text-sm text-muted-foreground uppercase tracking-wider">Optional</span>}
       </div>
       <div className="relative mt-1.5">
         <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -163,7 +163,7 @@ function Field({
           {...inputProps}
         />
       </div>
-      {error ? <p className="text-xs text-destructive mt-1">{error}</p> : null}
+      {error ? <p className="text-sm text-destructive mt-1">{error}</p> : null}
     </div>
   )
 }

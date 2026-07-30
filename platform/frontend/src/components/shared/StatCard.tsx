@@ -15,20 +15,20 @@ export function StatCard({
   icon?: string
 }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-lg border border-border/60 bg-card p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
             {title}
           </p>
-          <div className="mt-2 flex items-baseline gap-1.5">
-            <p className={cn('text-xl font-bold tracking-tight text-foreground', loading && 'text-muted-foreground')}>
+          <div className="mt-1 flex items-baseline gap-1">
+            <p className={cn('text-sm font-bold tracking-tight text-foreground', loading && 'text-muted-foreground')}>
               {loading ? '—' : value}
             </p>
             {unit && !loading ? <span className="text-xs text-muted-foreground/70">{unit}</span> : null}
           </div>
         </div>
-        {icon ? <div className="text-xl opacity-25 mt-1 shrink-0">{icon}</div> : null}
+        {icon ? <div className="text-base opacity-25 mt-0.5 shrink-0">{icon}</div> : null}
       </div>
     </div>
   )

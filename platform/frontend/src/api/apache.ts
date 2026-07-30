@@ -85,6 +85,21 @@ export type ApacheDashboardSummary = {
   // The threshold used to compute the above two lists (seconds)
   // Echoed back so the frontend can label the section correctly, e.g. "Slow (> 2s)"
   slow_requests_min_rt: number
+
+  // VM scalar values from real Apache metrics
+  uptime_seconds?: number
+  cpu_load_percent?: number
+  busy_workers?: number
+  idle_workers?: number
+  traffic_bytes_total?: number
+  load_1?: number
+  load_5?: number
+  load_15?: number
+
+  // Timeseries for workers/traffic/load
+  workers_timeseries?: ApacheTimePoint[]
+  traffic_timeseries?: ApacheTimePoint[]
+  load_timeseries?: ApacheTimePoint[]
 }
 
 export type ApacheExplorerResult = {

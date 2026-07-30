@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { getDiscoveryService } from "@/api/discovery"
-import { getPHPFPMDashboardSummary, type PHPFPMDashboardSummary, type PHPFPMTimePoint, type ScriptStat, type LabelCount } from "@/api/phpfpm"
+import { getPHPFPMDashboardSummary, type PHPFPMDashboardSummary, type ScriptStat, type LabelCount } from "@/api/phpfpm"
 import { PHPFPMSummaryTab } from "./components/PHPFPMSummaryTab"
 import {
   DashboardStatCard, DashboardSectionHeader, DashboardNoData,
@@ -19,7 +19,7 @@ import {
 import { mapTimeseries, getStep } from "@/lib/dashboardHelpers"
 import { cn } from "@/lib/utils"
 import { RefreshCw } from "lucide-react"
-import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
+import { useTranslation } from "@/i18n/LanguageContext"
 
 const FPM_COLORS = {
   blue: "#0ea5e9", green: "#22c55e", amber: "#f59e0b", red: "#ef4444",
@@ -118,13 +118,12 @@ export function PHPFPMDashboardPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
-            <LangToggle />
             <button type="button" onClick={() => dashQuery.refetch()}
               className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted" title="Refresh">
               <RefreshCw className={cn('h-4 w-4', dashQuery.isRefetching && 'animate-spin')} />
             </button>
             <Link to={`/services/phpfpm-logs/${id}`} className="rounded-md bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-500">
-              View Logs
+              {t("shared.viewLogs")}
             </Link>
           </div>
         }
@@ -190,7 +189,7 @@ export function PHPFPMDashboardPage() {
                       return (
                         <tr key={pool} className="border-b border-border/50">
                           <td className="py-2 pr-4 font-mono">{pool}</td>
-                          <td className={cn("py-2 pr-4 text-right tabular-nums", (pd?.saturation_pct ?? 0) > 85 ? "text-red-500" : (pd?.saturation_pct ?? 0) > 70 ? "text-amber-500" : "")}>
+                          <td className={cn("py-2 pr-4 text-right tabular-nums", (pd?.saturation_pct ?? 0) > 85 ? "text-destructive" : (pd?.saturation_pct ?? 0) > 70 ? "text-amber-500" : "")}>
                             {pd?.saturation_pct != null ? formatPercent(pd.saturation_pct) : "-"}
                           </td>
                           <td className="py-2 pr-4 text-right tabular-nums">{pd?.active_processes != null ? formatNumber(pd.active_processes, 0) : "-"}</td>
@@ -406,8 +405,8 @@ export function PHPFPMDashboardPage() {
                       <tbody>
                         {merged.map((r: { uri: string; total: number; errors: number; errorPct: number }) => (
                           <tr key={r.uri} className="border-b border-border/50">
-                            <td className="py-2 pr-3 font-mono text-xs truncate max-w-[180px]" title={r.uri}>{r.uri}</td>
-                            <td className={cn("py-2 pr-3 text-right tabular-nums", r.errorPct > 10 ? "text-red-500" : r.errorPct > 5 ? "text-amber-500" : "")}>
+                            <td className="py-2 pr-3 font-mono text-sm truncate max-w-[180px]" title={r.uri}>{r.uri}</td>
+                            <td className={cn("py-2 pr-3 text-right tabular-nums", r.errorPct > 10 ? "text-destructive" : r.errorPct > 5 ? "text-amber-500" : "")}>
                               {formatPercent(r.errorPct)}
                             </td>
                             <td className="py-2 text-right tabular-nums">{formatNumber(r.total, 0)}</td>

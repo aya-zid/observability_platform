@@ -1,4 +1,12 @@
-import type { TopIssue } from "@/api/overview"
+type TopIssue = {
+  machine_id: string
+  hostname: string
+  service: string
+  severity: string
+  issue: string
+  value: string
+  age: string
+}
 import { cn } from "@/lib/utils"
 
 const sevStyles: Record<string, { dot: string; bg: string }> = {
@@ -41,12 +49,12 @@ export function TopIssuesFeed({ issues }: { issues: TopIssue[] | null | undefine
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium">{issue.hostname}</span>
-                <span className="text-xs text-muted-foreground">·</span>
-                <span className="text-xs text-muted-foreground">{issue.service}</span>
-                <span className="text-xs text-muted-foreground">·</span>
-                <span className="text-xs font-medium">{issue.issue}</span>
+                <span className="text-sm text-muted-foreground">·</span>
+                <span className="text-sm text-muted-foreground">{issue.service}</span>
+                <span className="text-sm text-muted-foreground">·</span>
+                <span className="text-sm font-medium">{issue.issue}</span>
               </div>
-              <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="mt-0.5 flex items-center gap-2 text-sm text-muted-foreground">
                 <span>{issue.value}</span>
                 <span>·</span>
                 <span>{issue.age}</span>

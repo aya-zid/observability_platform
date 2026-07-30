@@ -28,11 +28,12 @@ import {
 } from '@/lib/queryHelpers'
 import { cn } from '@/lib/utils'
 import { RefreshCw } from 'lucide-react'
+import { useTranslation } from "@/i18n/LanguageContext"
 import { methodBadgeColor } from '@/lib/methodBadgeColor'
 import { NginxSlowRequestTable } from './components/NginxSlowRequestTable'
 import { IPInvestigationBlock } from './components/IPInvestigationBlock'
 import { NginxPerformanceSection, NginxRTDistributionChart } from './components/NginxPerformanceSection'
-import { StatCard } from '@/components/shared/StatCard'
+import { Page, PageHeader } from '@/components/shared/Page'
 import { ChartBox } from '@/components/shared/ChartBox'
 import { DataTable } from '@/components/shared/DataTable'
 import {
@@ -44,23 +45,11 @@ import { NginxDomainSelector } from './components/NginxDomainSelector'
 import { NginxServerView } from './components/NginxServerView'
 import { NginxErrorPathsPanel } from './components/NginxErrorPathsPanel'
 
-const STATUS_SUMMARY_STYLES = {
-  green: {
-    card: 'border-green-200 bg-green-50/70 dark:border-green-900/40 dark:bg-green-950/20',
-    text: 'text-green-700 dark:text-green-400',
-  },
-  blue: {
-    card: 'border-blue-200 bg-blue-50/70 dark:border-blue-900/40 dark:bg-blue-950/20',
-    text: 'text-blue-700 dark:text-blue-400',
-  },
-  amber: {
-    card: 'border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20',
-    text: 'text-amber-700 dark:text-amber-400',
-  },
-  red: {
-    card: 'border-red-200 bg-red-50/70 dark:border-red-900/40 dark:bg-red-950/20',
-    text: 'text-red-700 dark:text-red-400',
-  },
+const STATUS_SUMMARY_TONES = {
+  green: 'text-emerald-600 dark:text-emerald-400',
+  blue: 'text-sky-600 dark:text-sky-400',
+  amber: 'text-amber-600 dark:text-amber-400',
+  red: 'text-red-600 dark:text-red-400',
 } as const
 
 const STATUS_COLORS = {
@@ -206,12 +195,6 @@ function mapRTTimeseries(points: NginxTimePoint[]): Array<{
   })
 }
 
-function latestFromSeries(points: NginxTimePoint[], key: string): number | null {
-  if (!points || points.length === 0) return null
-  const last = points[points.length - 1]
-  return readNullableNumber(last[key])
-}
-
 function normalizePercentileInput(value: string) {
   const parsed = Number.parseInt(value.trim().replace(/^p/i, ''), 10)
   if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) {
@@ -221,6 +204,7 @@ function normalizePercentileInput(value: string) {
 }
 
 export function NginxDashboardPage() {
+  const { t } = useTranslation()
   const { id = '' } = useParams<{ id?: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
   const [timeSelection, setTimeSelection] = useState<TimeSelection>({
@@ -240,9 +224,6 @@ export function NginxDashboardPage() {
   const serviceName = serviceQuery.data?.service_name ?? 'nginx'
   const hostId = serviceQuery.data?.machine_id ?? ''
   const serviceReady = Boolean(id && serviceQuery.data?.service_name)
-  const configuredMetricsEndpoint =
-    serviceQuery.data?.user_metrics_endpoint || serviceQuery.data?.suggested_metrics_endpoint || ''
-
   const domainsQuery = useQuery<NginxDomainItem[]>({
     queryKey: ['nginx-domains', id],
     queryFn: () => getNginxDomains(id),
@@ -374,8 +355,6 @@ export function NginxDashboardPage() {
         .reduce((s, k) => s + (typeof connPts[connPts.length - 1][k] === 'number' ? (connPts[connPts.length - 1][k] as number) : 0), 0)
     : null
 
-  const p95LatestMs = latestFromSeries(d?.rt_timeseries ?? [], 'p95')
-
   const statusData   = mapTimeseries(d?.status_timeseries ?? [])
   const rtData       = mapRTTimeseries(d?.rt_timeseries ?? [])
   const reqRateData  = mapTimeseries(d?.req_rate_timeseries ?? [])
@@ -444,40 +423,33 @@ export function NginxDashboardPage() {
   if (!serviceQuery.data) return <div className="p-6 text-sm text-red-600">Service not found for id {id}.</div>
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
-        <div>
-          <h1 className="text-3xl font-bold">Nginx Dashboard</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Service: <span className="font-mono font-semibold">{serviceName}</span>
-            {hostId ? (
-              <>
-                {' '}• Host: <span className="font-mono font-semibold">{hostId}</span>
-              </>
-            ) : null}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => dashQuery.refetch()}
-            className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
-            title="Refresh"
-          >
-            <RefreshCw className={cn('h-4 w-4', dashQuery.isRefetching && 'animate-spin')} />
-          </button>
-          <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
-          <Link
-            to={buildDomainHref(`/services/nginx-logs/${id}`, selectedDomain || null)}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 transition-colors"
-          >
-            View Logs →
-          </Link>
-        </div>
-      </div>
+    <Page className="max-w-none">
+      <PageHeader
+        title="Nginx Dashboard"
+        description={`Service: ${serviceName}${hostId ? ` • Host: ${hostId}` : ''}`}
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => dashQuery.refetch()}
+              className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
+              title="Refresh"
+            >
+              <RefreshCw className={cn('h-4 w-4', dashQuery.isRefetching && 'animate-spin')} />
+            </button>
+            <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
+            <Link
+              to={buildDomainHref(`/services/nginx-logs/${id}`, selectedDomain || null)}
+              className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 transition-colors"
+            >
+              {t("shared.viewLogs")}
+            </Link>
+          </div>
+        }
+      />
 
       {timeWindow.error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
           {timeWindow.error}
         </div>
       ) : null}
@@ -500,7 +472,6 @@ export function NginxDashboardPage() {
           setSearchParams(nextParams)
         }}
         loading={domainsQuery.isLoading}
-        configuredMetricsEndpoint={configuredMetricsEndpoint}
       />
 
       {viewMode === 'server' ? (
@@ -520,22 +491,12 @@ export function NginxDashboardPage() {
         />
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <StatCard
-              title="P95 Response Time"
-              icon="⏱️"
-              value={p95LatestMs !== null ? `${Math.round(p95LatestMs)}ms` : '—'}
-              status={p95LatestMs !== null && p95LatestMs > 500 ? 'red' : p95LatestMs !== null && p95LatestMs > 100 ? 'yellow' : 'green'}
-              loading={isLoading}
-            />
-          </div>
-
-          <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-            <h3 className="mb-1 text-sm font-semibold text-foreground">Response Status Breakdown</h3>
-            <p className="mb-4 text-xs text-muted-foreground">
+          <div className="rounded-xl border border-border bg-card shadow-card p-3">
+            <h3 className="mb-1 text-xs font-semibold text-foreground">Response Status Breakdown</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
               Full selected range via Loki count queries. These totals are aligned with the current time picker.
             </p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
               {[
                 { label: '2xx Success', value: total2xx, percent: successPct, tone: 'green' as const },
                 { label: '3xx Redirect', value: total3xx, percent: redirectPct, tone: 'blue' as const },
@@ -543,9 +504,9 @@ export function NginxDashboardPage() {
                 { label: '5xx Server Error', value: total5xx, percent: rate5xxPct, tone: 'red' as const },
                 { label: 'Total', value: totalRequests, percent: null, tone: 'blue' as const },
               ].map((item) => (
-                <div key={item.label} className={cn('rounded-lg border p-4 text-center', STATUS_SUMMARY_STYLES[item.tone].card)}>
+                <div key={item.label} className="rounded-lg border border-border bg-card p-3 text-center">
                   <p className="text-xs font-medium text-muted-foreground">{item.label}</p>
-                  <p className={cn('mt-2 text-2xl font-bold', STATUS_SUMMARY_STYLES[item.tone].text)}>
+                  <p className={cn('mt-1 text-sm font-bold', STATUS_SUMMARY_TONES[item.tone])}>
                     {isLoading ? '—' : totalRequests > 0 || item.label === 'Total' ? formatNumber(Math.round(item.value)) : '—'}
                   </p>
                   {!isLoading && item.percent !== null ? (
@@ -611,9 +572,9 @@ export function NginxDashboardPage() {
               viewMoreHref={slowRequestsHref}
               loading={isLoading}
             />
-            <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-              <h3 className="mb-1 text-sm font-semibold text-foreground">Slow Requests (Normalized Paths)</h3>
-              <p className="mb-3 text-xs text-muted-foreground">
+            <div className="rounded-xl border border-border bg-card shadow-card p-3">
+              <h3 className="mb-1 text-xs font-semibold text-foreground">Slow Requests (Normalized Paths)</h3>
+              <p className="mb-2 text-xs text-muted-foreground">
                 Showing {formatNumber(slowRequestsNormalized.length, 0)} of {formatNumber(slowRequestsNormalizedTotal, 0)} normalized paths above {slowMinRT}s.
               </p>
               <div className="max-h-64 space-y-1 overflow-y-auto">
@@ -628,21 +589,21 @@ export function NginxDashboardPage() {
                       : req.normalized_path || req.path
                     const isNormalized = req.normalized_path && req.normalized_path !== req.path
                     return (
-                      <div key={idx} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-muted/50 transition-colors text-xs">
+                      <div key={idx} className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-muted/50 transition-colors text-sm">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1">
                             {isNormalized ? (
-                              <span className="rounded bg-blue-100 px-1 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 flex-shrink-0">
+                              <span className="rounded bg-primary/10 px-1 py-0.5 text-sm font-semibold text-primary flex-shrink-0">
                                 norm
                               </span>
                             ) : null}
-                            <span className="truncate font-mono text-xs" title={displayPath}>{displayPath}</span>
+                            <span className="truncate font-mono text-sm" title={displayPath}>{displayPath}</span>
                           </div>
-                          <div className="text-muted-foreground text-xs mt-0.5">{req.method} • {req.status}</div>
+                          <div className="text-muted-foreground text-sm mt-0.5">{req.method} • {req.status}</div>
                         </div>
                         <div className={cn(
                           'flex-shrink-0 ml-2 font-semibold tabular-nums',
-                          req.rt >= 5 ? 'text-red-500' : req.rt >= 2 ? 'text-amber-500' : 'text-primary',
+                          req.rt >= 5 ? 'text-destructive' : req.rt >= 2 ? 'text-amber-500' : 'text-primary',
                         )}>
                           {(req.rt * 1000).toFixed(0)}ms
                         </div>
@@ -655,10 +616,10 @@ export function NginxDashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
-              <h3 className="mb-1 text-sm font-semibold text-foreground">HTTP Method Distribution</h3>
-              <p className="mb-4 text-xs text-muted-foreground">{aggTotalsLabel}</p>
-              <div className="space-y-2">
+            <div className="rounded-xl border border-border bg-card shadow-card p-3">
+              <h3 className="mb-1 text-xs font-semibold text-foreground">HTTP Method Distribution</h3>
+              <p className="mb-3 text-xs text-muted-foreground">{aggTotalsLabel}</p>
+              <div className="space-y-1.5">
                 {isLoading ? (
                   <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
                 ) : aggMethods.length === 0 ? (
@@ -669,7 +630,7 @@ export function NginxDashboardPage() {
                     return (
                       <div key={item.label} className="flex items-center gap-2">
                         <span
-                          className="w-16 rounded px-2 py-1 text-center text-xs font-semibold text-white flex-shrink-0"
+                          className="w-16 rounded px-2 py-1 text-center text-sm font-semibold text-white flex-shrink-0"
                           style={{ background: methodBadgeColor(item.label) }}
                         >
                           {item.label}
@@ -677,7 +638,7 @@ export function NginxDashboardPage() {
                         <div className="h-2 flex-1 rounded-full bg-muted">
                           <div className="h-2 rounded-full bg-primary transition-all duration-300" style={{ width: `${Math.max(3, pct)}%` }} />
                         </div>
-                        <span className="w-24 flex-shrink-0 text-right text-xs">
+                        <span className="w-24 flex-shrink-0 text-right text-sm">
                           <span className="font-semibold">{formatNumber(Math.round(item.count), 0)}</span>
                           <span className="ml-1 text-muted-foreground">{pct.toFixed(1)}%</span>
                         </span>
@@ -688,19 +649,19 @@ export function NginxDashboardPage() {
               </div>
             </div>
 
-            <div className="rounded-lg border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/20 shadow-sm">
-              <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold">IPs with High 4xx/5xx Rate</h3>
+            <div className="rounded-xl border border-destructive/30 bg-destructive/10 shadow-card p-3">
+              <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold text-destructive">IPs with High 4xx/5xx Rate</h3>
               <div className="max-h-64 space-y-2 overflow-y-auto">
                 {isLoading ? (
                   <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
                 ) : aggSuspiciousIPs.length > 0 ? (
                   aggSuspiciousIPs.map((item) => (
-                    <div key={item.ip} className="flex items-center justify-between rounded-lg border-l-2 border-red-500 bg-white px-3 py-2 dark:bg-muted/30 transition-colors hover:bg-red-50 dark:hover:bg-red-950/10">
+                    <div key={item.ip} className="flex items-center justify-between rounded-lg border-l-2 border-destructive bg-muted/30 px-3 py-2 transition-colors hover:bg-destructive/5">
                       <div className="flex items-center gap-2">
-                        <span className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">{item.rate.toFixed(0)}%</span>
+                        <span className="rounded bg-destructive/10 px-2 py-1 text-sm font-semibold text-destructive">{item.rate.toFixed(0)}%</span>
                         <span className="font-mono text-sm">{item.ip}</span>
                       </div>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-sm text-muted-foreground">
                         {formatNumber(Math.round(item.errors), 0)}/{formatNumber(Math.round(item.total), 0)} errors
                       </span>
                     </div>
@@ -729,9 +690,9 @@ export function NginxDashboardPage() {
             />
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-4">
             <ChartBox title="Request Rate (req/s)" loading={isLoading} empty={reqRateData.length === 0}>
-              <div className="h-64">
+              <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={reqRateData}>
                     <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
@@ -756,7 +717,7 @@ export function NginxDashboardPage() {
                       key={percentile}
                       type="button"
                       onClick={() => setCustomRTPercentiles((current) => current.filter((item) => item !== percentile))}
-                      className="rounded-md border border-border px-2 py-1 text-xs font-semibold"
+                      className="rounded-md border border-border px-2 py-1 text-sm font-semibold"
                       style={{ color: CUSTOM_RT_COLORS[index % CUSTOM_RT_COLORS.length] }}
                     >
                       P{percentile} x
@@ -783,7 +744,7 @@ export function NginxDashboardPage() {
                     <button
                       type="submit"
                       disabled={customRTPercentiles.length >= 10}
-                      className="h-8 rounded-md border border-border bg-background px-3 text-xs font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                      className="h-8 rounded-md border border-border bg-background px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Add
                     </button>
@@ -791,7 +752,7 @@ export function NginxDashboardPage() {
                 </div>
               }
             >
-              <div className="h-64">
+              <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={rtData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
@@ -829,7 +790,7 @@ export function NginxDashboardPage() {
             </ChartBox>
 
             <ChartBox title="Bandwidth Over Time" loading={isLoading} empty={bandwidthData.length === 0}>
-              <div className="h-64">
+              <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={bandwidthData}>
                     <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
@@ -853,7 +814,7 @@ export function NginxDashboardPage() {
               loading={isLoading}
               empty={statusData.length === 0}
             >
-              <div className="h-64">
+              <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={statusData}>
                     <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
@@ -893,7 +854,7 @@ export function NginxDashboardPage() {
               empty={botTrendData.length === 0}
               hint="Estimated from request strings and user agents in the selected range"
             >
-              <div className="h-64">
+              <div className="h-48">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={botTrendData}>
                     <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />
@@ -906,16 +867,16 @@ export function NginxDashboardPage() {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-              <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+              <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
                 <span>Human share: {humanPct.toFixed(1)}%</span>
                 <span>Automated share: {botPct.toFixed(1)}%</span>
               </div>
             </ChartBox>
           </div>
 
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950/20 shadow-sm text-sm text-blue-800 dark:text-blue-300">
-            <p className="mb-1 font-semibold">Data notes</p>
-            <p className="text-xs">
+          <div className="rounded-xl border border-border bg-card shadow-card p-3">
+            <h3 className="mb-1 text-xs font-semibold text-foreground">Data notes</h3>
+            <p className="text-xs text-muted-foreground">
               Domain tabs use server-side Loki and VictoriaMetrics queries for the selected domain and time range.
               Slow Requests are now expandable so you can inspect each request inline.
             </p>
@@ -938,6 +899,6 @@ export function NginxDashboardPage() {
           <IPInvestigationBlock id={id} domain={selectedDomain} />
         </>
       )}
-    </div>
+    </Page>
   )
 }

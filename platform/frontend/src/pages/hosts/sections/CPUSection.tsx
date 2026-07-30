@@ -42,8 +42,8 @@ export function CPUSection({ machineId, params }: Props) {
   }, [perCPU])
 
   return (
-    <div className="grid gap-6">
-      <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
         <LineChartCard title="Overall CPU Usage" data={overall} lines={[{ dataKey: "value", color: "#22c55e", name: "CPU %" }]} loading={query.isLoading} />
         <LineChartCard title="CPU Frequency" data={freq} lines={[{ dataKey: "value", color: "#8b5cf6", name: "Hz" }]} loading={query.isLoading} />
       </div>

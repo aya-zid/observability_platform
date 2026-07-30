@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { translations, type Lang } from "./translations"
 
 interface LanguageContextType {
@@ -9,8 +9,26 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | null>(null)
 
+const STORAGE_KEY = "app-lang"
+
+function getInitialLang(): Lang {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored === "en" || stored === "fr") return stored
+  }
+  return "en"
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>("en")
+  const [lang, setLangState] = useState<Lang>(getInitialLang)
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, lang)
+  }, [lang])
+
+  function setLang(next: Lang) {
+    setLangState(next)
+  }
 
   function t(key: string, ...args: any[]): string {
     const entry = translations[key]
@@ -39,8 +57,8 @@ export function LangToggle() {
     <button
       type="button"
       onClick={() => setLang(lang === "en" ? "fr" : "en")}
-      className="rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted transition-colors"
-      title={lang === "en" ? "Switch to French" : "Passer en anglais"}
+      className="rounded-md border border-border px-2 py-1 text-sm font-medium hover:bg-muted transition-colors"
+      title={lang === "en" ? "Passer en français" : "Switch to English"}
     >
       {lang === "en" ? "FR" : "EN"}
     </button>

@@ -7,7 +7,7 @@ import { getPostgresConfigSnapshot, type PostgresConfigSetting } from "@/api/pos
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { formatBytes, formatDuration, formatNumber } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
-import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
+import { useTranslation } from "@/i18n/LanguageContext"
 
 function formatSettingValue(setting: PostgresConfigSetting, t: (key: string, ...args: any[]) => string) {
   if (setting.value == null) return t("pgConfig.unavailableValue")
@@ -30,18 +30,18 @@ function SettingCard({ setting }: { setting: PostgresConfigSetting }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate font-mono text-xs text-muted-foreground" title={setting.name}>
+          <div className="truncate font-mono text-sm text-muted-foreground" title={setting.name}>
             {setting.name}
           </div>
           <div className="mt-1 text-lg font-semibold">{formatSettingValue(setting, t)}</div>
         </div>
         {setting.warn ? (
-          <span className="rounded border border-amber-300/60 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+          <span className="rounded border border-amber-300/60 px-2 py-0.5 text-sm text-amber-700 dark:text-amber-300">
             {t("shared.review")}
           </span>
         ) : null}
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setting.description}</p>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{setting.description}</p>
     </div>
   )
 }
@@ -79,7 +79,6 @@ export function PostgresConfigPage() {
         description={t("pgConfig.description", service.service_name, service.hostname || service.machine_id)}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <LangToggle />
             <Link to={`/services/postgres-dashboard/${id}`} className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">
               {t("shared.dashboard")}
             </Link>

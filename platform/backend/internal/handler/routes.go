@@ -122,8 +122,11 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 		tenantRepo,
 	)
 
-	overviewService := service.NewOverviewService(cfg, infrastructure.Redis, hostRepo, discoveryRepo)
+	incidentRepo := repository.NewIncidentRepository(infrastructure.DB)
+	incidentGroupingService := service.NewIncidentGroupingService(alertRuleRepo, hostRepo, incidentRepo)
+	overviewService := service.NewOverviewService(cfg, infrastructure.Redis, hostRepo, discoveryRepo, alertRuleRepo, alertsRepo, incidentGroupingService)
 	overviewHandler := NewOverviewHandler(overviewService, tenantRepo)
+	incidentHandler := NewIncidentHandler(incidentRepo, tenantRepo)
 
 	hostDashboardService := service.NewHostDashboardService(cfg, infrastructure.Redis)
 	hostLogsService := service.NewHostLogsService(cfg, infrastructure.Redis)
@@ -169,6 +172,9 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 		api.PATCH("/discovery/services/:id/collection", discoveryAPIHandler.UpdateCollection)
 		api.PATCH("/discovery/services/:id/config", discoveryAPIHandler.UpdateServiceConfig)
 		api.POST("/discovery/services/:id/integration", integrationHandler.CreateInstallCommand)
+
+		// ── Member-accessible mutations ─────────────────────────
+		api.POST("/incidents/:id/dismiss", incidentHandler.DismissIncident)
 
 		// ── Admin-only mutations (members can still GET) ─────────
 		r := api.Group("", custommiddleware.RequireAdminForMutation())
@@ -296,7 +302,7 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 	//   2. Resolves tenant (Redis → Postgres)
 	//   3. Attaches CachedTenant to context for proxy handlers
 	ingestAuth := custommiddleware.IngestMiddleware(tenantCache, tenantRepo)
-	hostHandler := NewHostHandler(hostRepo, subscriptionRepo)
+	hostHandler := NewHostHandler(hostRepo, subscriptionRepo, discoveryRepo)
 	discoveryHandler := NewDiscoveryHandler(infrastructure.DB)
 
 	ingest := e.Group("/ingest", ingestAuth)
@@ -328,5 +334,3 @@ func boolStatus(ok bool) string {
 	}
 	return "disconnected"
 }
-
-

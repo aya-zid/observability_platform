@@ -43,6 +43,8 @@ export type DiscoveryService = {
   vuln_scan_supported: boolean
   vuln_scan_status: string
   last_vuln_scan_at?: string
+  last_seen_at: string
+  status: "running" | "warning" | "stopped"
 }
 
 export type DiscoveryServiceDetail = {
@@ -83,6 +85,8 @@ export type DiscoveryServiceDetail = {
   catalog?: CatalogService
   nginx_virtual_hosts?: VirtualHostEntry[]
   apache_virtual_hosts?: VirtualHostEntry[]
+  last_seen_at: string
+  status: "running" | "warning" | "stopped"
 }
 
 export type VirtualHostEntry = {

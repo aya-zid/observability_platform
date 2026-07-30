@@ -502,7 +502,7 @@ export function MariaDBSummaryTab({ data }: { data: MariaDBDashboardSummary }) {
           <ScoreRing score={healthScore} tone={overallTone} />
 
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-zinc-500">
               <span className={cn("h-1.5 w-1.5 rounded-full animate-pulse", TONE[overallTone].dot)} />
               MariaDB · Summary
             </div>
@@ -564,7 +564,7 @@ export function MariaDBSummaryTab({ data }: { data: MariaDBDashboardSummary }) {
                   const heading = sev === "critical" ? "Critical" : sev === "warning" ? "Warnings" : "Notices"
                   return (
                     <div key={sev}>
-                      <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em]">
+                      <div className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em]">
                         <span className={cn("h-1.5 w-1.5 rounded-full", TONE[tone].dot)} />
                         <span className={TONE[tone].text}>{heading}</span>
                         <span className="text-zinc-600">· {list.length}</span>
@@ -623,13 +623,13 @@ export function MariaDBSummaryTab({ data }: { data: MariaDBDashboardSummary }) {
                 {hotspots.map((h: { text: string; pct: number; time: number; execs: number; db: string }, i: number) => (
                   <li key={i} className="space-y-1.5">
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="font-mono text-[12px] text-zinc-200 truncate" title={h.text}>{h.text}{h.text.length >= 90 ? "…" : ""}</span>
-                      <span className="shrink-0 text-xs tabular-nums text-zinc-400">{formatPercent(h.pct)}</span>
+                      <span className="font-mono text-sm text-zinc-200 truncate" title={h.text}>{h.text}{h.text.length >= 90 ? "…" : ""}</span>
+                      <span className="shrink-0 text-sm tabular-nums text-zinc-400">{formatPercent(h.pct)}</span>
                     </div>
                     <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-800">
                       <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-rose-500" style={{ width: `${Math.max(2, h.pct)}%` }} />
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                    <div className="flex items-center gap-2 text-sm text-zinc-500">
                       <span className="font-mono">{h.db}</span>
                       <span>·</span>
                       <span>{formatNumber(h.execs, 0)} execs</span>
@@ -652,7 +652,7 @@ export function MariaDBSummaryTab({ data }: { data: MariaDBDashboardSummary }) {
                 <div className="bg-sky-500" style={{ width: `${readPct}%` }} />
                 <div className="bg-emerald-500" style={{ width: `${100 - readPct}%` }} />
               </div>
-              <div className="mt-2 flex justify-between text-[11px] text-zinc-400">
+              <div className="mt-2 flex justify-between text-sm text-zinc-400">
                 <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500 mr-1.5" />Reads {formatNumber(reads, 1)}/s</span>
                 <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5" />Writes {formatNumber(writes, 1)}/s</span>
               </div>
@@ -667,7 +667,7 @@ export function MariaDBSummaryTab({ data }: { data: MariaDBDashboardSummary }) {
             >
               <div className="flex flex-wrap gap-1.5">
                 {contextSignals.map((c, i) => (
-                  <span key={i} className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 text-[12px] text-zinc-400">
+                  <span key={i} className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 text-sm text-zinc-400">
                     <span className="font-medium text-zinc-200">{c.title}:</span> {c.detail}
                   </span>
                 ))}
@@ -691,11 +691,11 @@ export function MariaDBSummaryTab({ data }: { data: MariaDBDashboardSummary }) {
               <div className="flex min-w-0 items-center gap-2.5">
                 <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", TONE[row.status].dot)} />
                 <div className="min-w-0">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{row.group}</div>
+                  <div className="text-sm font-medium uppercase tracking-wider text-zinc-500">{row.group}</div>
                   <div className="truncate text-sm text-zinc-200">{row.label}</div>
                 </div>
               </div>
-              <span className={cn("shrink-0 text-right text-xs font-medium tabular-nums", TONE[row.status].text)}>
+              <span className={cn("shrink-0 text-right text-sm font-medium tabular-nums", TONE[row.status].text)}>
                 {row.status === "na" ? "—" : row.value}
               </span>
             </div>
@@ -718,7 +718,7 @@ function Panel({ title, sub, icon, children }: { title: string; sub?: string; ic
           {icon}
           <div>
             <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
-            {sub && <p className="text-[11px] text-zinc-500">{sub}</p>}
+            {sub && <p className="text-sm text-zinc-500">{sub}</p>}
           </div>
         </div>
       </header>
@@ -729,7 +729,7 @@ function Panel({ title, sub, icon, children }: { title: string; sub?: string; ic
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+    <span className="inline-flex items-center rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-sm font-medium uppercase tracking-wider text-zinc-400">
       {children}
     </span>
   )
@@ -745,7 +745,7 @@ function Tally({ tone, label, count }: { tone: Tone; label: string; count: numbe
       <div className={cn("text-2xl font-semibold tabular-nums", active ? TONE[tone].text : "text-zinc-600")}>
         {count}
       </div>
-      <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-0.5 text-sm font-medium uppercase tracking-wider text-zinc-500">{label}</div>
     </div>
   )
 }
@@ -758,13 +758,13 @@ function KpiCard({ label, value, sub, tone, icon: I }: { label: string; value: s
       tone !== "ok" && tone !== "na" && t.glow,
     )}>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</span>
+        <span className="text-sm font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</span>
         <I className={cn("h-3.5 w-3.5", t.text)} />
       </div>
       <div className={cn("mt-2 text-2xl font-semibold tabular-nums tracking-tight", tone === "ok" ? "text-zinc-100" : t.text)}>
         {value}
       </div>
-      <div className="mt-0.5 text-[11px] text-zinc-500">{sub}</div>
+      <div className="mt-0.5 text-sm text-zinc-500">{sub}</div>
       <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-px", t.bar, "opacity-60")} />
     </div>
   )
@@ -776,14 +776,14 @@ function FindingRow({ index, finding, tone }: { index: number; finding: Finding;
     <li className={cn("group relative overflow-hidden rounded-lg border bg-zinc-950/40 pl-4 pr-4 py-3 transition-colors hover:bg-zinc-900/40", t.surface)}>
       <span className={cn("absolute inset-y-0 left-0 w-[3px]", t.bar)} />
       <div className="flex items-start gap-3">
-        <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md text-[10px] font-semibold tabular-nums", t.text, "bg-zinc-900/80 border border-zinc-800")}>
+        <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md text-sm font-semibold tabular-nums", t.text, "bg-zinc-900/80 border border-zinc-800")}>
           {index}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className={cn("text-sm font-medium", "text-zinc-100")}>{finding.title}</span>
             {finding.category && (
-              <span className="text-[10px] uppercase tracking-wider text-zinc-500">· {finding.category}</span>
+              <span className="text-sm uppercase tracking-wider text-zinc-500">· {finding.category}</span>
             )}
           </div>
           <p className="mt-1 text-[13px] leading-relaxed text-zinc-400">{finding.detail}</p>

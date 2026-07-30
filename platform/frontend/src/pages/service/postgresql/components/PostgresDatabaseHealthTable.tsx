@@ -10,7 +10,7 @@ export function PostgresDatabaseHealthTable({ rows }: { rows: PostgresDatabaseHe
     <SectionCard title={t("pgDashboard.healthTitle")} description={t("pgDashboard.healthDesc")}>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="text-xs uppercase text-muted-foreground">
+          <thead className="text-sm uppercase text-muted-foreground">
             <tr className="border-b border-border">
               <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColDb")}</th>
               <th className="py-2 pr-4 text-left">{t("pgDashboard.healthColSize")}</th>
@@ -24,7 +24,7 @@ export function PostgresDatabaseHealthTable({ rows }: { rows: PostgresDatabaseHe
           <tbody>
             {rows.length ? rows.map((row) => (
               <tr key={row.database} className="border-b border-border/60">
-                <td className="py-2 pr-4 font-mono text-xs">{row.database}</td>
+                <td className="py-2 pr-4 font-mono text-sm">{row.database}</td>
                 <td className="py-2 pr-4">{formatBytes(row.size_bytes)}</td>
                 <td className="py-2 pr-4">{formatNumber(row.connections, 0)}</td>
                 <td className={cn("py-2 pr-4", row.cache_hit_ratio_pct < 95 ? "text-amber-600 dark:text-amber-400" : "")}>{formatPercent(row.cache_hit_ratio_pct)}</td>

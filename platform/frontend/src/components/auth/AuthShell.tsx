@@ -25,7 +25,7 @@ export default function AuthShell({
             <div className="text-[15px] font-bold tracking-tight">
                <span className="text-sidebar-accent">Media</span><span className="text-sidebar-primary">net</span>
             </div>
-            <div className="text-[10px] uppercase tracking-widest text-sidebar-foreground/70">Observability</div>
+            <div className="text-sm uppercase tracking-widest text-sidebar-foreground/70">Observability</div>
           </div>
         </div>
         <div className="relative space-y-4 max-w-md">
@@ -51,7 +51,7 @@ export default function AuthShell({
                 ].map((b) => (
                   <li key={b} className="flex items-center gap-2.5 text-sm text-sidebar-foreground/80">
                     <span className="w-5 h-5 rounded-full bg-sidebar-primary/20 flex items-center justify-center">
-                      <span className="text-sidebar-primary text-xs">✓</span>
+                      <span className="text-sidebar-primary text-sm">✓</span>
                     </span>
                     {b}
                   </li>
@@ -60,7 +60,7 @@ export default function AuthShell({
             </>
           )}
         </div>
-        <div className="relative text-xs text-sidebar-foreground/65">© 2026 Medianet Observability</div>
+        <div className="relative text-sm text-sidebar-foreground/65">© 2026 Medianet Observability</div>
       </div>
 
       {/* Right panel */}

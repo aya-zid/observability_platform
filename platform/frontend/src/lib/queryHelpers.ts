@@ -158,8 +158,8 @@ export function formatTimestampNano(unixNano: string | number): string {
 
 export function formatNumber(value: number | null | undefined, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(value) >= 10_000) return `${(value / 1_000).toFixed(1)}k`;
+  if (Math.abs(value) >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`;
+  if (Math.abs(value) >= 10_000) return `${Number((value / 1_000).toFixed(1))}k`;
   return value.toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: digits,
@@ -168,8 +168,8 @@ export function formatNumber(value: number | null | undefined, digits = 2): stri
 
 export function formatPercent(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (value >= 10) return `${value.toFixed(1)}%`;
-  return `${value.toFixed(2)}%`;
+  if (value >= 10) return `${Number(value.toFixed(1))}%`;
+  return `${Number(value.toFixed(2))}%`;
 }
 
 /**
@@ -297,7 +297,7 @@ export function formatBytes(bytes: number | null | undefined): string {
     v /= 1024;
     i++;
   }
-  return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`;
+  return `${Number(v.toFixed(v < 10 ? 2 : 1))} ${units[i]}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

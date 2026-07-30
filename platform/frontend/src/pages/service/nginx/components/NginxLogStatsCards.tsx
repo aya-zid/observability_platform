@@ -12,26 +12,26 @@ export function NginxLogStatsCards({
   initialLoading,
 }: NginxLogStatsCardsProps) {
   return (
-    <div className="flex gap-4 flex-wrap">
-      <div className="rounded-lg border border-border bg-card p-4">
+    <div className="flex gap-2 flex-wrap">
+      <div className="rounded-md border border-border bg-card px-2.5 py-1.5">
         <p className="text-xs text-muted-foreground">Loaded</p>
-        <p className="mt-1 text-2xl font-bold text-primary">{totalLoaded}</p>
+        <p className="text-sm font-bold text-primary">{totalLoaded}</p>
       </div>
-      <div className="rounded-lg border border-border bg-card p-4">
-        <p className="text-xs text-muted-foreground">Matching Filters</p>
-        <p className="mt-1 text-2xl font-bold text-blue-500">{filteredCount}</p>
+      <div className="rounded-md border border-border bg-card px-2.5 py-1.5">
+        <p className="text-xs text-muted-foreground">Matching</p>
+        <p className="text-sm font-bold text-blue-500">{filteredCount}</p>
       </div>
-      <div className="rounded-lg border border-border bg-card p-4">
-        <p className="text-xs text-muted-foreground">Pages loaded</p>
-        <p className="mt-1 text-2xl font-bold">{pagesCount}</p>
+      <div className="rounded-md border border-border bg-card px-2.5 py-1.5">
+        <p className="text-xs text-muted-foreground">Pages</p>
+        <p className="text-sm font-bold">{pagesCount}</p>
       </div>
-      <div className="rounded-lg border border-border bg-card flex-1 p-4">
+      <div className="rounded-md border border-border bg-card flex-1 px-2.5 py-1.5 flex items-center">
         {initialLoading ? (
-          <p className="text-sm text-muted-foreground">Updating logs...</p>
+          <span className="text-xs text-muted-foreground">Updating logs...</span>
         ) : (
-          <p className="text-xs text-muted-foreground">
-            Last updated {new Date().toLocaleTimeString()} · auto-refresh 15s
-          </p>
+          <span className="text-xs text-muted-foreground">
+            {new Date().toLocaleTimeString()} · auto-refresh 15s
+          </span>
         )}
       </div>
     </div>

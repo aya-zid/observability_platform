@@ -67,11 +67,11 @@ var Catalog = map[string]ServiceDef{
 		DefaultMetricsEndpoint: "http://127.0.0.1:80/nginx_status",
 		MetricsGuide: `## Nginx Metrics (stub_status)
 
-Nginx exposes basic connection metrics via the built-in stub_status module.
+The built-in stub_status module exposes basic connection metrics — no external exporter needed.
 
-**Step 1 — Add the status location block**
+### Step 1 — Add the status location
 
-Edit your nginx config and add inside a server block:
+Add this inside any server block (or a separate config file in sites-available/):
 
 ` + "```nginx" + `
 location /nginx_status {
@@ -82,31 +82,50 @@ location /nginx_status {
 }
 ` + "```" + `
 
-**Step 2 — Test and reload**
+The **access_log off** prevents scrape requests from polluting your access logs.
+
+### Step 2 — Test and reload
 
 ` + "```bash" + `
 sudo nginx -t
 sudo nginx -s reload
 ` + "```" + `
 
-**Step 3 — Verify**
+### Step 3 — Verify
 
 ` + "```bash" + `
 curl http://127.0.0.1:80/nginx_status
 ` + "```" + `
 
-The **access_log off** directive keeps metric scrapes out of your access logs.`,
+The platform's OTel collector scrapes stub_status automatically and feeds connection metrics (active, accepted, handled, requests) into the nginx dashboard.
+
+### Configure in the Platform
+
+1. Go to the service config page for Nginx
+2. Set Log Path to /var/log/nginx/access.log,/var/log/nginx/error.log and add each per-vhost log path (see below)
+3. Set Metrics Endpoint to http://127.0.0.1:80/nginx_status
+4. Set Metrics Mode to builtin
+5. Click Install Integration`,
 		LogsGuide: `## Nginx Log Collection
 
-Nginx writes access logs by default. Typically no changes are needed.
+Each virtual host (vhost) should have its own log pair. This is essential — per-domain analytics depend on separate log files. If everything goes to one file, you cannot tell which domain generated which request.
 
-**Verify log files exist:**
+### Default logs
 
 ` + "```bash" + `
 ls -la /var/log/nginx/
 ` + "```" + `
 
-If you configured the stub_status location block, it already includes **access_log off** to prevent metric scrapes from polluting your access logs.`,
+### Per-vhost logs (recommended)
+
+Each vhost should write its own access and error log:
+
+` + "```" + `
+/var/log/nginx/<vhost>.access.log
+/var/log/nginx/<vhost>.error.log
+` + "```" + `
+
+The platform agent detects all vhost logs automatically and routes them to the correct service dashboard.`,
 		DetectionHints: []string{"nginx", "openresty"},
 		NVD:            &NVDProduct{Vendor: "f5", Product: "nginx_open_source"},
 	},
@@ -121,65 +140,76 @@ If you configured the stub_status location block, it already includes **access_l
 		DefaultMetricsEndpoint: "http://127.0.0.1:8081/server-status?auto",
 		MetricsGuide: `## Apache Metrics (mod_status)
 
-Apache exposes server metrics via the built-in mod_status module.
+The built-in mod_status module exposes server metrics — no external exporter needed.
 
-**Step 1 — Enable the module**
+### Step 1 — Enable the module
 
 ` + "```bash" + `
 sudo a2enmod status
 sudo systemctl restart apache2
 ` + "```" + `
 
-**Step 2 — Verify**
+### Step 2 — Verify
 
 ` + "```bash" + `
 curl http://127.0.0.1:8081/server-status?auto
 ` + "```" + `
 
-Use the port your Apache instance is listening on. The ?auto parameter returns a machine-readable metrics format.`,
+The **?auto** parameter returns machine-readable metrics. Use your Apache listen port.
+
+The OTel collector scrapes mod_status automatically and feeds connection metrics (total requests, worker states, traffic, CPU) into the apache dashboard.
+
+### Configure in the Platform
+
+1. Go to the service config page for Apache
+2. Set Log Path to /var/log/apache2/error.log and each per-vhost access log (e.g. /var/log/apache2/your-domain.access.log)
+3. Set Metrics Endpoint to http://127.0.0.1:8081/server-status?auto
+4. Set Metrics Mode to builtin
+5. Click Install Integration`,
 		LogsGuide: `## Apache Log Collection
 
-**Step 1 — Add custom log format**
+Each virtual host (vhost) should have its own access log with the platform format. Per-domain analytics depend on separate log files.
 
-Edit **/etc/apache2/apache2.conf** and add after the existing LogFormat definitions:
+### Step 1 — Add custom log format
+
+Edit **/etc/apache2/apache2.conf** and add after the existing LogFormat:
 
 ` + "```apache" + `
 LogFormat "%a - %u %t \"%r\" %>s %B \"%{Referer}i\" \"%{User-Agent}i\" rt=%{ms}T" platform
 ` + "```" + `
 
-**Step 2 — Apply to each VirtualHost**
+### Step 2 — Apply to each VirtualHost
 
-For each domain, add the platform format and exclude **/server-status** from logs:
+For each vhost, use the platform format with its own log file and exclude /server-status from logs:
 
 ` + "```apache" + `
 <VirtualHost *:80>
     ServerName your-domain.com
-
     SetEnvIf Request_URI "^/server-status" dontlog
-
     ErrorLog  ${APACHE_LOG_DIR}/your-domain.error.log
     CustomLog ${APACHE_LOG_DIR}/your-domain.access.log platform env=!dontlog
 </VirtualHost>
 ` + "```" + `
 
-**Step 3 — Test and restart**
+### Step 3 — Test and restart
 
 ` + "```bash" + `
 sudo apache2ctl configtest
 sudo systemctl restart apache2
 ` + "```" + `
 
-**Step 4 — Verify**
+### Step 4 — Verify
 
 ` + "```bash" + `
 sudo tail -n 1 /var/log/apache2/your-domain.access.log
 ` + "```" + `
 
-Expected output:
-
+Expected format:
 ` + "```" + `
 192.168.1.10 - - [15/May/2026:16:33:00 +0000] "GET / HTTP/1.1" 200 612 "-" "curl/7.88" rt=12
-` + "```" + ``,
+` + "```" + `
+
+The platform agent detects all vhost logs automatically and routes them to the correct service dashboard.`,
 
 		DetectionHints: []string{"apache", "apache2", "httpd"},
 		NVD:            &NVDProduct{Vendor: "apache", Product: "http_server"},
@@ -198,40 +228,72 @@ Expected output:
 		MetricsGuide: `## Enable PostgreSQL Metrics (postgres_exporter + pg_stat_statements)
 
 Follow the complete instructions in the LogsGuide below (Parts 2 and 3).`,
-		LogsGuide: `Complete PostgreSQL Integration Guide
-BEFORE YOU START — DO NOT
+		LogsGuide: `## PostgreSQL Integration Guide
 
-* ❌ Do not use log_filename = 'postgresql-%Y-%m-%d.log' — daily rotation breaks log collection
+### BEFORE YOU START — DO NOT
+- ❌ Use log_filename = 'postgresql-%Y-%m-%d.log' — daily rotation breaks log collection
+- ❌ Set log_statement = 'all' unless you specifically need security auditing (massive log volume)
+- ❌ Skip the log_line_prefix — without it logs cannot be parsed
+- ❌ Set logging_collector = off — logs go to journald mixed with everything else
+- ❌ Skip pg_stat_statements — without it you lose per-query performance metrics
+- ❌ Assume postgresql.conf is the only source of truth — postgresql.auto.conf silently overrides it
 
-* ❌ Do not set log_statement = 'all' unless you specifically want security auditing — it creates massive log volume
+### Step 0 — Pre-Flight Checks
 
-* ❌ Do not skip the log_line_prefix — without it logs cannot be parsed
+Before changing anything, determine your environment.
 
-* ❌ Do not set logging_collector = off — logs go to journald mixed with everything else
+**0.1 — Find which PostgreSQL version is running**
+` + "```bash" + `
+sudo systemctl list-units --type=service | grep postgresql
+sudo systemctl status postgresql@XX-main   # your active version
+sudo ss -tlnp | grep 5432                  # confirm listening port
+` + "```" + `
+Note your active service name (e.g. postgresql@XX-main). You will need it throughout this guide instead of the generic "postgresql".
 
-* ❌ Do not skip pg_stat_statements — without it you lose per-query performance metrics
+**0.2 — Check for config override files**
+Debian/Ubuntu/Kali use conf.d/ and postgresql.auto.conf which silently override postgresql.conf.
+` + "```bash" + `
+ls -la /etc/postgresql/XX/main/conf.d/
+cat /etc/postgresql/XX/main/conf.d/*.conf 2>/dev/null
+sudo cat /var/lib/postgresql/XX/main/postgresql.auto.conf  # ALTER SYSTEM > postgresql.conf
+` + "```" + `
 
-PART 1 — Configure Log File
-Step 1 — Create log directory
+**0.3 — Check current running config source**
+` + "```bash" + `
+sudo -u postgres psql -c "SELECT name, setting, sourcefile FROM pg_settings WHERE name IN ('log_directory', 'log_filename', 'logging_collector', 'shared_preload_libraries', 'log_line_prefix');"
+` + "```" + `
+If sourcefile points to postgresql.auto.conf, you must clear it there first (Step 1.3).
 
+### Step 1 — Configure Log File
+
+**1.1 — Create log directory**
 ` + "```bash" + `
 sudo mkdir -p /var/log/postgresql
 sudo chown postgres:postgres /var/log/postgresql
 sudo chmod 755 /var/log/postgresql
 ` + "```" + `
 
-Step 2 — Find your postgresql.conf
-
+**1.2 — Backup your config**
 ` + "```bash" + `
-# Ubuntu/Debian
-sudo find /etc/postgresql -name "postgresql.conf"
-
-# RHEL/CentOS
-sudo find /var/lib/pgsql -name "postgresql.conf"
+sudo cp /etc/postgresql/XX/main/postgresql.conf /etc/postgresql/XX/main/postgresql.conf.bak.$(date +%Y%m%d)
 ` + "```" + `
 
-Step 3 — Edit postgresql.conf
+**1.3 — Clear any auto.conf overrides**
+If Step 0.3 showed auto.conf overrides:
+` + "```bash" + `
+sudo -u postgres psql -c "ALTER SYSTEM RESET log_directory;"
+sudo -u postgres psql -c "ALTER SYSTEM RESET log_filename;"
+sudo -u postgres psql -c "ALTER SYSTEM RESET log_line_prefix;"
+sudo -u postgres psql -c "ALTER SYSTEM RESET log_min_messages;"
+# verify it's clean:
+sudo cat /var/lib/postgresql/XX/main/postgresql.auto.conf
+` + "```" + `
 
+**1.4 — Edit postgresql.conf**
+` + "```bash" + `
+sudo nano /etc/postgresql/XX/main/postgresql.conf
+` + "```" + `
+Add or replace the logging section:
 ` + "```ini" + `
 # ── Logging destination ──────────────────────────────────────────
 logging_collector = on
@@ -246,68 +308,59 @@ log_truncate_on_rotation = off
 log_line_prefix = '%m [%p] %u@%d %r %a '
 
 # ── What to log ──────────────────────────────────────────────────
-log_min_duration_statement = 1000      # log queries slower than 1 second
+log_min_duration_statement = 1000      # log queries slower than 1s
 log_connections = on
 log_disconnections = on
 log_lock_waits = on
 log_checkpoints = on
-log_temp_files = 0
+log_temp_files = 0                     # log any temp file creation
 log_statement = 'ddl'                  # schema changes only
 ` + "```" + `
 
-For security auditing (logs every query — high volume):
-
-` + "```ini" + `
-log_statement = 'all'
-log_min_duration_statement = -1
-` + "```" + `
-
-Step 4 — Reload PostgreSQL
-
+**1.5 — Restart PostgreSQL**
 ` + "```bash" + `
-sudo systemctl reload postgresql
+sudo systemctl restart postgresql@XX-main
 ` + "```" + `
+On Debian/Kali, systemctl reload does not target the specific cluster. Use restart for settings requiring it (logging_collector, shared_preload_libraries), or pg_ctlcluster XX-main reload for dynamic settings.
 
-Step 5 — Verify
-
+**1.6 — Verify config was applied**
 ` + "```bash" + `
-ls -la /var/log/postgresql/
+sudo -u postgres psql -c "SHOW log_directory;"
+sudo -u postgres psql -c "SHOW log_filename;"
+sudo -u postgres psql -c "SHOW log_line_prefix;"
+sudo -u postgres psql -c "SELECT name, sourcefile FROM pg_settings WHERE name IN ('log_directory', 'log_filename', 'log_line_prefix');"
+` + "```" + `
+Expected: directory = /var/log/postgresql, filename = postgresql.log, sourcefile = postgresql.conf.
+
+**1.7 — Verify log file exists**
+` + "```bash" + `
+ls -la /var/log/postgresql/postgresql.log
+# Generate test events:
+sudo -u postgres psql -c "SELECT pg_sleep(1.5);"   # slow query
+sudo -u postgres psql -c "CREATE TABLE test_log (id INT); DROP TABLE test_log;"  # DDL
 tail -n 20 /var/log/postgresql/postgresql.log
 ` + "```" + `
+Expected lines: "duration: 1502.234 ms" and "LOG: statement: CREATE TABLE".
 
-You should see lines like:
+### Step 2 — Configure Metrics (pg_stat_statements)
 
-` + "```" + `
-2025-01-15 14:23:01.123 UTC [1234] app@mydb 192.168.1.5(52341) rails connection received: ...
-` + "```" + `
-
-If file is empty, restart instead:
-
+**2.1 — Enable pg_stat_statements**
 ` + "```bash" + `
-sudo systemctl restart postgresql
-` + "```" + `
-
-PART 2 — Configure Metrics
-Step 1 — Enable pg_stat_statements
-
-` + "```bash" + `
-sudo -u postgres psql <<SQL
+sudo -u postgres psql <<'SQL'
 ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
 ALTER SYSTEM SET pg_stat_statements.max = '10000';
 ALTER SYSTEM SET pg_stat_statements.track = 'all';
 SQL
 ` + "```" + `
 
-Step 2 — Restart PostgreSQL (required)
-
+**2.2 — Restart PostgreSQL (required for shared_preload_libraries)**
 ` + "```bash" + `
-sudo systemctl restart postgresql
+sudo systemctl restart postgresql@XX-main
 ` + "```" + `
 
-Step 3 — Create the extension and monitoring user
-
+**2.3 — Create extension and monitoring user**
 ` + "```bash" + `
-sudo -u postgres psql <<SQL
+sudo -u postgres psql <<'SQL'
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 CREATE USER monitoring WITH PASSWORD 'choose_a_strong_password_here';
@@ -316,43 +369,44 @@ GRANT CONNECT ON DATABASE postgres TO monitoring;
 SQL
 ` + "```" + `
 
-Step 4 — Verify monitoring user works
-
+**2.4 — Verify monitoring user works**
 ` + "```bash" + `
-psql -h localhost -U monitoring -d postgres \
-  -c "SELECT count(*) FROM pg_stat_statements;"
+psql -h localhost -U monitoring -d postgres -c "SELECT count(*) FROM pg_stat_statements;"
 ` + "```" + `
 
-PART 3 — Install postgres_exporter
-Step 1 — Download postgres_exporter
+### Step 3 — Install postgres_exporter
 
+**3.1 — Download and install**
 ` + "```bash" + `
+cd /tmp
+
 # Check latest version at https://github.com/prometheus-community/postgres_exporter/releases
-wget https://github.com/prometheus-community/postgres_exporter/releases/download/v0.15.0/postgres_exporter-0.15.0.linux-amd64.tar.gz
-tar xzf postgres_exporter-0.15.0.linux-amd64.tar.gz
-sudo mv postgres_exporter-0.15.0.linux-amd64/postgres_exporter /usr/local/bin/
+wget https://github.com/prometheus-community/postgres_exporter/releases/download/v0.19.1/postgres_exporter-0.19.1.linux-amd64.tar.gz
+tar xzf postgres_exporter-0.19.1.linux-amd64.tar.gz
+sudo mv postgres_exporter-0.19.1.linux-amd64/postgres_exporter /usr/local/bin/
 sudo chmod +x /usr/local/bin/postgres_exporter
+postgres_exporter --version   # verify
 ` + "```" + `
 
-Step 2 — Create environment file
-
+**3.2 — Create environment file**
 ` + "```bash" + `
-sudo tee /etc/postgres_exporter.env <<EOF
-DATA_SOURCE_NAME=postgresql://monitoring:choose_a_strong_password_here@localhost/postgres?sslmode=disable
+sudo tee /etc/postgres_exporter.env <<'EOF'
+DATA_SOURCE_NAME=postgresql://monitoring:choose_a_strong_password_here@localhost:5432/postgres?sslmode=disable
 EOF
 sudo chmod 600 /etc/postgres_exporter.env
 ` + "```" + `
 
-Step 3 — Create systemd service
-
+**3.3 — Create systemd service**
+Use your actual PostgreSQL service name in After= (e.g. postgresql@XX-main).
 ` + "```bash" + `
-sudo tee /etc/systemd/system/postgres_exporter.service <<EOF
+sudo tee /etc/systemd/system/postgres_exporter.service <<'EOF'
 [Unit]
 Description=PostgreSQL Exporter
-After=network.target postgresql.service
+After=network.target postgresql@XX-main.service
 
 [Service]
 User=root
+Group=root
 EnvironmentFile=/etc/postgres_exporter.env
 ExecStart=/usr/local/bin/postgres_exporter
 Restart=always
@@ -363,29 +417,23 @@ WantedBy=multi-user.target
 EOF
 ` + "```" + `
 
-Step 4 — Start the exporter
-
+**3.4 — Start the exporter**
 ` + "```bash" + `
 sudo systemctl daemon-reload
 sudo systemctl enable --now postgres_exporter
+sudo systemctl status postgres_exporter
 ` + "```" + `
 
-Step 5 — Verify exporter is working
-
+**3.5 — Verify exporter is working**
 ` + "```bash" + `
-sudo systemctl status postgres_exporter
 curl -s http://localhost:9187/metrics | grep pg_up
 ` + "```" + `
-
-PART 4 — If PostgreSQL Is Currently Logging to journald
-Check:
-
+Expected: pg_up 1. If pg_up 0:
 ` + "```bash" + `
-sudo journalctl -u postgresql --no-pager | head -5
+sudo journalctl -u postgres_exporter --no-pager -n 20
 ` + "```" + `
 
-PART 5 — Configure in the Platform
-After completing Parts 1, 2, and 3:
+### Step 4 — Configure in the Platform
 
 1. Go to the service config page for PostgreSQL
 2. Set Log Path to /var/log/postgresql/postgresql.log
@@ -393,44 +441,52 @@ After completing Parts 1, 2, and 3:
 4. Set Metrics Mode to prometheus
 5. Click Install Integration
 
-PART 6 — What You Will See in the Platform
+### What You Will See
 
-From logs:
-
+**From logs:**
 | Event | What you learn |
 |-------|----------------|
-| Slow query | Which query, how slow, which user, which database, which app |
+| Slow query | Which query, how slow, which user, database, app |
 | Auth failure | Failed login with username and client IP |
-| Connection | Every connection with user, database, client IP, application name |
+| Connection | User, database, client IP, application name |
 | Lock wait | Which query is blocked and for how long |
 | Schema change | Every CREATE, DROP, ALTER with full SQL |
-| Errors | Application errors at database level |
 
-From metrics:
-
+**From metrics:**
 | Metric | What it tells you |
 |--------|-------------------|
-| Cache hit ratio | Below 95% means reading from disk — need more RAM or better indexes |
-| Active connections | How close to max_connections limit |
-| Query avg execution time | Which query patterns are slowest |
-| Query call count | Which queries run most frequently |
+| Cache hit ratio | Below 95% = reading from disk (need more RAM or better indexes) |
+| Active connections | How close to max_connections |
+| Query exec time | Which query patterns are slowest |
 | Sequential scans | Which tables are missing indexes |
 | Dead rows | Whether VACUUM needs to run |
 | Database size | How fast data is growing |
-| Deadlocks | Application-level transaction conflicts |
-| Temp files | PostgreSQL spilling to disk — memory pressure |
+| Deadlocks | Transaction conflicts |
+| Temp files | Spilling to disk = work_mem too small |
 | Transaction rate | Commits and rollbacks per second |
 
-PART 7 — Checklist Before Clicking Install Integration
+### Checklist Before Installing
 
 - [ ] /var/log/postgresql/postgresql.log exists and has content
 - [ ] log_line_prefix is exactly '%m [%p] %u@%d %r %a '
 - [ ] log_filename is exactly 'postgresql.log'
+- [ ] log_directory is '/var/log/postgresql' (not 'log')
 - [ ] curl http://localhost:9187/metrics | grep pg_up returns pg_up 1
-- [ ] You have entered the log path and metrics endpoint in the platform config page`,
+- [ ] pg_stat_statements extension is active and monitoring user can query it
+- [ ] Log path and metrics endpoint are entered in the platform config page
+
+### Troubleshooting
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Config changes ignored | postgresql.auto.conf overrides postgresql.conf | ALTER SYSTEM RESET <setting> |
+| systemctl reload doesn't work | Service is postgresql@XX-main, not postgresql | Use restart or pg_ctlcluster XX-main reload |
+| Log file doesn't appear | log_directory or log_filename defaults still active | Check SHOW output; clear auto.conf overrides |
+| pg_up returns 0 | Exporter can't connect | Check journalctl for postgres_exporter; verify password and pg_monitor role |
+| Two PG versions installed | Multiple clusters active | Apply all steps to the active cluster only (check systemctl) |`,
 		JournaledLogGuide: `PostgreSQL is currently logging to journald.
 
-Follow PART 1 in the LogsGuide above to switch to a static file for proper collection.`,
+Follow Step 1 in the LogsGuide above to switch to a static file for proper collection.`,
 		DetectionHints: []string{"postgres", "postgresql"},
 		NVD:            &NVDProduct{Vendor: "postgresql", Product: "postgresql"},
 	},
@@ -453,11 +509,11 @@ Follow the complete instructions in the LogsGuide below. Metrics come from:
 - the query digest collector writing Prometheus text metrics to /var/lib/agent-prom/mariadb_query_digests.prom`,
 		LogsGuide: `Complete MariaDB Integration Guide
 
-BEFORE YOU START
+┃ MariaDB ◆ BEFORE YOU START
 
 This guide assumes MariaDB is already installed. Do not use root for collectors. Create a least-privilege monitor user and use that user for mysqld_exporter and the query digest collector.
 
-PART 1 — Configure MariaDB for Observability
+┃ MariaDB ◆ PART 1 — Configure MariaDB for Observability
 
 Step 1 — Edit the server config
 
@@ -508,7 +564,7 @@ sudo mariadb -u root -p -e "SHOW VARIABLES LIKE 'log_warnings';"
 
 Expected: performance_schema is ON, slow_query_log is ON, slow_query_log_file is /var/log/mysql/slow.log, log_error is /var/log/mysql/error.log.
 
-PART 2 — Create the Monitoring User
+┃ MariaDB ◆ PART 2 — Create the Monitoring User
 
 ` + "```bash" + `
 sudo mariadb -u root -p
@@ -536,12 +592,14 @@ Verify:
 mariadb -u monitor -p -e "SELECT * FROM performance_schema.events_statements_summary_by_digest LIMIT 1;"
 ` + "```" + `
 
-PART 3 — Install mysqld_exporter
+┃ MariaDB ◆ PART 3 — Install mysqld_exporter
 
 Step 1 — Download and install
 
 ` + "```bash" + `
 cd /tmp
+
+# Check latest version at https://github.com/prometheus/mysqld_exporter/releases
 wget https://github.com/prometheus/mysqld_exporter/releases/download/v0.15.1/mysqld_exporter-0.15.1.linux-amd64.tar.gz
 tar xzf mysqld_exporter-0.15.1.linux-amd64.tar.gz
 sudo mv mysqld_exporter-0.15.1.linux-amd64/mysqld_exporter /usr/local/bin/
@@ -600,7 +658,7 @@ sudo systemctl enable --now mysqld_exporter
 curl -s http://127.0.0.1:9104/metrics | grep mysql_up
 ` + "```" + `
 
-PART 4 — Add Query Digest Metrics
+┃ MariaDB ◆ PART 4 — Add Query Digest Metrics
 
 The platform agent already exposes /var/lib/agent-prom/*.prom through its local Prometheus file server. This collector writes query digest metrics there, so they flow into VictoriaMetrics through the existing agent pipeline.
 
@@ -634,11 +692,14 @@ TMP_FILE=$(mktemp)
 mkdir -p "$PROM_DIR"
 COLLECTED_EPOCH=$(date +%s)000
 
+# NOTE: Counter-type metrics get _total appended by the OTel collector
+# when metric names don't already end in _total. The names below match
+# what appears in VictoriaMetrics, not the raw file output.
 cat > "$TMP_FILE" <<HEADER
-# HELP mariadb_query_digest_exec_count Total executions of this query digest since server start
-# TYPE mariadb_query_digest_exec_count counter
-# HELP mariadb_query_digest_total_time_seconds Total time spent on this digest since server start
-# TYPE mariadb_query_digest_total_time_seconds counter
+# HELP mariadb_query_digest_exec_count_total Total executions of this query digest since server start
+# TYPE mariadb_query_digest_exec_count_total counter
+# HELP mariadb_query_digest_time_seconds_total Total time spent on this digest since server start
+# TYPE mariadb_query_digest_time_seconds_total counter
 # HELP mariadb_query_digest_avg_time_seconds Average execution time for this digest
 # TYPE mariadb_query_digest_avg_time_seconds gauge
 # HELP mariadb_query_digest_max_time_seconds Max execution time seen for this digest
@@ -647,8 +708,8 @@ cat > "$TMP_FILE" <<HEADER
 # TYPE mariadb_query_digest_rows_examined_total counter
 # HELP mariadb_query_digest_rows_sent_total Total rows sent by this digest
 # TYPE mariadb_query_digest_rows_sent_total counter
-# HELP mariadb_query_digest_no_index_used_count Executions that did not use an index
-# TYPE mariadb_query_digest_no_index_used_count counter
+# HELP mariadb_query_digest_no_index_used_count_total Executions that did not use an index
+# TYPE mariadb_query_digest_no_index_used_count_total counter
 # HELP mariadb_query_digest_tmp_tables_total Temporary tables created by this digest
 # TYPE mariadb_query_digest_tmp_tables_total counter
 # HELP mariadb_query_digest_tmp_disk_tables_total Temporary disk tables created by this digest
@@ -677,19 +738,22 @@ LIMIT 100;
     qt=${query_text//\\/\\\\}
     qt=${qt//\"/\\\"}
     labels="digest=\"${digest}\",db=\"${db}\",digest_text=\"${qt}\""
-    printf 'mariadb_query_digest_exec_count{%s} %s %s\n' "$labels" "$exec_count" "$COLLECTED_EPOCH" >> "$TMP_FILE"
-    printf 'mariadb_query_digest_total_time_seconds{%s} %s %s\n' "$labels" "$total_time" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    # The OTel prometheus receiver normalizes counter names by ensuring
+    # _total is at the end. Metrics written here as counters WITHOUT
+    # a trailing _total get it appended automatically in VictoriaMetrics.
+    printf 'mariadb_query_digest_exec_count_total{%s} %s %s\n' "$labels" "$exec_count" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_time_seconds_total{%s} %s %s\n' "$labels" "$total_time" "$COLLECTED_EPOCH" >> "$TMP_FILE"
     printf 'mariadb_query_digest_avg_time_seconds{%s} %s %s\n' "$labels" "$avg_time" "$COLLECTED_EPOCH" >> "$TMP_FILE"
     printf 'mariadb_query_digest_max_time_seconds{%s} %s %s\n' "$labels" "$max_time" "$COLLECTED_EPOCH" >> "$TMP_FILE"
     printf 'mariadb_query_digest_rows_examined_total{%s} %s %s\n' "$labels" "$rows_examined" "$COLLECTED_EPOCH" >> "$TMP_FILE"
     printf 'mariadb_query_digest_rows_sent_total{%s} %s %s\n' "$labels" "$rows_sent" "$COLLECTED_EPOCH" >> "$TMP_FILE"
-    printf 'mariadb_query_digest_no_index_used_count{%s} %s %s\n' "$labels" "$no_index" "$COLLECTED_EPOCH" >> "$TMP_FILE"
+    printf 'mariadb_query_digest_no_index_used_count_total{%s} %s %s\n' "$labels" "$no_index" "$COLLECTED_EPOCH" >> "$TMP_FILE"
     printf 'mariadb_query_digest_tmp_tables_total{%s} %s %s\n' "$labels" "$tmp_tables" "$COLLECTED_EPOCH" >> "$TMP_FILE"
     printf 'mariadb_query_digest_tmp_disk_tables_total{%s} %s %s\n' "$labels" "$tmp_disk" "$COLLECTED_EPOCH" >> "$TMP_FILE"
 done
 
 mv "$TMP_FILE" "$PROM_FILE"
-echo "Emitted $(grep -c 'mariadb_query_digest_exec_count' "$PROM_FILE" 2>/dev/null || echo 0) query digest metric sets to $PROM_FILE"
+echo "Emitted $(grep -c 'mariadb_query_digest_exec_count_total' "$PROM_FILE" 2>/dev/null || echo 0) query digest metric sets to $PROM_FILE"
 EOF
 sudo chmod +x /opt/observability/query_collector.sh
 ` + "```" + `
@@ -734,7 +798,7 @@ head -20 /var/lib/agent-prom/mariadb_query_digests.prom
 sudo systemctl list-timers --all | grep query-collector
 ` + "```" + `
 
-PART 5 — Configure in the Platform
+┃ MariaDB ◆ PART 5 — Configure in the Platform
 
 1. Go to the service config page for MariaDB / MySQL
 2. Set Log Path to /var/log/mysql/error.log,/var/log/mysql/slow.log if both are available
@@ -742,7 +806,7 @@ PART 5 — Configure in the Platform
 4. Set Metrics Mode to prometheus or catalog
 5. Click Install Integration
 
-PART 6 — Checklist Before Clicking Install Integration
+┃ MariaDB ◆ PART 6 — Checklist Before Clicking Install Integration
 
 - [ ] performance_schema is ON
 - [ ] /var/log/mysql/error.log exists and has content
@@ -766,18 +830,21 @@ PART 6 — Checklist Before Clicking Install Integration
 		ExporterPort:           9121,
 		MetricsGuide: `## Redis Metrics (redis_exporter)
 
-Redis exposes metrics via a Prometheus exporter — there is no built-in HTTP endpoint.
+Redis has no built-in HTTP endpoint — metrics come from a standalone Prometheus exporter.
 
-**Step 1 — Install redis_exporter**
+### Step 1 — Install redis_exporter
 
 ` + "```bash" + `
+cd /tmp
+
+# Check latest version at https://github.com/oliver006/redis_exporter/releases
 wget https://github.com/oliver006/redis_exporter/releases/download/v1.58.0/redis_exporter-v1.58.0.linux-amd64.tar.gz
 tar xzf redis_exporter-v1.58.0.linux-amd64.tar.gz
 sudo mv redis_exporter-v1.58.0.linux-amd64/redis_exporter /usr/local/bin/
 sudo chmod +x /usr/local/bin/redis_exporter
 ` + "```" + `
 
-**Step 2 — Create systemd service**
+### Step 2 — Create systemd service
 
 ` + "```bash" + `
 sudo tee /etc/systemd/system/redis_exporter.service <<EOF
@@ -791,7 +858,9 @@ User=root
 ExecStart=/usr/local/bin/redis_exporter \\
   --redis.addr redis://localhost:6379 \\
   --web.listen-address 127.0.0.1:9121 \\
-  --include-system-metrics
+  --include-system-metrics \\
+  --check-keys "" \\
+  --is-tile38=false
 Restart=always
 
 [Install]
@@ -799,7 +868,9 @@ WantedBy=multi-user.target
 EOF
 ` + "```" + `
 
-**Step 3 — Start and verify**
+Binding to **127.0.0.1:9121** keeps Redis metrics local-only — same security model as nginx stub_status.
+
+### Step 3 — Start and verify
 
 ` + "```bash" + `
 sudo systemctl daemon-reload
@@ -807,10 +878,18 @@ sudo systemctl enable --now redis_exporter
 curl -s http://127.0.0.1:9121/metrics | grep redis_up
 ` + "```" + `
 
-The **--web.listen-address 127.0.0.1:9121** flag binds the exporter to localhost only — same security model as Nginx stub_status.`,
+The OTel collector scrapes redis_exporter automatically and feeds memory, keyspace, client, and command metrics into the redis dashboard.
+
+### Configure in the Platform
+
+1. Go to the service config page for Redis
+2. Set Log Path to /var/log/redis/redis-server.log
+3. Set Metrics Endpoint to http://127.0.0.1:9121/metrics
+4. Set Metrics Mode to prometheus
+5. Click Install Integration`,
 		LogsGuide: `## Redis Log Collection
 
-**Step 1 — Configure logging in redis.conf**
+### Step 1 — Configure redis.conf
 
 Edit **/etc/redis/redis.conf**:
 
@@ -818,10 +897,10 @@ Edit **/etc/redis/redis.conf**:
 logfile /var/log/redis/redis-server.log
 loglevel notice
 slowlog-log-slower-than 10000
-slowlog-max-len 256
+slowlog-max-len 128
 ` + "```" + `
 
-**Step 2 — Create log directory**
+### Step 2 — Create log directory
 
 ` + "```bash" + `
 sudo mkdir -p /var/log/redis
@@ -829,7 +908,7 @@ sudo chown redis:redis /var/log/redis
 sudo chmod 755 /var/log/redis
 ` + "```" + `
 
-**Step 3 — Restart and verify**
+### Step 3 — Restart and verify
 
 ` + "```bash" + `
 sudo systemctl restart redis-server
@@ -837,12 +916,11 @@ sudo tail -n 20 /var/log/redis/redis-server.log
 ` + "```" + `
 
 Expected output:
-
 ` + "```" + `
 1016:M 20 May 2026 11:38:45.591 * Ready to accept connections tcp
 ` + "```" + `
 
-Log lines prefixed with **#** are warnings and errors — these are your actionable alerts.`,
+Lines prefixed with **#** are warnings and errors — these are your actionable alerts.`,
 		DetectionHints: []string{"redis", "redis-server"},
 		NVD:            &NVDProduct{Vendor: "redis", Product: "redis"},
 	},
@@ -865,7 +943,7 @@ Follow the complete instructions in the LogsGuide below. Metrics come from:
 - the OPcache collector writing Prometheus text metrics to /var/lib/agent-prom/phpfpm_opcache.prom (optional)`,
 		LogsGuide: `Complete PHP-FPM Integration Guide
 
-BEFORE YOU START — DO NOT
+┃ PHP-FPM ⚡ BEFORE YOU START — DO NOT
 
 * ❌ Do not skip enabling pm.status_path — without it the exporter cannot collect any pool metrics
 * ❌ Do not use the default access.log format — it omits memory and CPU which are the most valuable PHP-specific fields
@@ -873,7 +951,7 @@ BEFORE YOU START — DO NOT
 * ❌ Do not use root for the exporter — create a dedicated system user with socket read access
 * ❌ Do not skip the access log — it provides script-level memory and CPU data that Nginx/Apache cannot provide
 
-PART 1 — Configure PHP-FPM Pool
+┃ PHP-FPM ⚡ PART 1 — Configure PHP-FPM Pool
 
 PHP-FPM configuration is split between a main config file (php-fpm.conf) and per-pool files (e.g. www.conf).
 Almost everything you need to change is in the pool file.
@@ -914,6 +992,14 @@ ping.response = pong
 access.suppress_path[] = /status
 access.suppress_path[] = /ping
 access.suppress_path[] = /internal/opcache-collector
+` + "```" + `
+
+**Important**: Add a dedicated status listener on a TCP port. This creates a separate process for the status endpoint that stays responsive even when all pool workers are busy. Without this, php-fpm_exporter cannot scrape metrics during worker saturation, and the platform cannot detect out-of-workers conditions.
+
+` + "```ini" + `
+; Dedicated status listener — survives pool saturation
+; Use port 9001 for the first pool, 9002 for the second, etc.
+pm.status_listen = 127.0.0.1:9001
 ` + "```" + `
 
 Step 3 — Enable the access log with the platform format
@@ -1011,7 +1097,7 @@ If the access log is empty, check that access.log is uncommented and the log dir
 
 Pool metrics are verified in Part 2 Step 5 after the exporter is installed.
 
-PART 2 — Install php-fpm_exporter
+┃ PHP-FPM ⚡ PART 2 — Install php-fpm_exporter
 
 The exporter connects directly to the PHP-FPM Unix socket and exposes pool metrics in Prometheus format on port 9253. No web server is required — it speaks FastCGI directly.
 
@@ -1042,48 +1128,22 @@ sudo mv php-fpm_exporter /usr/local/bin/
 sudo chmod +x /usr/local/bin/php-fpm_exporter
 ` + "```" + `
 
-Step 3 — Create a system user with socket access
+Step 3 — Start the exporter
 
 ` + "```bash" + `
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin phpfpm-exporter
-sudo usermod -aG www-data phpfpm-exporter
+nohup /usr/local/bin/php-fpm_exporter server \\
+  --phpfpm.scrape-uri "tcp://127.0.0.1:9001/status" \\
+  --phpfpm.scrape-uri "tcp://127.0.0.1:9002/status" \\
+  --web.listen-address "127.0.0.1:9253" \
+  > /var/log/php-fpm-exporter.log 2>&1 &
 ` + "```" + `
 
-Step 4 — Create the systemd service
+Use port 9001 for the first pool, 9002 for the second, one port per pool.
+If you have only one pool, use a single --phpfpm.scrape-uri flag.
 
-Create one --phpfpm.scrape-uri flag per pool, using the socket paths you found in Step 1.
-
-` + "```bash" + `
-sudo tee /etc/systemd/system/phpfpm-exporter.service <<EOF
-[Unit]
-Description=PHP-FPM Exporter
-After=network.target
-
-[Service]
-Type=simple
-User=phpfpm-exporter
-Group=phpfpm-exporter
-ExecStart=/usr/local/bin/php-fpm_exporter server \\
-  --phpfpm.scrape-uri "unix:///SOCKET_PATH_1;/status" \\
-  --phpfpm.scrape-uri "unix:///SOCKET_PATH_2;/status" \\
-  --web.listen-address "127.0.0.1:9253"
-Restart=always
-RestartSec=5s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-` + "```" + `
-
-Replace SOCKET_PATH_1, SOCKET_PATH_2 etc. with the actual socket paths from Step 1.
-If you have only one pool, just use a single --phpfpm.scrape-uri flag.
-
-Step 5 — Start and verify
+Step 4 — Verify
 
 ` + "```bash" + `
-sudo systemctl daemon-reload
-sudo systemctl enable --now phpfpm-exporter
-sudo systemctl status phpfpm-exporter
 curl -s http://127.0.0.1:9253/metrics | grep phpfpm_up
 ` + "```" + `
 
@@ -1094,9 +1154,9 @@ phpfpm_up{pool="www"} 1
 phpfpm_up{pool="laravel"} 1
 ` + "```" + `
 
-If phpfpm_up is 0 for a pool, the exporter cannot reach that pool's socket. Check the socket path and that the phpfpm-exporter user is in the web server group.
+If phpfpm_up is 0 for a pool, the exporter cannot reach that pool's socket path.
 
-PART 3 — Configure Log Collection
+┃ PHP-FPM ⚡ PART 3 — Configure Log Collection
 
 Your platform agent already monitors the log paths set in Part 1. No additional software is needed — just verify the paths are correct.
 
@@ -1124,7 +1184,7 @@ sudo php-fpmX.Y --test 2>&1 | grep -i log   # Debian/Ubuntu
 sudo php-fpm --test 2>&1 | grep -i log      # RHEL/CentOS
 ` + "```" + `
 
-PART 4 — OPcache Collector (Optional — Bonus Dashboard)
+┃ PHP-FPM ⚡ PART 4 — OPcache Collector (Optional — Bonus Dashboard)
 
 This is the same pattern as the MariaDB query digest collector. A PHP script calls opcache_get_status() and the collector writes Prometheus metrics to /var/lib/agent-prom/phpfpm_opcache.prom, which the platform agent already picks up through its prom-file-server.
 
@@ -1333,7 +1393,7 @@ After completing Parts 1-3 (and optionally Part 4):
 4. Set Metrics Mode to prometheus
 5. Click Install Integration
 
-PART 6 — What You Will See in the Platform
+┃ PHP-FPM ⚡ PART 6 — What You Will See in the Platform
 
 From metrics (php-fpm_exporter):
 
@@ -1383,7 +1443,7 @@ From OPcache collector (if enabled):
 | Wasted memory | High wasted % after deployments — consider opcache_reset() in deploy scripts |
 | Restarts | OOM restarts mean OPcache ran out of memory and had to clear itself |
 
-PART 7 — Checklist Before Clicking Install Integration
+┃ PHP-FPM ⚡ PART 7 — Checklist Before Clicking Install Integration
 
 - [ ] pm.status_path = /status is set in the pool config
 - [ ] access.suppress_path[] entries are set for /status, /ping, /internal/opcache-collector (/status?json&full handled by agent filter)
@@ -1395,6 +1455,8 @@ PART 7 — Checklist Before Clicking Install Integration
 - [ ] curl http://127.0.0.1:9253/metrics | grep phpfpm_up returns phpfpm_up{pool="..."} 1 for every pool
 - [ ] /var/log/php-fpm/error.log exists
 - [ ] All log paths and the metrics endpoint are entered in the platform config page
+- [ ] pm.status_listen = 127.0.0.1:9001 (one port per pool) is set so the status endpoint survives worker saturation
+- [ ] curl http://127.0.0.1:9001/status (via cgi-fcgi) returns pool metrics even when all workers are busy
 - [ ] (Optional) /var/lib/agent-prom/phpfpm_opcache.prom exists if OPcache collector is enabled`,
 		JournaledLogGuide: `PHP-FPM may be logging to journald if error_log is not set or points to /dev/stderr.
 

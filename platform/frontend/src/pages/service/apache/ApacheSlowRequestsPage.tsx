@@ -55,7 +55,7 @@ function SlowRequestRow({
       <button
         type="button"
         onClick={onToggle}
-        className="grid w-full grid-cols-1 gap-2 px-3 py-3 text-left text-xs hover:bg-muted/40 md:grid-cols-[180px_132px_76px_78px_minmax(0,1fr)_96px] md:items-center md:gap-3"
+        className="grid w-full grid-cols-1 gap-2 px-3 py-3 text-left text-sm hover:bg-muted/40 md:grid-cols-[180px_132px_76px_78px_minmax(0,1fr)_96px] md:items-center md:gap-3"
       >
         <span className="font-mono text-muted-foreground" title={req.timestamp || undefined}>
           {req.timestamp || '-'}
@@ -85,7 +85,7 @@ function SlowRequestRow({
         </span>
       </button>
       {expanded ? (
-        <div className="border-t border-border bg-muted/30 px-3 py-3 text-xs">
+        <div className="border-t border-border bg-muted/30 px-3 py-3 text-sm">
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <div>
               <span className="text-muted-foreground">Client IP:</span>{' '}
@@ -188,7 +188,7 @@ export function ApacheSlowRequestsPage() {
               </>
             ) : null}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             {formatWindowLabel(start, end)} • RT &gt; {minRT}s
           </p>
         </div>

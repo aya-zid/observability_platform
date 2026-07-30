@@ -26,7 +26,7 @@ import {
 } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
 import { RefreshCw } from "lucide-react"
-import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
+import { useTranslation } from "@/i18n/LanguageContext"
 
 function getTimeWindow(selection: TimeSelection) {
   if (selection.mode === "preset") {
@@ -105,7 +105,6 @@ export function RedisDashboardPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
-            <LangToggle />
             <button
               type="button"
               onClick={() => dashQuery.refetch()}

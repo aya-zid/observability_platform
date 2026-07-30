@@ -110,6 +110,34 @@ func (r *DiscoveryRepository) ReplaceServiceLogPathsCtx(ctx context.Context, ten
 	return nil
 }
 
+func (r *DiscoveryRepository) TouchServiceHeartbeatCtx(ctx context.Context, tenantID uint, machineID string, serviceNames []string) error {
+	if len(serviceNames) == 0 {
+		return nil
+	}
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&domain.DiscoveredService{}).
+		Where("tenant_id = ? AND machine_id = ? AND service_name IN ?", tenantID, machineID, serviceNames).
+		Updates(map[string]interface{}{
+			"last_seen_at": now,
+			"updated_at":   now,
+		}).Error
+}
+
+func (r *DiscoveryRepository) TouchContainerHeartbeatCtx(ctx context.Context, tenantID uint, machineID string, containerNames []string) error {
+	if len(containerNames) == 0 {
+		return nil
+	}
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&domain.DiscoveredContainerService{}).
+		Where("tenant_id = ? AND machine_id = ? AND container_name IN ?", tenantID, machineID, containerNames).
+		Updates(map[string]interface{}{
+			"last_seen_at": now,
+			"updated_at":   now,
+		}).Error
+}
+
 func (r *DiscoveryRepository) UpsertContainerServiceCtx(ctx context.Context, rec domain.DiscoveredContainerService) error {
 	now := time.Now()
 	rec.LastSeenAt = now
@@ -147,6 +175,20 @@ func (r *DiscoveryRepository) ListContainerServicesByTenantCtx(ctx context.Conte
 		Order("machine_id ASC, container_name ASC").
 		Find(&rows).Error
 	return rows, err
+}
+
+func (r *DiscoveryRepository) FindContainerByNameMachineCtx(ctx context.Context, tenantID uint, machineID string, containerName string) (*domain.DiscoveredContainerService, error) {
+	var row domain.DiscoveredContainerService
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND machine_id = ? AND container_name = ?", tenantID, machineID, containerName).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
 }
 
 func (r *DiscoveryRepository) FindContainerServiceByIDTenantCtx(ctx context.Context, tenantID uint, serviceID uint) (*domain.DiscoveredContainerService, error) {

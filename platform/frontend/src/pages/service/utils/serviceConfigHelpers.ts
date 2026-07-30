@@ -1,4 +1,3 @@
-import type { LucideIcon } from "lucide-react"
 import type { VirtualHostEntry } from "@/pages/service/components/WebServerVirtualHostsSection"
 
 export function adaptGuideToPort(guide: string, defaultEndpoint: string | undefined, detectedPort?: number) {

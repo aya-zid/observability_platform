@@ -30,47 +30,47 @@ const statusDot: Record<string, string> = {
 export function CorrelationFindings({ findings }: { findings: Finding[] | null | undefined }) {
   if (!findings || findings.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-border bg-card/30 p-6 text-center text-xs text-muted-foreground">
         No correlation findings — all dependency chains look healthy
       </div>
     )
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {findings.map((f) => {
         const cfg = severityConfig[f.severity] ?? severityConfig.info
         return (
           <div
             key={f.id}
-            className={cn("rounded-lg border bg-card/70 p-4", cfg.border)}
+            className={cn("rounded-lg border bg-card/70 p-3", cfg.border)}
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={cn("inline-block h-2 w-2 rounded-full", statusDot[f.severity])} />
-                  <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", cfg.badge)}>
+                <div className="flex items-center gap-1.5">
+                  <span className={cn("inline-block h-1.5 w-1.5 rounded-full shrink-0", statusDot[f.severity])} />
+                  <span className={cn("rounded px-1 py-0.5 text-[11px] font-medium leading-none", cfg.badge)}>
                     {cfg.label}
                   </span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-[11px] text-muted-foreground">
                     {f.hostname} · {f.rule_id}
                   </span>
-                  <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                  <span className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">
                     {f.duration}
                   </span>
                 </div>
-                <h4 className="mt-1.5 text-sm font-medium">{f.title}</h4>
-                <p className="mt-1 text-xs text-muted-foreground">{f.message}</p>
+                <h4 className="mt-1 text-xs font-semibold">{f.title}</h4>
+                <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">{f.message}</p>
               </div>
             </div>
 
             {f.evidence.length > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {f.evidence.map((e, i) => (
                   <span
                     key={i}
                     className={cn(
-                      "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs",
+                      "inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px]",
                       e.status === "critical"
                         ? "border-red-200 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20"
                         : e.status === "warning"
@@ -85,22 +85,20 @@ export function CorrelationFindings({ findings }: { findings: Finding[] | null |
               </div>
             ) : null}
 
-            {/* Recommended action */}
             {f.recommended_action ? (
-              <div className="mt-3 flex items-start gap-2 rounded-md border border-border bg-background/50 p-2 text-xs">
-                <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
-                <span className="text-muted-foreground">{f.recommended_action}</span>
+              <div className="mt-2 flex items-start gap-1.5 rounded-md border border-border bg-background/50 p-1.5 text-[11px]">
+                <Lightbulb className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
+                <span className="text-muted-foreground leading-relaxed">{f.recommended_action}</span>
               </div>
             ) : null}
 
-            {/* Investigation link */}
             {f.dashboard_link ? (
-              <div className="mt-2">
+              <div className="mt-1.5">
                 <a
                   href={f.dashboard_link}
-                  className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+                  className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
                 >
-                  <ExternalLink className="h-3 w-3" />
+                  <ExternalLink className="h-2.5 w-2.5" />
                   Investigate in dashboard
                 </a>
               </div>

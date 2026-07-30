@@ -183,6 +183,30 @@ func (r *AlertRuleRepository) ListAlertEventsByTenantCtx(ctx context.Context, te
 	return rows, err
 }
 
+func (r *AlertRuleRepository) ListFiringEventsByTenantCtx(ctx context.Context, tenantID uint) ([]domain.AlertEvent, error) {
+	var rows []domain.AlertEvent
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND status = 'firing'", tenantID).
+		Preload("Rule").
+		Preload("Threshold").
+		Order("triggered_at ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *AlertRuleRepository) ListRecentEventsByTenantCtx(ctx context.Context, tenantID uint, since time.Duration) ([]domain.AlertEvent, error) {
+	var rows []domain.AlertEvent
+	cutoff := time.Now().Add(-since)
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND (status = 'firing' OR resolved_at >= ?)", tenantID, cutoff).
+		Preload("Rule").
+		Preload("Threshold").
+		Order("triggered_at ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+
 func (r *AlertRuleRepository) FindFiringEventByThresholdCtx(ctx context.Context, ruleID uint, thresholdID uint, hostMachineID string, serviceID *uint) (*domain.AlertEvent, error) {
 	var event domain.AlertEvent
 	query := r.db.WithContext(ctx).
@@ -210,6 +234,42 @@ func (r *AlertRuleRepository) ListFiringEventsByRuleCtx(ctx context.Context, rul
 	return events, err
 }
 
+type FiringAlertCounts struct {
+	Total    int
+	Critical int
+	Warning  int
+}
+
+func (r *AlertRuleRepository) CountFiringEventsByTenantCtx(ctx context.Context, tenantID uint) (FiringAlertCounts, error) {
+	var rows []struct {
+		Severity string
+		Count    int
+	}
+	err := r.db.WithContext(ctx).
+		Table("alert_events ae").
+		Select("coalesce(at.severity, ar.default_severity, 'warning') as severity, count(*) as count").
+		Joins("left join alert_thresholds at on at.id = ae.threshold_id").
+		Joins("left join alert_rules ar on ar.id = ae.rule_id").
+		Where("ae.tenant_id = ? AND ae.status = 'firing'", tenantID).
+		Group("coalesce(at.severity, ar.default_severity, 'warning')").
+		Scan(&rows).Error
+	if err != nil {
+		return FiringAlertCounts{}, err
+	}
+
+	var out FiringAlertCounts
+	for _, row := range rows {
+		out.Total += row.Count
+		switch row.Severity {
+		case "critical":
+			out.Critical += row.Count
+		default:
+			out.Warning += row.Count
+		}
+	}
+	return out, nil
+}
+
 func (r *AlertRuleRepository) ResolveEventCtx(ctx context.Context, eventID uint) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).
@@ -226,8 +286,8 @@ func (r *AlertRuleRepository) AcknowledgeEventCtx(ctx context.Context, eventID u
 		Model(&domain.AlertEvent{}).
 		Where("id = ? AND tenant_id = ?", eventID, tenantID).
 		Updates(map[string]interface{}{
-			"status":           "acknowledged",
-			"acknowledged_by":  userID,
+			"status":          "acknowledged",
+			"acknowledged_by": userID,
 		}).Error
 }
 

@@ -64,8 +64,8 @@ export function LogsHealthSection({ machineId, params }: Props) {
   }, [d])
 
   return (
-    <div className="grid gap-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           title="Log Errors"
           value={d?.total_errors ?? "\u2014"}
@@ -103,7 +103,7 @@ export function LogsHealthSection({ machineId, params }: Props) {
       />
 
       {(formattedSSH.length > 0 || formattedDisk.length > 0) && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {formattedSSH.length > 0 && (
             <StackedAreaCard
               title="SSH Auth Attempts"
@@ -128,11 +128,11 @@ export function LogsHealthSection({ machineId, params }: Props) {
       )}
 
       {failedRestarts.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-3 text-sm font-semibold text-foreground">Recent Service Failures</h3>
-          <div className="max-h-48 overflow-y-auto space-y-2">
+        <div className="rounded-lg border border-border bg-card p-3">
+          <h3 className="mb-2 text-xs font-semibold text-foreground">Recent Service Failures</h3>
+          <div className="max-h-48 overflow-y-auto space-y-1.5">
             {failedRestarts.slice(0, 20).map((evt: LogHealthRestartEvent, i: number) => (
-              <div key={i} className="flex items-start gap-3 text-xs">
+              <div key={i} className="flex items-start gap-2 text-xs">
                 <span className="shrink-0 font-mono text-muted-foreground">
                   {new Date(evt.time).toLocaleTimeString()}
                 </span>
@@ -148,11 +148,11 @@ export function LogsHealthSection({ machineId, params }: Props) {
       )}
 
       {d && d.oom_kills.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-3 text-sm font-semibold text-foreground">OOM Kill Events</h3>
-          <div className="max-h-48 overflow-y-auto space-y-2">
+        <div className="rounded-lg border border-border bg-card p-3">
+          <h3 className="mb-2 text-xs font-semibold text-foreground">OOM Kill Events</h3>
+          <div className="max-h-48 overflow-y-auto space-y-1.5">
             {d.oom_kills.map((evt, i) => (
-              <div key={i} className="flex items-start gap-3 text-xs">
+              <div key={i} className="flex items-start gap-2 text-xs">
                 <span className="shrink-0 font-mono text-muted-foreground">
                   {new Date(evt.time).toLocaleTimeString()}
                 </span>

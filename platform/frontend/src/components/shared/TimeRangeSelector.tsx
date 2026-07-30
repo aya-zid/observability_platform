@@ -35,15 +35,15 @@ export function TimeRangeSelector({
   const manual = selected.mode === 'manual' ? selected : createDefaultManualSelection()
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex gap-1 rounded-lg border border-border bg-muted p-1 shadow-sm">
+    <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex gap-0.5 rounded-lg border border-border bg-muted p-0.5">
         {TIME_RANGES.map((range) => (
           <button
             key={range.label}
             type="button"
             onClick={() => onChange({ mode: 'preset', preset: range })}
             className={cn(
-              'rounded px-3 py-1.5 text-sm font-medium transition-all duration-200',
+              'rounded px-2 py-1 text-xs font-medium transition-colors',
               selected.mode === 'preset' && selected.preset.seconds === range.seconds
                 ? 'bg-primary text-primary-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
@@ -56,7 +56,7 @@ export function TimeRangeSelector({
           type="button"
           onClick={() => onChange(manual)}
           className={cn(
-            'rounded px-3 py-1.5 text-sm font-medium transition-all duration-200',
+            'rounded px-2 py-1 text-xs font-medium transition-colors',
             selected.mode === 'manual'
               ? 'bg-primary text-primary-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
@@ -67,7 +67,7 @@ export function TimeRangeSelector({
       </div>
 
       {selected.mode === 'manual' ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2 py-1 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1">
           <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
             Date
             <input
@@ -76,7 +76,7 @@ export function TimeRangeSelector({
               placeholder="DD-MM-YYYY"
               value={selected.date}
               onChange={(event) => onChange({ ...selected, date: event.target.value })}
-              className="h-8 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+              className="h-7 w-24 rounded-md border border-border bg-background px-1.5 text-xs text-foreground outline-none focus:border-primary"
             />
           </label>
           <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
@@ -85,7 +85,7 @@ export function TimeRangeSelector({
               type="time"
               value={selected.startTime}
               onChange={(event) => onChange({ ...selected, startTime: event.target.value })}
-              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+              className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground outline-none focus:border-primary"
             />
           </label>
           <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
@@ -94,7 +94,7 @@ export function TimeRangeSelector({
               type="time"
               value={selected.endTime}
               onChange={(event) => onChange({ ...selected, endTime: event.target.value })}
-              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+              className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground outline-none focus:border-primary"
             />
           </label>
         </div>

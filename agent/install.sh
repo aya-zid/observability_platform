@@ -42,12 +42,19 @@ backup_file() {
 }
 
 # ---- Startup banner ----
-_bcenter() { local t="$1" c="$2" p=$((56 - ${#t})) l=$((p / 2)) r=$((p - l)); printf "${c}  ║${NC}%*s%s%*s${c}║${NC}\n" "$l" "" "$t" "$r" ""; }
+_bcenter() {
+  local t="${1:-}" c="${2:-}" p l r
+  p=$((56 - ${#t}))
+  (( p < 0 )) && p=0
+  l=$((p / 2))
+  r=$((p - l))
+  printf "${c}  ║${NC}%*s%s%*s${c}║${NC}\n" "$l" "" "$t" "$r" ""
+}
 echo ""
-echo -e "${BOLD}${BLUE}  ╔══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${BLUE}  ╔════════════════════════════════════════════════════════╗${NC}"
 _bcenter "Observability Platform - Agent Installer" "${BOLD}${BLUE}"
 _bcenter "Version ${AGENT_VERSION:-1.0.0}" "${BOLD}${BLUE}"
-echo -e "${BOLD}${BLUE}  ╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BOLD}${BLUE}  ╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # ============================================
@@ -2641,21 +2648,134 @@ HOSTNAME_FQDN="${HOSTNAME_FQDN}"
 AGENT_VERSION="${AGENT_VERSION}"
 AUTH_B64=\$(echo -n "\${API_KEY}:\${API_KEY}" | base64 -w 0)
 
+# Map a systemd unit name to its canonical service name.
+# Must match unit_canonical() in install.sh.
+unit_canonical() {
+  local UNIT=\$1
+  case "\$UNIT" in
+    nginx)                   echo "nginx" ;;
+    apache2|httpd)           echo "apache" ;;
+    postgresql@*|postgresql) echo "postgresql" ;;
+    mysql|mysqld)            echo "mysql" ;;
+    mariadb)                 echo "mariadb" ;;
+    mongod|mongodb)          echo "mongodb" ;;
+    redis|redis-server|redis@*) echo "redis" ;;
+    php*fpm*|php-fpm)        echo "phpfpm" ;;
+    elasticsearch)           echo "elasticsearch" ;;
+    rabbitmq-server)         echo "rabbitmq" ;;
+    kafka|kafka@*)           echo "kafka" ;;
+    haproxy)                 echo "haproxy" ;;
+    traefik)                 echo "traefik" ;;
+    vault)                   echo "vault" ;;
+    consul)                  echo "consul" ;;
+    memcached)               echo "memcached" ;;
+    caddy)                   echo "caddy" ;;
+    clickhouse-server)       echo "clickhouse" ;;
+    cassandra)               echo "cassandra" ;;
+    *)                       echo "" ;;
+  esac
+}
+
+safe_unit_name() {
+  echo "\$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_' | sed 's/^_//; s/_$//'
+}
+
+RUNNING_SERVICE_NAMES=""
+add_running_service() {
+  local NAME=\$1
+  [ -z "\$NAME" ] && return
+  case "\$NAME" in
+    *[!a-z0-9_]*)
+      return
+      ;;
+  esac
+  if ! printf '%s\n' "\$RUNNING_SERVICE_NAMES" | grep -Fxq "\$NAME"; then
+    if [ -n "\$RUNNING_SERVICE_NAMES" ]; then
+      RUNNING_SERVICE_NAMES="\${RUNNING_SERVICE_NAMES}
+\${NAME}"
+    else
+      RUNNING_SERVICE_NAMES="\$NAME"
+    fi
+  fi
+}
+
+add_unit_service_names() {
+  local UNIT=\$1
+  local CANONICAL
+  CANONICAL=\$(unit_canonical "\$UNIT")
+
+  if [ -n "\$CANONICAL" ]; then
+    add_running_service "\$CANONICAL"
+    case "\$UNIT" in
+      postgresql@*)
+        local PG_MAJOR
+        PG_MAJOR=\$(echo "\$UNIT" | sed -nE 's/^postgresql@([0-9]+).*/\\1/p')
+        [ -n "\$PG_MAJOR" ] && add_running_service "postgresql\${PG_MAJOR}"
+        ;;
+    esac
+    return
+  fi
+
+  # Unknown services are stored during discovery by this same safe-name rule.
+  # Sending the safe name keeps rows like redis_exporter or mysqld_exporter fresh.
+  add_running_service "\$(safe_unit_name "\$UNIT")"
+}
+
+json_array_from_lines() {
+  local OUT=""
+  local ITEM
+  while IFS= read -r ITEM; do
+    [ -z "\$ITEM" ] && continue
+    if [ -n "\$OUT" ]; then
+      OUT="\${OUT},\\"\${ITEM}\\""
+    else
+      OUT="\\"\${ITEM}\\""
+    fi
+  done <<< "\$1"
+  echo "\$OUT"
+}
+
+# Collect running systemd units and map to canonical service names.
+# This correctly handles units like php8.2-fpm -> phpfpm, apache2 -> apache.
+while IFS= read -r UNIT; do
+  [ -z "\$UNIT" ] && continue
+  UNIT="\${UNIT%.service}"
+  add_unit_service_names "\$UNIT"
+done < <(systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | awk '{print \$1}')
+
+RUNNING_SERVICES_JSON=\$(json_array_from_lines "\$RUNNING_SERVICE_NAMES")
+
+RUNNING_CONTAINERS_JSON=""
+if [ -S /var/run/docker.sock ] && command -v docker &>/dev/null; then
+  while IFS= read -r CNAME; do
+    [ -z "\$CNAME" ] && continue
+    # Match container discovery naming: lower-case and collapse non-alphanumerics.
+    CNAME=\$(safe_unit_name "\$CNAME")
+    if [ -n "\$RUNNING_CONTAINERS_JSON" ]; then
+      RUNNING_CONTAINERS_JSON="\${RUNNING_CONTAINERS_JSON},\\"\${CNAME}\\""
+    else
+      RUNNING_CONTAINERS_JSON="\\"\${CNAME}\\""
+    fi
+  done < <(docker ps --format '{{.Names}}' 2>/dev/null)
+fi
+
 PAYLOAD=\$(cat <<JSON
 {
   "machine_id": "\${MACHINE_ID}",
   "hostname": "\${HOSTNAME_FQDN}",
-  "agent_version": "\${AGENT_VERSION}"
+  "agent_version": "\${AGENT_VERSION}",
+  "running_services": [\${RUNNING_SERVICES_JSON}],
+  "running_containers": [\${RUNNING_CONTAINERS_JSON}]
 }
 JSON
 )
 
 MAX_ATTEMPTS=3
 for i in \$(seq 1 \$MAX_ATTEMPTS); do
-  if curl -sf -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Basic \${AUTH_B64}" \
-    -d "\${PAYLOAD}" \
+  if curl -sf -X POST \\
+    -H "Content-Type: application/json" \\
+    -H "Authorization: Basic \${AUTH_B64}" \\
+    -d "\${PAYLOAD}" \\
     "\${HOST_HEARTBEAT_ENDPOINT}" >/dev/null 2>&1; then
     exit 0
   fi
@@ -2683,10 +2803,9 @@ cat > /etc/systemd/system/agent-heartbeat.timer <<'HEARTBEAT_TIMER'
 Description=Observability Agent — Host heartbeat every 5 minutes
 
 [Timer]
-OnBootSec=2min
+OnStartupSec=2min
 OnUnitActiveSec=5min
 AccuracySec=30s
-Persistent=true
 
 [Install]
 WantedBy=timers.target
@@ -2710,6 +2829,8 @@ fi
 
 if [ "$HEARTBEAT_UNIT_READY" = "true" ]; then
   systemctl enable --now agent-heartbeat.timer
+  # Seed the first activation so OnUnitActiveSec has a reference point.
+  systemctl start agent-heartbeat.service 2>/dev/null || true
   if systemctl is-active --quiet agent-heartbeat.timer; then
     log "Heartbeat timer enabled (every 5 minutes)"
   else
@@ -2901,10 +3022,10 @@ fi
 # INSTALLATION COMPLETE
 # ============================================
 echo ""
-echo -e "${GREEN}  ╔══════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}  ╔════════════════════════════════════════════════════════╗${NC}"
 _bcenter "✓  Installation Complete" "${GREEN}"
 _bcenter "Agent v${AGENT_VERSION} — ${HOSTNAME_FQDN}" "${GREEN}"
-echo -e "${GREEN}  ╚══════════════════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}  ╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 log "Agent v${AGENT_VERSION} installed successfully on ${HOSTNAME_FQDN}"
 log "Platform: ${PLATFORM_HOST}:${PLATFORM_PORT}"

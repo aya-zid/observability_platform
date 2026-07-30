@@ -24,29 +24,29 @@ export default function HostDetailPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto w-full py-6 px-6 space-y-8">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
+    <div className="max-w-6xl mx-auto w-full py-4 px-4 md:px-6 space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
           <Link
             to="/hosts"
-            className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+            <h1 className="text-lg font-bold tracking-tight text-foreground">
               {host?.hostname ?? machineId}
             </h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {host ? `${host.os_name} ${host.arch || ""}` : machineId}
             </p>
           </div>
         </div>
         <Link
           to={`/hosts/${machineId}/logs`}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-accent-glow"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-accent-glow"
         >
-          <FileText className="w-4 h-4" /> View Logs
+          <FileText className="w-3.5 h-3.5" /> View Logs
         </Link>
       </div>
 

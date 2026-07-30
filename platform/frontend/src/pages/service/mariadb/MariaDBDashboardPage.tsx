@@ -19,7 +19,7 @@ import {
   DashboardDonutCard,
   DASHBOARD_CHART_STYLE,
 } from "@/components/shared/DashboardComponents"
-import { TimeRangeSelector, TIME_RANGES, type TimeSelection, createDefaultManualSelection } from "@/components/shared/TimeRangeSelector"
+import { TimeRangeSelector, TIME_RANGES, type TimeSelection } from "@/components/shared/TimeRangeSelector"
 import {
   dateTimeInputToSeconds,
   formatBytes,
@@ -32,7 +32,7 @@ import {
 } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
 import { RefreshCw } from "lucide-react"
-import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
+import { useTranslation } from "@/i18n/LanguageContext"
 import { MariaDBDigestsTable } from "./components/MariaDBDigestsTable"
 
 function getStep(rangeSeconds: number) {
@@ -139,7 +139,6 @@ export function MariaDBDashboardPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             {activeTab === "dashboard" && <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />}
-            <LangToggle />
             <button
               type="button"
               onClick={() => dashQuery.refetch()}
@@ -194,31 +193,31 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 1. STATUS BAR ═══════════════════════ */}
       <DashboardSectionHeader title="Status" description="Instance health at a glance" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="MySQL Up" icon="🔌" value={data?.up === 1 ? "Online" : data?.up === 0 ? "Down" : "-"} tone={data?.up === 1 ? "good" : data?.up === 0 ? "bad" : "neutral"} hint="mysql_up — 1 = reachable" />
-        <DashboardStatCard label="Exporter Scrape" icon="📡" value={data?.scrape_error === 0 ? "OK" : data?.scrape_error === 1 ? "Error" : "-"} tone={data?.scrape_error === 1 ? "bad" : data?.scrape_error === 0 ? "good" : "neutral"} hint="Last scrape success" />
-        <DashboardStatCard label="Uptime" icon="⏱️" value={data?.uptime_seconds != null ? formatDuration(data.uptime_seconds) : "-"} hint="Time since last restart" />
-        <DashboardStatCard label="Replication Lag" icon="🔁" value={data?.replication_lag_seconds != null ? formatDuration(data.replication_lag_seconds) : "N/A"} tone={(data?.replication_lag_seconds ?? 0) > 30 ? "bad" : (data?.replication_lag_seconds ?? 0) > 5 ? "warn" : "good"} hint={data?.slave_running === 1 ? "Replica running" : "No active replica"} />
+        <DashboardStatCard label="MySQL Up" value={data?.up === 1 ? "Online" : data?.up === 0 ? "Down" : "-"} tone={data?.up === 1 ? "good" : data?.up === 0 ? "bad" : "neutral"} hint="mysql_up — 1 = reachable" />
+        <DashboardStatCard label="Exporter Scrape" value={data?.scrape_error === 0 ? "OK" : data?.scrape_error === 1 ? "Error" : "-"} tone={data?.scrape_error === 1 ? "bad" : data?.scrape_error === 0 ? "good" : "neutral"} hint="Last scrape success" />
+        <DashboardStatCard label="Uptime" value={data?.uptime_seconds != null ? formatDuration(data.uptime_seconds) : "-"} hint="Time since last restart" />
+        <DashboardStatCard label="Replication Lag" value={data?.replication_lag_seconds != null ? formatDuration(data.replication_lag_seconds) : "N/A"} tone={(data?.replication_lag_seconds ?? 0) > 30 ? "bad" : (data?.replication_lag_seconds ?? 0) > 5 ? "warn" : "good"} hint={data?.slave_running === 1 ? "Replica running" : "No active replica"} />
       </div>
       {(data?.wsrep_cluster_size != null) && (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 mt-2">
-          <DashboardStatCard label="Galera Cluster Size" icon="🌐" value={data?.wsrep_cluster_size != null ? formatNumber(data.wsrep_cluster_size, 0) : "-"} hint="Number of Galera nodes" />
-          <DashboardStatCard label="Galera Connected" icon="🔗" value={data?.wsrep_connected === 1 ? "Yes" : data?.wsrep_connected === 0 ? "No" : "-"} tone={data?.wsrep_connected === 1 ? "good" : data?.wsrep_connected === 0 ? "bad" : "neutral"} hint="Is this node connected to the cluster?" />
-          <DashboardStatCard label="Galera Ready" icon="✅" value={data?.wsrep_ready === 1 ? "Yes" : data?.wsrep_ready === 0 ? "No" : "-"} tone={data?.wsrep_ready === 1 ? "good" : data?.wsrep_ready === 0 ? "bad" : "neutral"} hint="Is this node ready to accept queries?" />
+          <DashboardStatCard label="Galera Cluster Size" value={data?.wsrep_cluster_size != null ? formatNumber(data.wsrep_cluster_size, 0) : "-"} hint="Number of Galera nodes" />
+          <DashboardStatCard label="Galera Connected" value={data?.wsrep_connected === 1 ? "Yes" : data?.wsrep_connected === 0 ? "No" : "-"} tone={data?.wsrep_connected === 1 ? "good" : data?.wsrep_connected === 0 ? "bad" : "neutral"} hint="Is this node connected to the cluster?" />
+          <DashboardStatCard label="Galera Ready" value={data?.wsrep_ready === 1 ? "Yes" : data?.wsrep_ready === 0 ? "No" : "-"} tone={data?.wsrep_ready === 1 ? "good" : data?.wsrep_ready === 0 ? "bad" : "neutral"} hint="Is this node ready to accept queries?" />
         </div>
       )}
 
       {/* ═══════════════════════════════ 2. QUERY THROUGHPUT ════════════════ */}
       <DashboardSectionHeader title="Query Throughput" description="Queries per second, rows read/written, and read/write breakdown" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="QPS" icon="⚡" value={data?.qps != null ? `${formatNumber(data.qps, 1)}/s` : "-"} hint="Questions/sec (all statements)" />
-        <DashboardStatCard label="Slow Queries/min" icon="🐢" value={data?.slow_queries_per_min != null ? formatNumber(data.slow_queries_per_min, 2) : "-"} tone={(data?.slow_queries_per_min ?? 0) > 0 ? "warn" : "good"} hint="Queries exceeding long_query_time" />
-        <DashboardStatCard label="SELECTs/sec" icon="📖" value={data?.selects_per_sec != null ? `${formatNumber(data.selects_per_sec, 1)}/s` : "-"} hint="Read workload" />
-        <DashboardStatCard label="Writes/sec" icon="✏️" value={data != null ? `${formatNumber((data.inserts_per_sec ?? 0) + (data.updates_per_sec ?? 0) + (data.deletes_per_sec ?? 0), 1)}/s` : "-"} hint="INSERT + UPDATE + DELETE" />
+        <DashboardStatCard label="QPS" value={data?.qps != null ? `${formatNumber(data.qps, 1)}/s` : "-"} hint="Questions/sec (all statements)" />
+        <DashboardStatCard label="Slow Queries/min" value={data?.slow_queries_per_min != null ? formatNumber(data.slow_queries_per_min, 2) : "-"} tone={(data?.slow_queries_per_min ?? 0) > 0 ? "warn" : "good"} hint="Queries exceeding long_query_time" />
+        <DashboardStatCard label="SELECTs/sec" value={data?.selects_per_sec != null ? `${formatNumber(data.selects_per_sec, 1)}/s` : "-"} hint="Read workload" />
+        <DashboardStatCard label="Writes/sec" value={data != null ? `${formatNumber((data.inserts_per_sec ?? 0) + (data.updates_per_sec ?? 0) + (data.deletes_per_sec ?? 0), 1)}/s` : "-"} hint="INSERT + UPDATE + DELETE" />
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Rows Read/sec" icon="📖" value={data?.rows_read_per_sec != null ? `${formatNumber(data.rows_read_per_sec, 0)}/s` : "-"} hint="Handler rows read (all engines)" />
-        <DashboardStatCard label="Rows Modified/sec" icon="✏️" value={data?.rows_modified_per_sec != null ? `${formatNumber(data.rows_modified_per_sec, 0)}/s` : "-"} hint="Handler writes/updates/deletes" />
-        <DashboardStatCard label="Sort Merge Passes/sec" icon="🔄" value={data?.sort_merge_passes_per_sec != null ? formatNumber(data.sort_merge_passes_per_sec, 2) : "-"} tone={(data?.sort_merge_passes_per_sec ?? 0) > 0.5 ? "warn" : "good"} hint="Disk-based sort merges — increase sort_buffer_size" />
+        <DashboardStatCard label="Rows Read/sec" value={data?.rows_read_per_sec != null ? `${formatNumber(data.rows_read_per_sec, 0)}/s` : "-"} hint="Handler rows read (all engines)" />
+        <DashboardStatCard label="Rows Modified/sec" value={data?.rows_modified_per_sec != null ? `${formatNumber(data.rows_modified_per_sec, 0)}/s` : "-"} hint="Handler writes/updates/deletes" />
+        <DashboardStatCard label="Sort Merge Passes/sec" value={data?.sort_merge_passes_per_sec != null ? formatNumber(data.sort_merge_passes_per_sec, 2) : "-"} tone={(data?.sort_merge_passes_per_sec ?? 0) > 0.5 ? "warn" : "good"} hint="Disk-based sort merges — increase sort_buffer_size" />
       </div>
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="xl:col-span-2">
@@ -241,7 +240,7 @@ export function MariaDBDashboardPage() {
                   <Tooltip contentStyle={DASHBOARD_CHART_STYLE.tooltip} formatter={(v) => `${formatNumber(Number(v), 2)}/s`} />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="mt-2 grid grid-cols-2 gap-1 text-xs">
+              <div className="mt-2 grid grid-cols-2 gap-1 text-sm">
                 {rwPieData.map((d) => (
                   <div key={d.name} className="flex items-center gap-1.5">
                     <div className="h-2 w-2 rounded-full" style={{ background: d.fill }} />
@@ -266,10 +265,10 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 3. CONNECTIONS ═════════════════════ */}
       <DashboardSectionHeader title="Connections" description="Thread pool saturation, peak usage, and error rates" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Connection Saturation" icon="📊" value={data?.connection_saturation_pct != null ? formatPercent(data.connection_saturation_pct) : "-"} tone={(data?.connection_saturation_pct ?? 0) > 85 ? "bad" : (data?.connection_saturation_pct ?? 0) > 70 ? "warn" : "good"} hint={`${data?.threads_connected ?? "-"} / ${data?.max_connections ?? "-"} used`} />
-        <DashboardStatCard label="Threads Running" icon="⚡" value={data?.threads_running != null ? formatNumber(data.threads_running, 0) : "-"} tone={(data?.threads_running ?? 0) > (data?.max_connections ?? 100) * 0.5 ? "warn" : "neutral"} hint="Active query threads" />
-        <DashboardStatCard label="Max Used Connections" icon="📈" value={data?.max_used_connections != null ? formatNumber(data.max_used_connections, 0) : "-"} hint="Peak concurrent connections since server start" />
-        <DashboardStatCard label="Aborted Connects/min" icon="⛔" value={data?.aborted_connects_per_min != null ? formatNumber(data.aborted_connects_per_min, 2) : "-"} tone={(data?.aborted_connects_per_min ?? 0) > 1 ? "warn" : "good"} hint="Failed TCP handshakes or auth" />
+        <DashboardStatCard label="Connection Saturation" value={data?.connection_saturation_pct != null ? formatPercent(data.connection_saturation_pct) : "-"} tone={(data?.connection_saturation_pct ?? 0) > 85 ? "bad" : (data?.connection_saturation_pct ?? 0) > 70 ? "warn" : "good"} hint={`${data?.threads_connected ?? "-"} / ${data?.max_connections ?? "-"} used`} />
+        <DashboardStatCard label="Threads Running" value={data?.threads_running != null ? formatNumber(data.threads_running, 0) : "-"} tone={(data?.threads_running ?? 0) > (data?.max_connections ?? 100) * 0.5 ? "warn" : "neutral"} hint="Active query threads" />
+        <DashboardStatCard label="Max Used Connections" value={data?.max_used_connections != null ? formatNumber(data.max_used_connections, 0) : "-"} hint="Peak concurrent connections since server start" />
+        <DashboardStatCard label="Aborted Connects/min" value={data?.aborted_connects_per_min != null ? formatNumber(data.aborted_connects_per_min, 2) : "-"} tone={(data?.aborted_connects_per_min ?? 0) > 1 ? "warn" : "good"} hint="Failed TCP handshakes or auth" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardAreaPanel title="Connections Over Time" data={connections} stacked={false} areas={[
@@ -285,10 +284,10 @@ export function MariaDBDashboardPage() {
         <DashboardDonutCard title="Hit Ratio" value={data?.buffer_pool_hit_ratio_pct ?? 0} color={(data?.buffer_pool_hit_ratio_pct ?? 100) < 95 ? MARIADB_COLORS.red : MARIADB_COLORS.green} label="cache effectiveness" hint="< 95% = needs more memory" />
         <DashboardDonutCard title="Used" value={data?.buffer_pool_used_pct ?? 0} color={MARIADB_COLORS.blue} label="of pool allocated" hint="High = pool is active" />
         <DashboardDonutCard title="Dirty Pages" value={data?.buffer_pool_dirty_pct ?? 0} color={(data?.buffer_pool_dirty_pct ?? 0) > 75 ? MARIADB_COLORS.amber : MARIADB_COLORS.teal} label="of data bytes modified" hint="High sustained = I/O pressure" />
-        <DashboardStatCard label="Pool Size" icon="💽" value={data?.innodb_buffer_pool_size_bytes != null ? formatBytes(data.innodb_buffer_pool_size_bytes) : "-"} hint="innodb_buffer_pool_size" />
+        <DashboardStatCard label="Pool Size" value={data?.innodb_buffer_pool_size_bytes != null ? formatBytes(data.innodb_buffer_pool_size_bytes) : "-"} hint="innodb_buffer_pool_size" />
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Wait Free/sec" icon="⏳" value={data?.buffer_pool_wait_free_per_sec != null ? `${formatNumber(data.buffer_pool_wait_free_per_sec, 2)}/s` : "-"} tone={(data?.buffer_pool_wait_free_per_sec ?? 0) > 0 ? "warn" : "good"} hint="Non-zero ⇒ InnoDB waiting for free pages (pool too small)" />
+        <DashboardStatCard label="Wait Free/sec" value={data?.buffer_pool_wait_free_per_sec != null ? `${formatNumber(data.buffer_pool_wait_free_per_sec, 2)}/s` : "-"} tone={(data?.buffer_pool_wait_free_per_sec ?? 0) > 0 ? "warn" : "good"} hint="Non-zero ⇒ InnoDB waiting for free pages (pool too small)" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardLinePanel title="Buffer Pool % Over Time" data={bufferPool} formatter={(v) => formatPercent(v)} lines={[
@@ -301,11 +300,11 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 4b. INNODB HEALTH ════════════════════ */}
       <DashboardSectionHeader title="InnoDB Health" description="History list length, log waits, and pending I/O indicate internal pressure" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="History List Length" icon="📜" value={data?.innodb_history_list_length != null ? formatNumber(data.innodb_history_list_length, 0) : "-"} tone={(data?.innodb_history_list_length ?? 0) > 100000 ? "bad" : (data?.innodb_history_list_length ?? 0) > 10000 ? "warn" : "good"} hint="High sustained = long-running tx blocking purge" />
-        <DashboardStatCard label="Log Waits/sec" icon="📝" value={data?.innodb_log_waits_per_sec != null ? `${formatNumber(data.innodb_log_waits_per_sec, 2)}/s` : "-"} tone={(data?.innodb_log_waits_per_sec ?? 0) > 0 ? "warn" : "good"} hint="Non-zero ⇒ innodb_log_buffer_size too small" />
-        <DashboardStatCard label="Pending Reads" icon="⬇️" value={data?.innodb_pending_reads != null ? formatNumber(data.innodb_pending_reads, 0) : "-"} tone={(data?.innodb_pending_reads ?? 0) > 0 ? "warn" : "good"} hint="I/O operations queued for reads" />
-        <DashboardStatCard label="Pending Writes" icon="⬆️" value={data?.innodb_pending_writes != null ? formatNumber(data.innodb_pending_writes, 0) : "-"} tone={(data?.innodb_pending_writes ?? 0) > 0 ? "warn" : "good"} hint="I/O operations queued for writes" />
-        <DashboardStatCard label="Pending fsyncs" icon="🔄" value={data?.innodb_pending_fsyncs != null ? formatNumber(data.innodb_pending_fsyncs, 0) : "-"} hint="Pending fsync I/O operations" />
+        <DashboardStatCard label="History List Length" value={data?.innodb_history_list_length != null ? formatNumber(data.innodb_history_list_length, 0) : "-"} tone={(data?.innodb_history_list_length ?? 0) > 100000 ? "bad" : (data?.innodb_history_list_length ?? 0) > 10000 ? "warn" : "good"} hint="High sustained = long-running tx blocking purge" />
+        <DashboardStatCard label="Log Waits/sec" value={data?.innodb_log_waits_per_sec != null ? `${formatNumber(data.innodb_log_waits_per_sec, 2)}/s` : "-"} tone={(data?.innodb_log_waits_per_sec ?? 0) > 0 ? "warn" : "good"} hint="Non-zero ⇒ innodb_log_buffer_size too small" />
+        <DashboardStatCard label="Pending Reads" value={data?.innodb_pending_reads != null ? formatNumber(data.innodb_pending_reads, 0) : "-"} tone={(data?.innodb_pending_reads ?? 0) > 0 ? "warn" : "good"} hint="I/O operations queued for reads" />
+        <DashboardStatCard label="Pending Writes" value={data?.innodb_pending_writes != null ? formatNumber(data.innodb_pending_writes, 0) : "-"} tone={(data?.innodb_pending_writes ?? 0) > 0 ? "warn" : "good"} hint="I/O operations queued for writes" />
+        <DashboardStatCard label="Pending fsyncs" value={data?.innodb_pending_fsyncs != null ? formatNumber(data.innodb_pending_fsyncs, 0) : "-"} hint="Pending fsync I/O operations" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardLinePanel title="Pending I/O Operations Over Time" data={pendingIO} formatter={(v) => formatNumber(v, 0)} lines={[
@@ -318,10 +317,10 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 5. INNODB I/O ═══════════════════════ */}
       <DashboardSectionHeader title="InnoDB Disk I/O" description="Physical reads/writes indicate storage pressure" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Data Reads/sec" icon="📥" value={data?.innodb_data_reads_per_sec != null ? `${formatBytes(data.innodb_data_reads_per_sec)}/s` : "-"} hint="Physical disk reads" />
-        <DashboardStatCard label="Data Writes/sec" icon="📤" value={data?.innodb_data_writes_per_sec != null ? `${formatBytes(data.innodb_data_writes_per_sec)}/s` : "-"} hint="Physical disk writes" />
-        <DashboardStatCard label="fsyncs/sec" icon="🔄" value={data?.innodb_fsyncs_per_sec != null ? formatNumber(data.innodb_fsyncs_per_sec, 1) : "-"} tone={(data?.innodb_fsyncs_per_sec ?? 0) > 100 ? "warn" : "neutral"} hint="Disk flush calls/sec" />
-        <DashboardStatCard label="Log Writes/sec" icon="📝" value={data?.innodb_log_writes_per_sec != null ? formatNumber(data.innodb_log_writes_per_sec, 1) : "-"} hint="Redo log write rate" />
+        <DashboardStatCard label="Data Reads/sec" value={data?.innodb_data_reads_per_sec != null ? `${formatBytes(data.innodb_data_reads_per_sec)}/s` : "-"} hint="Physical disk reads" />
+        <DashboardStatCard label="Data Writes/sec" value={data?.innodb_data_writes_per_sec != null ? `${formatBytes(data.innodb_data_writes_per_sec)}/s` : "-"} hint="Physical disk writes" />
+        <DashboardStatCard label="fsyncs/sec" value={data?.innodb_fsyncs_per_sec != null ? formatNumber(data.innodb_fsyncs_per_sec, 1) : "-"} tone={(data?.innodb_fsyncs_per_sec ?? 0) > 100 ? "warn" : "neutral"} hint="Disk flush calls/sec" />
+        <DashboardStatCard label="Log Writes/sec" value={data?.innodb_log_writes_per_sec != null ? formatNumber(data.innodb_log_writes_per_sec, 1) : "-"} hint="Redo log write rate" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardAreaPanel title="InnoDB I/O Bytes Over Time" data={io} stacked={false} formatter={(v, key) => {
@@ -338,9 +337,9 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 5b. FULL SCAN DETECTION ═══════════════ */}
       <DashboardSectionHeader title="Full Scan Detection" description="High read_rnd_next vs read_key ⇒ sequential scans (missing indexes)" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Table Scan %" icon="🔍" value={data?.table_scan_ratio_pct != null ? formatPercent(data.table_scan_ratio_pct) : "-"} tone={(data?.table_scan_ratio_pct ?? 0) > 50 ? "bad" : (data?.table_scan_ratio_pct ?? 0) > 20 ? "warn" : "good"} hint="% handler ops that are full table scans" />
-        <DashboardStatCard label="Handler Read Key/sec" icon="🔑" value={data?.handler_read_key_per_sec != null ? `${formatNumber(data.handler_read_key_per_sec, 0)}/s` : "-"} hint="Index-based row lookups" />
-        <DashboardStatCard label="Handler Read Rnd Next/sec" icon="📖" value={data?.handler_read_rnd_next_per_sec != null ? `${formatNumber(data.handler_read_rnd_next_per_sec, 0)}/s` : "-"} tone={(data?.handler_read_rnd_next_per_sec ?? 0) > (data?.handler_read_key_per_sec ?? 1) * 5 ? "warn" : "good"} hint="Full scan row reads — high relative to read_key = missing index" />
+        <DashboardStatCard label="Table Scan %" value={data?.table_scan_ratio_pct != null ? formatPercent(data.table_scan_ratio_pct) : "-"} tone={(data?.table_scan_ratio_pct ?? 0) > 50 ? "bad" : (data?.table_scan_ratio_pct ?? 0) > 20 ? "warn" : "good"} hint="% handler ops that are full table scans" />
+        <DashboardStatCard label="Handler Read Key/sec" value={data?.handler_read_key_per_sec != null ? `${formatNumber(data.handler_read_key_per_sec, 0)}/s` : "-"} hint="Index-based row lookups" />
+        <DashboardStatCard label="Handler Read Rnd Next/sec" value={data?.handler_read_rnd_next_per_sec != null ? `${formatNumber(data.handler_read_rnd_next_per_sec, 0)}/s` : "-"} tone={(data?.handler_read_rnd_next_per_sec ?? 0) > (data?.handler_read_key_per_sec ?? 1) * 5 ? "warn" : "good"} hint="Full scan row reads — high relative to read_key = missing index" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardAreaPanel title="Handler Read Operations Over Time" data={handlerRead} stacked={false} formatter={(v) => `${formatNumber(v, 0)}/s`} areas={[
@@ -363,10 +362,10 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 6. LOCKS & CONTENTION ═══════════════ */}
       <DashboardSectionHeader title="Locks & Contention" description="Deadlocks and waits indicate query or schema issues" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Table Locks Waited/min" icon="🔒" value={data?.table_locks_waited_per_min != null ? formatNumber(data.table_locks_waited_per_min, 2) : "-"} tone={(data?.table_locks_waited_per_min ?? 0) > 0 ? "warn" : "good"} hint="MyISAM or explicit table locks" />
-        <DashboardStatCard label="InnoDB Deadlocks/min" icon="💀" value={data?.innodb_deadlocks_per_min != null ? formatNumber(data.innodb_deadlocks_per_min, 2) : "-"} tone={(data?.innodb_deadlocks_per_min ?? 0) > 0 ? "bad" : "good"} hint="Cyclic row lock conflicts" />
-        <DashboardStatCard label="Row Lock Waits/min" icon="⏳" value={data?.innodb_row_lock_waits_per_min != null ? formatNumber(data.innodb_row_lock_waits_per_min, 2) : "-"} tone={(data?.innodb_row_lock_waits_per_min ?? 0) > 10 ? "warn" : "good"} hint="InnoDB row-level contention" />
-        <DashboardStatCard label="Avg Row Lock Time" icon="⌛" value={data?.innodb_row_lock_time_avg_ms != null ? `${formatNumber(data.innodb_row_lock_time_avg_ms, 1)} ms` : "-"} tone={(data?.innodb_row_lock_time_avg_ms ?? 0) > 50 ? "warn" : "neutral"} hint="Average wait per lock event" />
+        <DashboardStatCard label="Table Locks Waited/min" value={data?.table_locks_waited_per_min != null ? formatNumber(data.table_locks_waited_per_min, 2) : "-"} tone={(data?.table_locks_waited_per_min ?? 0) > 0 ? "warn" : "good"} hint="MyISAM or explicit table locks" />
+        <DashboardStatCard label="InnoDB Deadlocks/min" value={data?.innodb_deadlocks_per_min != null ? formatNumber(data.innodb_deadlocks_per_min, 2) : "-"} tone={(data?.innodb_deadlocks_per_min ?? 0) > 0 ? "bad" : "good"} hint="Cyclic row lock conflicts" />
+        <DashboardStatCard label="Row Lock Waits/min" value={data?.innodb_row_lock_waits_per_min != null ? formatNumber(data.innodb_row_lock_waits_per_min, 2) : "-"} tone={(data?.innodb_row_lock_waits_per_min ?? 0) > 10 ? "warn" : "good"} hint="InnoDB row-level contention" />
+        <DashboardStatCard label="Avg Row Lock Time" value={data?.innodb_row_lock_time_avg_ms != null ? `${formatNumber(data.innodb_row_lock_time_avg_ms, 1)} ms` : "-"} tone={(data?.innodb_row_lock_time_avg_ms ?? 0) > 50 ? "warn" : "neutral"} hint="Average wait per lock event" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardLinePanel title="Lock Contention Over Time" data={locks} formatter={(v) => `${formatNumber(v, 2)}/min`} lines={[
@@ -380,8 +379,8 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 7. TEMP TABLES ══════════════════════ */}
       <DashboardSectionHeader title="Temporary Tables" description="Disk-based temp tables are expensive — tune tmp_table_size" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Tmp Tables/sec (memory)" icon="📋" value={data?.tmp_tables_per_sec != null ? `${formatNumber(data.tmp_tables_per_sec, 2)}/s` : "-"} hint="In-memory temp tables (fast)" />
-        <DashboardStatCard label="Tmp Disk Tables/sec" icon="💽" value={data?.tmp_disk_tables_per_sec != null ? `${formatNumber(data.tmp_disk_tables_per_sec, 2)}/s` : "-"} tone={(data?.tmp_disk_tables_per_sec ?? 0) > 0.5 ? "warn" : "good"} hint="Disk spills — increase tmp_table_size" />
+        <DashboardStatCard label="Tmp Tables/sec (memory)" value={data?.tmp_tables_per_sec != null ? `${formatNumber(data.tmp_tables_per_sec, 2)}/s` : "-"} hint="In-memory temp tables (fast)" />
+        <DashboardStatCard label="Tmp Disk Tables/sec" value={data?.tmp_disk_tables_per_sec != null ? `${formatNumber(data.tmp_disk_tables_per_sec, 2)}/s` : "-"} tone={(data?.tmp_disk_tables_per_sec ?? 0) > 0.5 ? "warn" : "good"} hint="Disk spills — increase tmp_table_size" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardAreaPanel title="Temporary Tables Created Over Time" data={tmpTables} stacked={false} formatter={(v) => `${formatNumber(v, 3)}/s`} areas={[
@@ -393,8 +392,8 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 8. NETWORK ═══════════════════════════ */}
       <DashboardSectionHeader title="Network" description="Client ↔ server data transfer rates" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="RX (client → server)" icon="⬇️" value={data?.network_rx_bytes_per_sec != null ? `${formatBytes(data.network_rx_bytes_per_sec)}/s` : "-"} hint="Incoming query bytes" />
-        <DashboardStatCard label="TX (server → client)" icon="⬆️" value={data?.network_tx_bytes_per_sec != null ? `${formatBytes(data.network_tx_bytes_per_sec)}/s` : "-"} hint="Outgoing result bytes" />
+        <DashboardStatCard label="RX (client → server)" value={data?.network_rx_bytes_per_sec != null ? `${formatBytes(data.network_rx_bytes_per_sec)}/s` : "-"} hint="Incoming query bytes" />
+        <DashboardStatCard label="TX (server → client)" value={data?.network_tx_bytes_per_sec != null ? `${formatBytes(data.network_tx_bytes_per_sec)}/s` : "-"} hint="Outgoing result bytes" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardAreaPanel title="Network Throughput Over Time" data={network} stacked={false} formatter={(v) => `${formatBytes(v)}/s`} areas={[
@@ -406,8 +405,8 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 8b. STORAGE ═══════════════════════════ */}
       <DashboardSectionHeader title="Storage" description="Binary log growth and top tables by estimated size" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Binlog Size" icon="📦" value={data?.binlog_size_bytes != null ? formatBytes(data.binlog_size_bytes) : "-"} hint="Current total binary log disk usage" />
-        <DashboardStatCard label="Binlog Files" icon="📄" value={data?.binlog_files != null ? formatNumber(data.binlog_files, 0) : "-"} hint="Number of binlog files on disk" />
+        <DashboardStatCard label="Binlog Size" value={data?.binlog_size_bytes != null ? formatBytes(data.binlog_size_bytes) : "-"} hint="Current total binary log disk usage" />
+        <DashboardStatCard label="Binlog Files" value={data?.binlog_files != null ? formatNumber(data.binlog_files, 0) : "-"} hint="Number of binlog files on disk" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardLinePanel title="Binary Log Size Over Time" data={binlog} formatter={(v) => formatBytes(v)} lines={[{ dataKey: "size_bytes", name: "Binlog Size", color: MARIADB_COLORS.cyan }]} />
@@ -417,16 +416,16 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 9. CACHE EFFICIENCY ═════════════════ */}
       <DashboardSectionHeader title="Cache Efficiency" description="Query cache and table open-cache effectiveness" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <DashboardStatCard label="Query Cache Hit %" icon="🎯" value={data?.qcache_hit_ratio_pct != null ? formatPercent(data.qcache_hit_ratio_pct) : "N/A"} tone={data?.qcache_hit_ratio_pct != null && data.qcache_hit_ratio_pct < 50 ? "warn" : "neutral"} hint="Disabled in MySQL 8+ / MariaDB 10.6+" />
-        <DashboardStatCard label="Query Cache Free Mem" icon="💾" value={data?.qcache_free_mem_bytes != null ? formatBytes(data.qcache_free_mem_bytes) : "N/A"} hint="Remaining space in query cache" />
-        <DashboardStatCard label="Table Cache Hit %" icon="📂" value={data?.table_cache_hit_ratio_pct != null ? formatPercent(data.table_cache_hit_ratio_pct) : "-"} tone={(data?.table_cache_hit_ratio_pct ?? 100) < 90 ? "warn" : "good"} hint="Increase table_open_cache if low" />
-        <DashboardStatCard label="Open Tables" icon="📁" value={data?.open_tables != null ? formatNumber(data.open_tables, 0) : "-"} hint="Currently open table handles" />
+        <DashboardStatCard label="Query Cache Hit %" value={data?.qcache_hit_ratio_pct != null ? formatPercent(data.qcache_hit_ratio_pct) : "N/A"} tone={data?.qcache_hit_ratio_pct != null && data.qcache_hit_ratio_pct < 50 ? "warn" : "neutral"} hint="Disabled in MySQL 8+ / MariaDB 10.6+" />
+        <DashboardStatCard label="Query Cache Free Mem" value={data?.qcache_free_mem_bytes != null ? formatBytes(data.qcache_free_mem_bytes) : "N/A"} hint="Remaining space in query cache" />
+        <DashboardStatCard label="Table Cache Hit %" value={data?.table_cache_hit_ratio_pct != null ? formatPercent(data.table_cache_hit_ratio_pct) : "-"} tone={(data?.table_cache_hit_ratio_pct ?? 100) < 90 ? "warn" : "good"} hint="Increase table_open_cache if low" />
+        <DashboardStatCard label="Open Tables" value={data?.open_tables != null ? formatNumber(data.open_tables, 0) : "-"} hint="Currently open table handles" />
       </div>
 
       {/* ═══════════════════════════════ 10. QUERY ANALYSIS ═══════════════════ */}
       <DashboardSectionHeader title="Query Analysis" description="Performance Schema digest data — requires performance_schema=ON" />
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-2">
-        <DashboardStatCard label="Total Query Time (digests)" icon="⏱️" value={data?.query_digest_total_time_seconds != null ? formatDuration(data.query_digest_total_time_seconds) : "-"} hint="Cumulative time across all digest classes" />
+        <DashboardStatCard label="Total Query Time (digests)" value={data?.query_digest_total_time_seconds != null ? formatDuration(data.query_digest_total_time_seconds) : "-"} hint="Cumulative time across all digest classes" />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <DashboardLinePanel title="Total Query Time (digests) Over Time" data={queryTime} formatter={(v) => formatDuration(v)} lines={[{ dataKey: "total_seconds", name: "Total Time", color: MARIADB_COLORS.violet }]} />
@@ -451,7 +450,7 @@ export function MariaDBDashboardPage() {
       {/* ═══════════════════════════════ 12. LOG SIGNALS ═════════════════════ */}
       <DashboardSectionHeader title="Log Signals" description="Events parsed from MariaDB logs via Loki" />
       <div className="mb-4 flex items-center gap-3">
-        <label className="text-xs font-medium text-muted-foreground whitespace-nowrap">Min Slow Query Duration (s):</label>
+        <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Min Slow Query Duration (s):</label>
         <input
           type="number"
           min="0"
@@ -466,7 +465,7 @@ export function MariaDBDashboardPage() {
         <button
           type="button"
           onClick={() => setMinDurationSec(minDurationSecInput)}
-          className="h-8 rounded-md border border-border px-3 text-xs hover:bg-muted"
+          className="h-8 rounded-md border border-border px-3 text-sm hover:bg-muted"
         >
           Apply
         </button>
@@ -474,7 +473,7 @@ export function MariaDBDashboardPage() {
           <button
             type="button"
             onClick={() => { setMinDurationSec(""); setMinDurationSecInput("") }}
-            className="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted"
+            className="h-8 rounded-md border border-border px-3 text-sm text-muted-foreground hover:bg-muted"
           >
             Clear
           </button>
@@ -482,14 +481,14 @@ export function MariaDBDashboardPage() {
       </div>
       <SectionCard title="Log Event Counters">
         <div className="grid gap-3 md:grid-cols-4">
-          <DashboardStatCard label="Slow Queries" icon="🐢" value={formatNumber(data?.log_summary.slow_queries ?? 0, 0)} tone={(data?.log_summary.slow_queries ?? 0) > 0 ? "warn" : "good"} />
-          <DashboardStatCard label="Errors" icon="❌" value={formatNumber(data?.log_summary.errors ?? 0, 0)} tone={(data?.log_summary.errors ?? 0) > 0 ? "bad" : "good"} />
-          <DashboardStatCard label="Warnings" icon="⚠️" value={formatNumber(data?.log_summary.warnings ?? 0, 0)} tone={(data?.log_summary.warnings ?? 0) > 0 ? "warn" : "good"} />
-          <DashboardStatCard label="Auth Failures" icon="🔐" value={formatNumber(data?.log_summary.auth_failures ?? 0, 0)} tone={(data?.log_summary.auth_failures ?? 0) > 0 ? "bad" : "good"} />
-          <DashboardStatCard label="Deadlocks" icon="💀" value={formatNumber(data?.log_summary.deadlocks ?? 0, 0)} tone={(data?.log_summary.deadlocks ?? 0) > 0 ? "bad" : "good"} />
-          <DashboardStatCard label="Replication Events" icon="🔁" value={formatNumber(data?.log_summary.replication ?? 0, 0)} tone={(data?.log_summary.replication ?? 0) > 0 ? "warn" : "good"} />
-          <DashboardStatCard label="Startups" icon="🚀" value={formatNumber(data?.log_summary.startup ?? 0, 0)} />
-          <DashboardStatCard label="Shutdowns" icon="🛑" value={formatNumber(data?.log_summary.shutdown ?? 0, 0)} />
+          <DashboardStatCard label="Slow Queries" value={formatNumber(data?.log_summary.slow_queries ?? 0, 0)} tone={(data?.log_summary.slow_queries ?? 0) > 0 ? "warn" : "good"} />
+          <DashboardStatCard label="Errors" value={formatNumber(data?.log_summary.errors ?? 0, 0)} tone={(data?.log_summary.errors ?? 0) > 0 ? "bad" : "good"} />
+          <DashboardStatCard label="Warnings" value={formatNumber(data?.log_summary.warnings ?? 0, 0)} tone={(data?.log_summary.warnings ?? 0) > 0 ? "warn" : "good"} />
+          <DashboardStatCard label="Auth Failures" value={formatNumber(data?.log_summary.auth_failures ?? 0, 0)} tone={(data?.log_summary.auth_failures ?? 0) > 0 ? "bad" : "good"} />
+          <DashboardStatCard label="Deadlocks" value={formatNumber(data?.log_summary.deadlocks ?? 0, 0)} tone={(data?.log_summary.deadlocks ?? 0) > 0 ? "bad" : "good"} />
+          <DashboardStatCard label="Replication Events" value={formatNumber(data?.log_summary.replication ?? 0, 0)} tone={(data?.log_summary.replication ?? 0) > 0 ? "warn" : "good"} />
+          <DashboardStatCard label="Startups" value={formatNumber(data?.log_summary.startup ?? 0, 0)} />
+          <DashboardStatCard label="Shutdowns" value={formatNumber(data?.log_summary.shutdown ?? 0, 0)} />
         </div>
       </SectionCard>
         </>

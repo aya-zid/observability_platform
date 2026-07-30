@@ -102,9 +102,9 @@ export function ContainerLogsPage() {
       ) : null}
 
       <SectionCard title="Filters">
-        <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+        <div className="grid gap-2 lg:grid-cols-[1fr_auto]">
           <input
-            className="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none"
+            className="h-8 rounded-md border border-input bg-background/70 px-2 text-xs outline-none"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && commitSearch()}
@@ -114,7 +114,7 @@ export function ContainerLogsPage() {
           <button
             type="button"
             onClick={commitSearch}
-            className="h-10 rounded-md border border-border px-4 text-sm hover:bg-muted"
+            className="h-8 rounded-md border border-border px-2 text-xs hover:bg-muted"
           >
             Search
           </button>
@@ -137,19 +137,19 @@ export function ContainerLogsPage() {
           <>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead className="text-xs uppercase text-muted-foreground">
+                <thead className="text-sm uppercase text-muted-foreground">
                   <tr className="border-b border-border">
-                    <th className="py-2 pr-4 text-left w-44">Timestamp</th>
-                    <th className="py-2 text-left">Message</th>
+                    <th className="py-1.5 pr-3 text-left w-44 text-xs">Timestamp</th>
+                    <th className="py-1.5 text-left text-xs">Message</th>
                   </tr>
                 </thead>
                 <tbody>
                   {events.map((event, index) => (
                     <tr key={`${event.timestamp}-${index}`} className="border-b border-border/60 hover:bg-muted/20">
-                      <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-muted-foreground align-top">
+                      <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs text-muted-foreground align-top">
                         {formatTimestamp(event.timestamp)}
                       </td>
-                      <td className="py-2">
+                      <td className="py-1.5">
                         <div className="font-mono text-xs whitespace-pre-wrap break-all">{event.line}</div>
                       </td>
                     </tr>

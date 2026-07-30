@@ -23,21 +23,21 @@ interface Props {
 export function ApacheLogViewerRow({ log, parsed, expanded, onToggle }: Props) {
   if (!parsed) {
     return (
-      <div className="rounded p-3 font-mono text-xs text-muted-foreground hover:bg-muted">
+      <div className="rounded p-3 font-mono text-sm text-muted-foreground hover:bg-muted">
         {log.substring(0, 200)}...
       </div>
     )
   }
 
   return (
-    <div className="border-l-2 border-l-border bg-card">
+    <div className="border-l-[2px] border-l-border bg-card">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full px-3 py-2 text-left hover:bg-muted transition-colors"
+        className="w-full px-2.5 py-1 text-left hover:bg-muted transition-colors"
       >
-        <div className="flex items-center gap-3">
-          <span className={cn('px-2 py-1 rounded text-xs font-medium', getStatusBadgeClass(parsed.status))}>
+        <div className="flex items-center gap-2">
+          <span className={cn('px-1.5 py-0.5 rounded text-xs font-medium', getStatusBadgeClass(parsed.status))}>
             {parsed.status}
           </span>
           <span className="font-mono text-xs text-muted-foreground">{parsed.method}</span>
@@ -58,8 +58,8 @@ export function ApacheLogViewerRow({ log, parsed, expanded, onToggle }: Props) {
       </button>
 
       {expanded && (
-        <div className="border-t border-t-border bg-muted/50 px-3 py-3 text-xs font-mono">
-          <div className="space-y-1 text-foreground">
+        <div className="border-t border-t-border bg-muted/50 px-2.5 py-2 text-xs font-mono">
+          <div className="space-y-0.5 text-foreground">
             {[
               ['IP', parsed.ip],
               ['Method', parsed.method],
@@ -70,8 +70,8 @@ export function ApacheLogViewerRow({ log, parsed, expanded, onToggle }: Props) {
               ['Referer', parsed.referer || '—'],
               ['User Agent', parsed.user_agent],
             ].map(([label, value]) => (
-              <div key={label} className="flex gap-2">
-                <span className="text-muted-foreground w-24 flex-shrink-0">{label}:</span>
+              <div key={label} className="flex gap-1.5">
+                <span className="text-muted-foreground w-20 flex-shrink-0">{label}:</span>
                 <span className="flex-1 break-all">{value}</span>
               </div>
             ))}

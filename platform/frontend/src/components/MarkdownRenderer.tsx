@@ -5,27 +5,31 @@ import { Terminal } from "lucide-react"
 
 export default function MarkdownRenderer({ content }: { content: string }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h2: ({ children }) => (
-            <h2 className="text-sm font-bold text-foreground mt-5 mb-3 pb-2 border-b border-border">
-              {children}
-            </h2>
-          ),
+          h2: ({ children }) => {
+            const id = String(children).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
+            return (
+              <h2 id={id} className="text-lg font-bold text-foreground mt-8 mb-4 pl-4 border-l-[3px] border-primary">
+                {children}
+              </h2>
+            )
+          },
           h3: ({ children }) => (
-            <h3 className="text-xs font-semibold text-foreground mt-4 mb-2">
+            <h3 className="text-base font-bold text-primary mt-7 mb-3 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
               {children}
             </h3>
           ),
           h4: ({ children }) => (
-            <h4 className="text-xs font-semibold text-foreground mt-3 mb-1.5">
+            <h4 className="text-sm font-bold text-foreground/80 mt-5 mb-2 uppercase tracking-wider">
               {children}
             </h4>
           ),
           p: ({ children }) => (
-            <p className="text-xs text-foreground leading-relaxed mb-3 last:mb-0">
+            <p className="text-sm text-foreground leading-relaxed mb-3 last:mb-0">
               {children}
             </p>
           ),
@@ -33,16 +37,16 @@ export default function MarkdownRenderer({ content }: { content: string }) {
             <strong className="font-semibold text-foreground">{children}</strong>
           ),
           ol: ({ children }) => (
-            <ol className="list-decimal pl-5 my-2 space-y-1 text-xs text-foreground">{children}</ol>
+            <ol className="list-decimal pl-5 my-3 space-y-1.5 text-sm text-foreground">{children}</ol>
           ),
           ul: ({ children }) => (
-            <ul className="list-disc pl-5 my-2 space-y-1 text-xs text-foreground">{children}</ul>
+            <ul className="list-disc pl-5 my-3 space-y-1.5 text-sm text-foreground">{children}</ul>
           ),
           li: ({ children }) => (
             <li className="leading-relaxed">{children}</li>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-primary/30 pl-4 py-1 my-3 text-xs text-muted-foreground">
+            <blockquote className="border-l-2 border-primary/30 pl-4 py-2 my-4 text-sm text-muted-foreground bg-muted/30 rounded-r-lg">
               {children}
             </blockquote>
           ),
@@ -51,21 +55,21 @@ export default function MarkdownRenderer({ content }: { content: string }) {
             if (isBlock) {
               const lang = className!.replace("language-", "")
               return (
-                <div className="rounded-lg overflow-hidden border border-primary/20 my-3">
-                  <div className="px-3 py-1.5 border-b border-primary/10 bg-primary/5 flex items-center gap-1.5">
-                    <Terminal className="w-3 h-3 text-primary" />
-                    <span className="text-[10px] text-primary uppercase tracking-wider font-semibold">
+                <div className="rounded-lg overflow-hidden border border-border my-4">
+                  <div className="px-3 py-1.5 border-b border-border bg-muted flex items-center gap-1.5">
+                    <Terminal className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground uppercase tracking-wider font-semibold">
                       {lang}
                     </span>
                   </div>
-                  <pre className="p-3 text-xs font-mono text-foreground whitespace-pre-wrap overflow-x-auto leading-relaxed bg-[hsl(240,15%,5%)]">
+                  <pre className="p-4 text-sm font-mono text-foreground whitespace-pre-wrap overflow-x-auto leading-relaxed bg-muted/50">
                     {children}
                   </pre>
                 </div>
               )
             }
             return (
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono text-foreground border border-border/50">
+              <code className="rounded bg-muted px-1.5 py-0.5 text-sm font-mono text-foreground border border-border/50">
                 {children}
               </code>
             )
@@ -73,8 +77,8 @@ export default function MarkdownRenderer({ content }: { content: string }) {
           pre({ children }) {
             if (isValidElement(children) && children.type === "code") {
               return (
-                <div className="rounded-lg overflow-hidden border border-primary/20 my-3">
-                  <pre className="p-3 text-xs font-mono text-foreground whitespace-pre-wrap overflow-x-auto leading-relaxed bg-[hsl(240,15%,5%)]">
+                <div className="rounded-lg overflow-hidden border border-border my-4">
+                  <pre className="p-4 text-sm font-mono text-foreground whitespace-pre-wrap overflow-x-auto leading-relaxed bg-muted/50">
                     {children}
                   </pre>
                 </div>
@@ -82,7 +86,7 @@ export default function MarkdownRenderer({ content }: { content: string }) {
             }
             return <>{children}</>
           },
-          hr: () => <hr className="my-4 border-border" />,
+          hr: () => <hr className="my-6 border-border" />,
           a: ({ children, href }) => (
             <a
               href={href}
@@ -94,24 +98,28 @@ export default function MarkdownRenderer({ content }: { content: string }) {
             </a>
           ),
           table: ({ children }) => (
-            <div className="my-3 overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-xs">{children}</table>
+            <div className="my-4 overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">{children}</table>
             </div>
           ),
           thead: ({ children }) => (
-            <thead className="bg-muted/50 border-b border-border">{children}</thead>
+            <thead className="bg-muted border-b border-border">{children}</thead>
           ),
           th: ({ children }) => (
-            <th className="px-3 py-2 text-left font-semibold text-foreground">{children}</th>
+            <th className="px-4 py-2.5 text-left font-semibold text-foreground text-sm uppercase tracking-wider">
+              {children}
+            </th>
           ),
           td: ({ children }) => (
-            <td className="px-3 py-2 text-muted-foreground border-t border-border/50">{children}</td>
+            <td className="px-4 py-2.5 text-sm text-muted-foreground border-t border-border/50">
+              {children}
+            </td>
           ),
           input({ ...props }) {
             return (
               <input
                 {...props}
-                className="h-3.5 w-3.5 rounded border-border accent-primary"
+                className="h-4 w-4 rounded border-border accent-primary"
               />
             )
           },

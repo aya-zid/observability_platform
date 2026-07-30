@@ -68,9 +68,9 @@ export default function NotificationsPage() {
               <div key={ch.id} className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
                 <div>
                   <span className="font-mono text-sm">{ch.target}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">({ch.type})</span>
+                  <span className="ml-2 text-sm text-muted-foreground">({ch.type})</span>
                   {ch.is_verified && (
-                    <span className="ml-2 text-xs text-green-500">verified</span>
+                    <span className="ml-2 text-sm text-green-500">verified</span>
                   )}
                 </div>
                 <Button variant="ghost" size="sm" className="text-destructive" onClick={() => deleteMutation.mutate(ch.id)}>

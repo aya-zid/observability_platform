@@ -31,12 +31,12 @@ export function ApacheSlowRequestTable({
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="mb-1 text-sm font-semibold text-foreground">Slow Requests (&gt;{minRT}s) — Recent 100</h3>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Showing {formatNumber(rows.length, 0)} of {formatNumber(total, 0)} found. Click a request to view more details.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground">
+          <label className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm font-medium text-muted-foreground">
             RT
             <input
               type="number"
@@ -45,14 +45,14 @@ export function ApacheSlowRequestTable({
               value={thresholdValue}
               onChange={(event) => onThresholdChange(event.target.value)}
               onBlur={onThresholdBlur}
-              className="h-7 w-16 rounded border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
+              className="h-7 w-16 rounded border border-border bg-card px-2 text-sm text-foreground outline-none focus:border-primary"
             />
             <span>s</span>
           </label>
           {total > rows.length ? (
             <Link
               to={viewMoreHref}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted"
             >
               View More
             </Link>
@@ -77,24 +77,24 @@ export function ApacheSlowRequestTable({
                     onClick={() => setExpandedRow(isOpen ? null : i)}
                     className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-muted/40 transition-colors"
                   >
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs" title={req.path}>
+                    <span className="min-w-0 flex-1 truncate font-mono text-sm" title={req.path}>
                       {req.path}
                     </span>
-                    <span className="hidden w-28 flex-shrink-0 truncate font-mono text-xs text-muted-foreground md:inline" title={req.ip}>
+                    <span className="hidden w-28 flex-shrink-0 truncate font-mono text-sm text-muted-foreground md:inline" title={req.ip}>
                       {req.ip || '—'}
                     </span>
                     <span
-                      className="rounded px-1.5 py-0.5 text-xs font-semibold text-white flex-shrink-0"
+                      className="rounded px-1.5 py-0.5 text-sm font-semibold text-white flex-shrink-0"
                       style={{ background: methodBadgeColor(req.method) }}
                     >
                       {req.method}
                     </span>
-                    <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold flex-shrink-0', getStatusBadgeClass(req.status))}>
+                    <span className={cn('rounded px-1.5 py-0.5 text-sm font-semibold flex-shrink-0', getStatusBadgeClass(req.status))}>
                       {req.status}
                     </span>
                     <span
                       className={cn(
-                        'w-20 flex-shrink-0 text-right text-xs font-semibold tabular-nums',
+                        'w-20 flex-shrink-0 text-right text-sm font-semibold tabular-nums',
                         req.rt >= 5000 ? 'text-red-500' : req.rt >= 2000 ? 'text-amber-500' : 'text-foreground',
                       )}
                     >
@@ -102,7 +102,7 @@ export function ApacheSlowRequestTable({
                     </span>
                   </button>
                   {isOpen ? (
-                    <div className="border-t border-border bg-muted/30 px-3 py-3 text-xs">
+                    <div className="border-t border-border bg-muted/30 px-3 py-3 text-sm">
                       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                         <div>
                           <span className="text-muted-foreground">Timestamp:</span>{' '}
@@ -137,7 +137,7 @@ export function ApacheSlowRequestTable({
                         {req.user_agent && (
                           <div className="md:col-span-2">
                             <span className="text-muted-foreground">User Agent:</span>{' '}
-                            <span className="font-mono break-all text-[10px]">{req.user_agent}</span>
+                            <span className="font-mono break-all text-sm">{req.user_agent}</span>
                           </div>
                         )}
                       </div>

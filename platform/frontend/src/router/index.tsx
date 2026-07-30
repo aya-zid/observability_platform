@@ -26,6 +26,7 @@ import HostsPage from "@/pages/hosts/HostsPage"
 import HostDetailPage from "@/pages/hosts/HostDetailPage"
 import ContainersPage from "@/pages/container/ContainersPage"
 import GetStartedPage from "@/pages/getstarted/GetStartedPage"
+import DocsPage from "@/pages/docs/DocsPage"
 import { ContainerDashboardPage } from "@/pages/container/ContainerDashboardPage"
 import { ContainerLogsPage } from "@/pages/container/ContainerLogsPage"
 import { HostLogsPage } from "@/pages/hosts/HostLogsPage"
@@ -58,6 +59,7 @@ export const router = createBrowserRouter([
         children: [
           { path: "/overview", element: <OverviewPage /> },
           { path: "/get-started", element: <GetStartedPage /> },
+          { path: "/docs", element: <DocsPage /> },
           { path: "/alerts", element: <AlertsPage /> },
           { path: "/hosts", element: <HostsPage /> },
           { path: "/hosts/:machineId", element: <HostDetailPage /> },

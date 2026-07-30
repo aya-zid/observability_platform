@@ -31,14 +31,25 @@ func (h *OverviewHandler) GetOverview(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "tenant not found"})
 	}
 
-	// Optional timeline window params (nanosecond epoch).
-	var timelineStartNs, timelineEndNs int64
+	// Optional timeline window params (millisecond epoch — converted to ns).
+	var timelineStartMs, timelineEndMs int64
 	if startStr := c.QueryParam("timeline_start"); startStr != "" {
-		timelineStartNs, _ = strconv.ParseInt(startStr, 10, 64)
+		var err error
+		timelineStartMs, err = strconv.ParseInt(startStr, 10, 64)
+		if err != nil {
+			c.Logger().Errorf("invalid timeline_start: %v", err)
+		}
 	}
 	if endStr := c.QueryParam("timeline_end"); endStr != "" {
-		timelineEndNs, _ = strconv.ParseInt(endStr, 10, 64)
+		var err error
+		timelineEndMs, err = strconv.ParseInt(endStr, 10, 64)
+		if err != nil {
+			c.Logger().Errorf("invalid timeline_end: %v", err)
+		}
 	}
+	// Convert millisecond-precision values to nanoseconds for internal use.
+	timelineStartNs := timelineStartMs * 1_000_000
+	timelineEndNs := timelineEndMs * 1_000_000
 
 	overview, err := h.svc.GetOverview(c.Request().Context(), claims.TenantID, tenant.UUID, timelineStartNs, timelineEndNs)
 	if err != nil {

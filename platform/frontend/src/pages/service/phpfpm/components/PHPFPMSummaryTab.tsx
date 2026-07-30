@@ -539,20 +539,7 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
     return rank.slice(0, 5)
   }, [saturation, queueDepth, maxChildren, latencyP99, opcacheRestarts, avgDur, avgCpu, opcacheHit, profile.opcacheEnabled, status5xx, slowReqs, errors, queueUtil, opcacheWasted, data])
 
-  const recommendations = useMemo(() => {
-    const recs: string[] = []
-    if (saturation > 85) recs.push("Increase pm.max_children or optimize slow handlers to reduce worker saturation.")
-    if (queueDepth > 0) recs.push("Requests are queueing — add workers or investigate blocking operations causing queue buildup.")
-    if (maxChildren > 0) recs.push("Pool reached pm.max_children limit. Increase it or reduce memory per process.")
-    if (avgDur > 1000) recs.push("Review slow scripts and external API calls contributing to high average duration.")
-    if (avgCpu > 25) recs.push("Investigate CPU-bound scripts — consider caching or optimizing database queries.")
-    if (profile.opcacheEnabled && opcacheHit < 0.9) recs.push("Tune opcache.max_accelerated_files and opcache.memory_consumption to improve hit rate.")
-    if (profile.opcacheEnabled && opcacheWasted > 0.05) recs.push("OPcache waste ratio elevated — check opcache.revalidate_freq and script churn.")
-    if (latencyP99 > 2000) recs.push("Investigate slow database queries and external service calls causing p99 latency spikes.")
-    if (status5xx > 0) recs.push("Check application error logs for 5xx response causes.")
-    if (errors > 5) recs.push("Review recent error log entries for application-level issues.")
-    return recs.slice(0, 5)
-  }, [saturation, queueDepth, maxChildren, avgDur, avgCpu, opcacheHit, profile.opcacheEnabled, opcacheWasted, latencyP99, status5xx, errors])
+
 
   const resourceWaste = useMemo(() => {
     const items: Array<{ label: string; value: string; tone: Tone }> = []
@@ -615,7 +602,7 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
           <ScoreRing score={healthScore} tone={overallTone} />
 
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.18em] text-zinc-500">
               <span className={cn("h-1.5 w-1.5 rounded-full animate-pulse", TONE[overallTone].dot)} />
               PHP-FPM · Summary
             </div>
@@ -655,13 +642,13 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
               const dirLabel = t.direction === "up" ? "Rising" : t.direction === "down" ? "Falling" : "Steady"
               return (
                 <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-3">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{t.label}</div>
+                  <div className="text-sm font-medium uppercase tracking-wider text-zinc-500">{t.label}</div>
                   <div className={cn("mt-1 flex items-baseline gap-1.5 text-sm font-semibold tabular-nums", TONE[trendTone].text)}>
                     <span>{formatNumber(t.first, 1)}</span>
-                    <span className="text-xs text-zinc-600">{arrow}</span>
+                    <span className="text-sm text-zinc-600">{arrow}</span>
                     <span>{formatNumber(t.last, 1)}</span>
                   </div>
-                  <div className={cn("mt-0.5 flex items-center gap-1 text-[10px] font-medium", TONE[trendTone].text)}>
+                  <div className={cn("mt-0.5 flex items-center gap-1 text-sm font-medium", TONE[trendTone].text)}>
                     <span>{dirLabel}</span>
                     {t.direction !== "flat" && (
                       <span>{formatNumber(Math.abs(t.pct), 1)}%</span>
@@ -695,17 +682,17 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
                     <tr key={p.pool} className="border-b border-zinc-800/50">
                       <td className="py-3 pr-4 font-mono text-zinc-200">{p.pool}</td>
                       <td className="py-3 pr-2 text-center">
-                        <span className={cn("inline-block w-full rounded-md px-2 py-1 text-xs font-semibold tabular-nums", TONE[satTone].surface, TONE[satTone].text)}>
+                        <span className={cn("inline-block w-full rounded-md px-2 py-1 text-sm font-semibold tabular-nums", TONE[satTone].surface, TONE[satTone].text)}>
                           {formatPercent(p.saturation)}
                         </span>
                       </td>
                       <td className="py-3 pr-2 text-center">
-                        <span className={cn("inline-block w-full rounded-md px-2 py-1 text-xs font-semibold tabular-nums", TONE[slowTone].surface, TONE[slowTone].text)}>
+                        <span className={cn("inline-block w-full rounded-md px-2 py-1 text-sm font-semibold tabular-nums", TONE[slowTone].surface, TONE[slowTone].text)}>
                           {p.slowReqs > 0 ? formatNumber(p.slowReqs, 0) : "—"}
                         </span>
                       </td>
                       <td className="py-3 text-center">
-                        <span className={cn("inline-block w-full rounded-md px-2 py-1 text-xs font-semibold tabular-nums", TONE[errTone].surface, TONE[errTone].text)}>
+                        <span className={cn("inline-block w-full rounded-md px-2 py-1 text-sm font-semibold tabular-nums", TONE[errTone].surface, TONE[errTone].text)}>
                           {p.errors > 0 || p.errorRate > 0 ? formatNumber(p.errors + p.errorRate, 0) : "—"}
                         </span>
                       </td>
@@ -737,7 +724,7 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {resourceWaste.map((r, i) => (
               <div key={i} className={cn("rounded-lg border bg-zinc-900/40 px-3.5 py-3", TONE[r.tone].surface)}>
-                <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{r.label}</div>
+                <div className="text-sm font-medium uppercase tracking-wider text-zinc-500">{r.label}</div>
                 <div className={cn("mt-1 text-base font-semibold tabular-nums", TONE[r.tone].text)}>{r.value}</div>
               </div>
             ))}
@@ -767,7 +754,7 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
                   const heading = sev === "critical" ? "Critical" : sev === "warning" ? "Warnings" : "Notices"
                   return (
                     <div key={sev}>
-                      <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em]">
+                      <div className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.2em]">
                         <span className={cn("h-1.5 w-1.5 rounded-full", TONE[tone].dot)} />
                         <span className={TONE[tone].text}>{heading}</span>
                         <span className="text-zinc-600">· {list.length}</span>
@@ -796,12 +783,12 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
                   return (
                     <li key={i} className={cn("rounded-lg border bg-zinc-900/40 px-3 py-2.5", TONE[bTone].surface)}>
                       <div className="flex items-center gap-2.5">
-                        <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded text-[10px] font-bold tabular-nums", TONE[bTone].surface, TONE[bTone].text)}>
+                        <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded text-sm font-bold tabular-nums", TONE[bTone].surface, TONE[bTone].text)}>
                           {i + 1}
                         </span>
-                        <span className={cn("text-xs font-semibold", TONE[bTone].text)}>{b.label}</span>
+                        <span className={cn("text-sm font-semibold", TONE[bTone].text)}>{b.label}</span>
                       </div>
-                      <p className="mt-1.5 text-[12px] leading-relaxed text-zinc-400">{b.detail}</p>
+                      <p className="mt-1.5 text-sm leading-relaxed text-zinc-400">{b.detail}</p>
                     </li>
                   )
                 })}
@@ -817,15 +804,15 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
             >
               <div className="space-y-3">
                 <div className="flex items-baseline justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-                  <span className="text-xs text-zinc-400">5xx Rate</span>
+                  <span className="text-sm text-zinc-400">5xx Rate</span>
                   <span className={cn("text-sm font-semibold tabular-nums", errorImpact.errorRate5xx > 0 ? "text-rose-300" : "text-zinc-400")}>
                     {errorImpact.errorRate5xx > 0 ? `${formatNumber(errorImpact.errorRate5xx, 2)}/s` : "None"}
                   </span>
                 </div>
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Top Error</div>
-                  <div className="mt-0.5 text-xs text-zinc-300 leading-relaxed">{errorImpact.topError}</div>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500">
+                  <div className="text-sm font-medium uppercase tracking-wider text-zinc-500">Top Error</div>
+                  <div className="mt-0.5 text-sm text-zinc-300 leading-relaxed">{errorImpact.topError}</div>
+                  <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500">
                     <span>{formatNumber(errorImpact.topCount, 0)} occurrences</span>
                     {errorImpact.topPools.length > 0 && (
                       <><span>·</span><span>Pool: {errorImpact.topPools.join(", ")}</span></>
@@ -845,7 +832,7 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
           >
             {insights.length === 0 ? (
               <div className="rounded-lg border border-dashed border-zinc-700/60 bg-zinc-900/20 p-3.5">
-                <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500 mb-2">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 mb-2">
                   <Icon.Spark className="h-3 w-3" />
                   No correlations yet — how this works
                 </div>
@@ -857,7 +844,7 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
                     ["OPcache hit rate", "OPcache waste", "Low hit rate with high waste signals memory pressure"],
                     ["Max children", "Active workers", "Limit reached while saturated means pool is exhausted"],
                   ].map(([a, b, desc], i) => (
-                    <li key={i} className="flex items-start gap-2 text-[11px] text-zinc-600">
+                    <li key={i} className="flex items-start gap-2 text-sm text-zinc-600">
                       <span className="mt-0.5 shrink-0 font-mono text-zinc-700">{a}</span>
                       <span className="shrink-0 text-zinc-700">+</span>
                       <span className="shrink-0 font-mono text-zinc-700">{b}</span>
@@ -898,8 +885,8 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
                   return (
                     <li key={p.pool} className="space-y-1.5">
                       <div className="flex items-baseline justify-between gap-3">
-                        <span className="font-mono text-[12px] text-zinc-200">{p.pool}</span>
-                        <span className={cn("shrink-0 text-xs tabular-nums", TONE[pTone].text)}>{formatPercent(p.saturation)}</span>
+                        <span className="font-mono text-sm text-zinc-200">{p.pool}</span>
+                        <span className={cn("shrink-0 text-sm tabular-nums", TONE[pTone].text)}>{formatPercent(p.saturation)}</span>
                       </div>
                       <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-800">
                         <div className={cn("h-full rounded-full", TONE[pTone].bar)} style={{ width: `${Math.max(2, p.saturation)}%` }} />
@@ -928,10 +915,10 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
               <ul className="space-y-2">
                 {topErrorMessages.map(([msg, count], i) => (
                   <li key={i} className="flex items-start gap-2.5 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-                    <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-[10px] font-semibold tabular-nums", count > 3 ? "text-rose-300 bg-rose-500/10" : "text-zinc-400 bg-zinc-800")}>
+                    <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded text-sm font-semibold tabular-nums", count > 3 ? "text-rose-300 bg-rose-500/10" : "text-zinc-400 bg-zinc-800")}>
                       {count}
                     </span>
-                    <span className="text-[12px] text-zinc-300 leading-relaxed">{msg}</span>
+                    <span className="text-sm text-zinc-300 leading-relaxed">{msg}</span>
                   </li>
                 ))}
               </ul>
@@ -951,8 +938,8 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
                   return (
                     <li key={i} className="space-y-1">
                       <div className="flex items-baseline justify-between gap-3">
-                        <span className="text-xs text-zinc-300 truncate">{e.label}</span>
-                        <span className="shrink-0 text-xs tabular-nums text-zinc-400">{formatNumber(e.count, 0)}</span>
+                        <span className="text-sm text-zinc-300 truncate">{e.label}</span>
+                        <span className="shrink-0 text-sm tabular-nums text-zinc-400">{formatNumber(e.count, 0)}</span>
                       </div>
                       <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-800">
                         <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-rose-500" style={{ width: `${Math.max(2, pct)}%` }} />
@@ -972,7 +959,7 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
             >
               <div className="flex flex-wrap gap-1.5">
                 {contextSignals.map((c, i) => (
-                  <span key={i} className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 text-[12px] text-zinc-400">
+                  <span key={i} className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 text-sm text-zinc-400">
                     <span className="font-medium text-zinc-200">{c.title}:</span> {c.detail}
                   </span>
                 ))}
@@ -989,11 +976,11 @@ export function PHPFPMSummaryTab({ data }: { data: PHPFPMDashboardSummary }) {
               <div className="flex min-w-0 items-center gap-2.5">
                 <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", TONE[row.status].dot)} />
                 <div className="min-w-0">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{row.group}</div>
+                  <div className="text-sm font-medium uppercase tracking-wider text-zinc-500">{row.group}</div>
                   <div className="truncate text-sm text-zinc-200">{row.label}</div>
                 </div>
               </div>
-              <span className={cn("shrink-0 text-right text-xs font-medium tabular-nums", TONE[row.status].text)}>
+              <span className={cn("shrink-0 text-right text-sm font-medium tabular-nums", TONE[row.status].text)}>
                 {row.status === "na" ? "—" : row.value}
               </span>
             </div>
@@ -1016,9 +1003,9 @@ function LatencyExperienceScore({ data }: { data: PHPFPMDashboardSummary }) {
       <div className="space-y-3">
         <div className="flex items-baseline justify-between">
           <span className="text-2xl font-semibold tabular-nums text-zinc-600">—</span>
-          <span className="text-xs font-medium text-zinc-600">Insufficient data</span>
+          <span className="text-sm font-medium text-zinc-600">Insufficient data</span>
         </div>
-        <p className="text-[11px] text-zinc-600 leading-relaxed">
+        <p className="text-sm text-zinc-600 leading-relaxed">
           No latency measurements available for this window. Score estimates user experience from the share of requests completing under {threshold}ms (Satisfied) vs exceeding {threshold * 4}ms (Frustrated).
         </p>
       </div>
@@ -1058,7 +1045,7 @@ function LatencyExperienceScore({ data }: { data: PHPFPMDashboardSummary }) {
         <span className={cn("text-2xl font-semibold tabular-nums", TONE[tone].text)}>
           {(apdex / 100).toFixed(2)}
         </span>
-        <span className={cn("rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider", TONE[tone].surface, TONE[tone].text)}>
+        <span className={cn("rounded-md px-2 py-0.5 text-sm font-semibold uppercase tracking-wider", TONE[tone].surface, TONE[tone].text)}>
           {label}
         </span>
       </div>
@@ -1067,32 +1054,32 @@ function LatencyExperienceScore({ data }: { data: PHPFPMDashboardSummary }) {
         <div className="bg-amber-500 transition-all" style={{ width: `${tolerated * 100}%` }} title="Tolerated" />
         <div className="bg-rose-500 transition-all" style={{ width: `${frustrated * 100}%` }} title="Frustrated" />
       </div>
-      <div className="flex justify-between text-[11px] text-zinc-500">
+      <div className="flex justify-between text-sm text-zinc-500">
         <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1" />Satisfied {'<'}500ms</span>
         <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 mr-1" />Tolerated</span>
         <span><span className="inline-block h-1.5 w-1.5 rounded-full bg-rose-500 mr-1" />Frustrated {'>'}2s</span>
       </div>
       <div className="grid grid-cols-3 gap-2 border-t border-zinc-800 pt-3">
         <div>
-          <div className="text-[10px] text-zinc-600">p50</div>
+          <div className="text-sm text-zinc-600">p50</div>
           <div className={cn("text-sm font-semibold tabular-nums", p50 <= threshold ? "text-emerald-400" : p50 <= threshold * 2 ? "text-amber-400" : "text-rose-400")}>
             {formatNumber(p50, 1)}ms
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-zinc-600">p95</div>
+          <div className="text-sm text-zinc-600">p95</div>
           <div className={cn("text-sm font-semibold tabular-nums", p95 <= threshold ? "text-emerald-400" : p95 <= threshold * 2 ? "text-amber-400" : "text-rose-400")}>
             {formatNumber(p95, 1)}ms
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-zinc-600">p99</div>
+          <div className="text-sm text-zinc-600">p99</div>
           <div className={cn("text-sm font-semibold tabular-nums", p99 <= threshold ? "text-emerald-400" : p99 <= threshold * 2 ? "text-amber-400" : "text-rose-400")}>
             {formatNumber(p99, 1)}ms
           </div>
         </div>
       </div>
-      <p className="text-[11px] text-zinc-600 leading-relaxed">
+      <p className="text-sm text-zinc-600 leading-relaxed">
         Score of 1.00 = all requests under {threshold}ms. Currently {formatNumber(satisfied * 100, 0)}% of requests are Satisfied (under {threshold}ms), {formatNumber(frustrated * 100, 0)}% are Frustrated (over {threshold * 4}ms). Estimated from percentile latencies.
       </p>
     </div>
@@ -1107,7 +1094,7 @@ function Panel({ title, sub, icon, children }: { title: string; sub?: string; ic
           {icon}
           <div>
             <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
-            {sub && <p className="text-[11px] text-zinc-500">{sub}</p>}
+            {sub && <p className="text-sm text-zinc-500">{sub}</p>}
           </div>
         </div>
       </header>
@@ -1118,7 +1105,7 @@ function Panel({ title, sub, icon, children }: { title: string; sub?: string; ic
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+    <span className="inline-flex items-center rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-sm font-medium uppercase tracking-wider text-zinc-400">
       {children}
     </span>
   )
@@ -1132,7 +1119,7 @@ function Tally({ tone, label, count }: { tone: Tone; label: string; count: numbe
       active ? TONE[tone].surface : "border-zinc-800/60",
     )}>
       <div className={cn("text-2xl font-semibold tabular-nums", active ? TONE[tone].text : "text-zinc-600")}>{count}</div>
-      <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-0.5 text-sm font-medium uppercase tracking-wider text-zinc-500">{label}</div>
     </div>
   )
 }
@@ -1145,13 +1132,13 @@ function KpiCard({ label, value, sub, tone, icon: I }: { label: string; value: s
       tone !== "ok" && tone !== "na" && t.glow,
     )}>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</span>
+        <span className="text-sm font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</span>
         <I className={cn("h-3.5 w-3.5", t.text)} />
       </div>
       <div className={cn("mt-2 text-2xl font-semibold tabular-nums tracking-tight", tone === "ok" ? "text-zinc-100" : t.text)}>
         {value}
       </div>
-      <div className="mt-0.5 text-[11px] text-zinc-500">{sub}</div>
+      <div className="mt-0.5 text-sm text-zinc-500">{sub}</div>
       <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-px", t.bar, "opacity-60")} />
     </div>
   )
@@ -1163,14 +1150,14 @@ function FindingRow({ index, finding, tone }: { index: number; finding: Finding;
     <li className={cn("group relative overflow-hidden rounded-lg border bg-zinc-950/40 pl-4 pr-4 py-3 transition-colors hover:bg-zinc-900/40", t.surface)}>
       <span className={cn("absolute inset-y-0 left-0 w-[3px]", t.bar)} />
       <div className="flex items-start gap-3">
-        <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md text-[10px] font-semibold tabular-nums", t.text, "bg-zinc-900/80 border border-zinc-800")}>
+        <span className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md text-sm font-semibold tabular-nums", t.text, "bg-zinc-900/80 border border-zinc-800")}>
           {index}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className={cn("text-sm font-medium", "text-zinc-100")}>{finding.title}</span>
             {finding.category && (
-              <span className="text-[10px] uppercase tracking-wider text-zinc-500">· {finding.category}</span>
+              <span className="text-sm uppercase tracking-wider text-zinc-500">· {finding.category}</span>
             )}
           </div>
           <p className="mt-1 text-[13px] leading-relaxed text-zinc-400">{finding.detail}</p>
@@ -1196,9 +1183,9 @@ function CapacityCard({ label, value, sub, tone }: { label: string; value: strin
   const t = TONE[tone]
   return (
     <div className={cn("rounded-xl border bg-zinc-950/60 p-4 text-center transition-all", t.surface)}>
-      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</div>
+      <div className="text-sm font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</div>
       <div className={cn("mt-1 text-2xl font-semibold tabular-nums tracking-tight", t.text)}>{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-zinc-500">{sub}</div>}
+      {sub && <div className="mt-0.5 text-sm text-zinc-500">{sub}</div>}
       <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-px", t.bar, "opacity-60")} />
     </div>
   )

@@ -51,7 +51,7 @@ export default function LoginPage() {
 
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <div>
-          <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Email</label>
+          <label className="text-sm font-semibold text-foreground uppercase tracking-wider">Email</label>
           <div className="relative mt-1.5">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -63,13 +63,13 @@ export default function LoginPage() {
             />
           </div>
           {form.formState.errors.email ? (
-            <p className="text-xs text-destructive mt-1">{form.formState.errors.email.message}</p>
+            <p className="text-sm text-destructive mt-1">{form.formState.errors.email.message}</p>
           ) : null}
         </div>
 
         <div>
           <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Password</label>
+            <label className="text-sm font-semibold text-foreground uppercase tracking-wider">Password</label>
           </div>
           <div className="relative mt-1.5">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -85,11 +85,11 @@ export default function LoginPage() {
             </button>
           </div>
           {form.formState.errors.password ? (
-            <p className="text-xs text-destructive mt-1">{form.formState.errors.password.message}</p>
+            <p className="text-sm text-destructive mt-1">{form.formState.errors.password.message}</p>
           ) : null}
         </div>
 
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
         <Button
           type="submit"
@@ -101,7 +101,7 @@ export default function LoginPage() {
         </Button>
       </form>
 
-      <p className="text-xs text-muted-foreground text-center mt-6">
+      <p className="text-sm text-muted-foreground text-center mt-6">
         Don't have an account?{" "}
         <Link to="/signup" className="text-primary font-semibold hover:underline">
           Create one

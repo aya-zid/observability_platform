@@ -17,8 +17,9 @@ import (
 type QueryType string
 
 const (
-	QueryTypePromQL QueryType = "promql"
-	QueryTypeLogQL  QueryType = "logql"
+	QueryTypePromQL  QueryType = "promql"
+	QueryTypeLogQL   QueryType = "logql"
+	QueryTypeStatus  QueryType = "status"
 )
 
 type BuiltQuery struct {
@@ -167,6 +168,9 @@ func (b *AlertQueryBuilder) BuildQuery(templateID, hostMachineID, serviceName, d
 		return b.buildNginxAuthBruteForce(hostMachineID, serviceName, domain, forDuration), nil
 
 	// ── Apache templates (LogQL + PromQL) ────────────────────
+	case "apache_auth_brute_force":
+		return b.buildApacheAuthBruteForce(hostMachineID, serviceName, domain, forDuration), nil
+
 	case "apache_4xx":
 		return b.buildApache4xx(hostMachineID, serviceName, domain, forDuration), nil
 
@@ -181,6 +185,9 @@ func (b *AlertQueryBuilder) BuildQuery(templateID, hostMachineID, serviceName, d
 			`apache_workers{state="busy",host_id=%q} / clamp_min(sum(apache_workers{host_id=%q}), 1) * 100`,
 			hostMachineID, hostMachineID,
 		)), nil
+
+	case "apache_traffic_drop":
+		return b.buildApacheTrafficDrop(hostMachineID, serviceName, domain, forDuration), nil
 
 	// ── PostgreSQL templates (PromQL + LogQL) ─────────────────
 	case "postgres_connections":
@@ -381,6 +388,10 @@ func (b *AlertQueryBuilder) BuildQuery(templateID, hostMachineID, serviceName, d
 	case "phpfpm_error_rate":
 		return b.buildPHPFPMErrorRate(hostMachineID, serviceName, forDuration), nil
 
+	// ── Status-based templates (DB queries, not PromQL/LogQL) ───
+	case "container_stopped", "host_service_stopped":
+		return &BuiltQuery{QueryType: QueryTypeStatus}, nil
+
 	// ── Container templates (PromQL) ────────────────────────────
 	case "container_cpu":
 		return b.buildContainerCPU(containerName), nil
@@ -422,7 +433,7 @@ func lokiWebSelector(serviceName, domain, logKind, hostID string) string {
 func (b *AlertQueryBuilder) buildNginx5xx(hostID, serviceName, domain, forDuration string) *BuiltQuery {
 	base := lokiWebSelector(serviceName, domain, "access", hostID)
 	query := fmt.Sprintf(
-		`sum(rate(%s %s | status =~ "5.." [%s])) / clamp_min(sum(rate(%s [%s])), 1) * 100`,
+		`sum(rate(%s %s | status =~ "5.." [%s])) / sum(rate(%s [%s])) * 100`,
 		base, nginxParseExpr, forDuration, base, forDuration,
 	)
 	return b.logQL(query)
@@ -431,7 +442,7 @@ func (b *AlertQueryBuilder) buildNginx5xx(hostID, serviceName, domain, forDurati
 func (b *AlertQueryBuilder) buildNginx4xx(hostID, serviceName, domain, forDuration string) *BuiltQuery {
 	base := lokiWebSelector(serviceName, domain, "access", hostID)
 	query := fmt.Sprintf(
-		`sum(rate(%s %s | status =~ "4.." [%s])) / clamp_min(sum(rate(%s [%s])), 1) * 100`,
+		`sum(rate(%s %s | status =~ "4.." [%s])) / sum(rate(%s [%s])) * 100`,
 		base, nginxParseExpr, forDuration, base, forDuration,
 	)
 	return b.logQL(query)
@@ -458,6 +469,14 @@ func (b *AlertQueryBuilder) buildApache4xx(hostID, serviceName, domain, forDurat
 	return b.buildNginx4xx(hostID, serviceName, domain, forDuration)
 }
 
+func (b *AlertQueryBuilder) buildApacheAuthBruteForce(hostID, serviceName, domain, forDuration string) *BuiltQuery {
+	return b.buildNginxAuthBruteForce(hostID, serviceName, domain, forDuration)
+}
+
+func (b *AlertQueryBuilder) buildApacheTrafficDrop(hostID, serviceName, domain, forDuration string) *BuiltQuery {
+	return b.buildNginxTrafficDrop(hostID, serviceName, domain, forDuration)
+}
+
 // buildNginxTrafficDrop compares current request rate (5m) against historical rate (1h).
 // A negative percentage means traffic dropped — fires when drop exceeds threshold (e.g. -50%).
 func (b *AlertQueryBuilder) buildNginxTrafficDrop(hostID, serviceName, domain, forDuration string) *BuiltQuery {
@@ -472,11 +491,12 @@ func (b *AlertQueryBuilder) buildNginxTrafficDrop(hostID, serviceName, domain, f
 	return b.logQL(query)
 }
 
-// buildNginxAuthBruteForce counts 401/403 responses on authentication-related paths.
+// buildNginxAuthBruteForce counts 401/403 responses — any elevated 401/403 rate
+// indicates potential brute-force or credential-stuffing attempts.
 func (b *AlertQueryBuilder) buildNginxAuthBruteForce(hostID, serviceName, domain, forDuration string) *BuiltQuery {
 	base := lokiWebSelector(serviceName, domain, "access", hostID)
 	query := fmt.Sprintf(
-		`sum(count_over_time(%s %s | status =~ "401|403" | path =~ "(?i)(admin|wp-admin|wp-login|xmlrpc|api/auth|login|signin|oauth/token)" [%s]))`,
+		`sum(count_over_time(%s %s | status =~ "401|403" [%s]))`,
 		base, parseExpr, forDuration,
 	)
 	return b.logQL(query)
@@ -662,7 +682,7 @@ func (b *AlertQueryBuilder) ExecuteLogQL(ctx context.Context, tenantUUID, query 
 
 	params := url.Values{}
 	params.Set("query", query)
-	params.Set("time", strconv.FormatInt(time.Now().UnixNano(), 10))
+	params.Set("time", strconv.FormatInt(time.Now().Unix(), 10))
 	params.Set("limit", "1")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream+"?"+params.Encode(), nil)

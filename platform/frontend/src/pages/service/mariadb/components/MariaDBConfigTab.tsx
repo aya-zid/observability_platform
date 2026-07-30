@@ -28,18 +28,18 @@ function SettingCard({ setting }: { setting: MariaDBConfigSetting }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate font-mono text-xs text-muted-foreground" title={setting.name}>
+          <div className="truncate font-mono text-sm text-muted-foreground" title={setting.name}>
             {setting.name}
           </div>
           <div className="mt-1 text-lg font-semibold tabular-nums">{formatSettingValue(setting)}</div>
         </div>
         {setting.warn ? (
-          <span className="rounded border border-amber-300/60 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+          <span className="rounded border border-amber-300/60 px-2 py-0.5 text-sm text-amber-700 dark:text-amber-300">
             Review
           </span>
         ) : null}
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{setting.description}</p>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{setting.description}</p>
     </div>
   )
 }
@@ -71,7 +71,7 @@ export function MariaDBConfigTab({ id }: { id: string }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Current settings for {service.service_name} ({service.hostname || service.machine_id})
       </p>
       {(snapshot?.groups ?? []).map((group, index) => {

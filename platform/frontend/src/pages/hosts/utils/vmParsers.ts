@@ -52,7 +52,6 @@ export function latestVMValueMulti(data: any, labelKey: string): Record<string, 
 }
 
 export function sumLatestVMValues(data: any, labelFilter?: (label: string) => boolean): number | null {
-  const values = latestVMValueMulti(data, labelFilter ? "_dummy" : "_dummy")
   if (!data?.data?.result) return null
   let sum = 0
   let count = 0

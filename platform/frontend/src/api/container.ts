@@ -9,6 +9,8 @@ export type ContainerService = {
   log_collection_on: boolean
   metric_collection_on: boolean
   hostname?: string
+  last_seen_at: string
+  status: "running" | "stopped"
 }
 
 export type ContainerServiceDetail = {
@@ -20,6 +22,8 @@ export type ContainerServiceDetail = {
   container_image?: string
   log_collection_on: boolean
   metric_collection_on: boolean
+  last_seen_at: string
+  status: "running" | "stopped"
 }
 
 export type ContainerDashboardSummary = {

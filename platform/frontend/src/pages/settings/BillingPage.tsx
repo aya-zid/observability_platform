@@ -132,7 +132,7 @@ export default function BillingPage() {
                   >
                     <div className="font-semibold text-lg">{plan.name}</div>
                     <div className="text-2xl font-bold mt-2">${plan.price_per_month.toFixed(2)}</div>
-                    <div className="text-xs text-muted-foreground">per month</div>
+                    <div className="text-sm text-muted-foreground">per month</div>
                     <ul className="mt-4 grid gap-2 text-sm">
                       <li>Up to {plan.max_hosts} hosts</li>
                       <li>{plan.log_retention_days} day log retention</li>

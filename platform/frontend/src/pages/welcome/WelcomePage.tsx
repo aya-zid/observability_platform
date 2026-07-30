@@ -1,11 +1,11 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
 import {
-  Activity, ArrowRight, Server, Box, Bell, ShieldCheck, GitBranch,
-  LineChart, Database, Eye, Cpu, Layers, Sparkles, Check, Terminal,
+  Activity, ArrowRight, Server, Bell, ShieldCheck, GitBranch,
+  LineChart, Database, Eye, Layers, Sparkles, Check, Terminal,
   AlertTriangle, Github, Twitter, Linkedin,
-  Cloud, HardDrive, BarChart3, Search,
-  Menu, X, Radio,
+  BarChart3,
+  Menu, X,
 } from "lucide-react"
 import ThemeToggle from "@/components/shared/ThemeToggle"
 import { Button } from "@/components/ui/button"
@@ -61,14 +61,14 @@ function StepCard({
   return (
     <div className="relative rounded-xl border border-border bg-card p-6 transition-all duration-300 hover:border-primary/30 hover:shadow-elevated">
       <div className="flex items-center justify-between mb-4">
-        <span className="text-xs font-mono text-muted-foreground/60">{number}</span>
+        <span className="text-sm font-mono text-muted-foreground/60">{number}</span>
         <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
           <Icon className="w-4.5 h-4.5 text-primary" />
         </div>
       </div>
       <h3 className="font-semibold text-lg">{title}</h3>
       <p className="mt-2 text-sm text-muted-foreground leading-relaxed">{desc}</p>
-      <div className="mt-5 rounded-lg bg-background border border-border px-3 py-2.5 font-mono text-[11px] text-foreground/80 overflow-x-auto">
+      <div className="mt-5 rounded-lg bg-background border border-border px-3 py-2.5 font-mono text-sm text-foreground/80 overflow-x-auto">
         {code}
       </div>
     </div>
@@ -95,7 +95,7 @@ export default function WelcomePage() {
               <div className="text-[15px] font-bold tracking-tight">
                 <span className="text-accent">Media</span><span className="text-primary">net</span>
               </div>
-              <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Observability</div>
+              <div className="text-sm uppercase tracking-[0.18em] text-muted-foreground">Observability</div>
             </div>
           </Link>
 
@@ -162,7 +162,7 @@ export default function WelcomePage() {
         <div className="absolute inset-0 bg-grid opacity-60" />
         <div className="relative max-w-7xl mx-auto px-6 pt-20 pb-24 md:pb-32">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-card/60 backdrop-blur text-xs text-muted-foreground mb-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-card/60 backdrop-blur text-sm text-muted-foreground mb-6">
               <span className="status-dot-green" />
               <span>Now with cross-tier correlation engine</span>
               <span className="hidden sm:inline text-muted-foreground/50">&mdash;</span>
@@ -197,7 +197,7 @@ export default function WelcomePage() {
               </Button>
             </div>
 
-            <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
+            <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Check className="w-3.5 h-3.5 text-status-green" /> No credit card required
               </span>
@@ -218,7 +218,7 @@ export default function WelcomePage() {
                 <span className="w-2.5 h-2.5 rounded-full bg-destructive/70" />
                 <span className="w-2.5 h-2.5 rounded-full bg-status-amber/70" />
                 <span className="w-2.5 h-2.5 rounded-full bg-status-green/70" />
-                <span className="ml-4 text-[11px] text-muted-foreground font-mono">medianet.observability / overview</span>
+                <span className="ml-4 text-sm text-muted-foreground font-mono">medianet.observability / overview</span>
               </div>
               <div className="p-4 md:p-5 grid grid-cols-12 gap-3 md:gap-4">
                 {/* KPI row */}
@@ -231,15 +231,15 @@ export default function WelcomePage() {
                   { label: "Findings", v: "12", c: "text-destructive" },
                 ].map((k) => (
                   <div key={k.label} className="col-span-4 md:col-span-2 rounded-lg border border-border bg-background/50 p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{k.label}</div>
+                    <div className="text-sm uppercase tracking-wider text-muted-foreground">{k.label}</div>
                     <div className={`text-xl md:text-2xl font-bold mt-1 ${k.c}`}>{k.v}</div>
                   </div>
                 ))}
                 {/* Chart panel */}
                 <div className="col-span-12 md:col-span-8 rounded-lg border border-border bg-background/50 p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <div className="text-xs font-semibold">Ingest throughput</div>
-                    <div className="text-[10px] text-muted-foreground font-mono">last 1h</div>
+                    <div className="text-sm font-semibold">Ingest throughput</div>
+                    <div className="text-sm text-muted-foreground font-mono">last 1h</div>
                   </div>
                   <svg viewBox="0 0 400 120" className="w-full h-20 md:h-24" preserveAspectRatio="none">
                     <defs>
@@ -254,7 +254,7 @@ export default function WelcomePage() {
                 </div>
                 {/* Findings panel */}
                 <div className="col-span-12 md:col-span-4 rounded-lg border border-border bg-background/50 p-4">
-                  <div className="text-xs font-semibold mb-3 flex items-center gap-1.5">
+                  <div className="text-sm font-semibold mb-3 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-primary" /> Correlation findings
                   </div>
                   <div className="space-y-2">
@@ -263,7 +263,7 @@ export default function WelcomePage() {
                       { t: "Cache miss cascade", c: "amber" },
                       { t: "DB slow query storm", c: "amber" },
                     ].map((f) => (
-                      <div key={f.t} className="flex items-center gap-2 text-[11px]">
+                      <div key={f.t} className="flex items-center gap-2 text-sm">
                         <span className={`status-dot-${f.c}`} />
                         <span className="text-foreground/85 truncate">{f.t}</span>
                       </div>
@@ -279,7 +279,7 @@ export default function WelcomePage() {
       {/* ===================== TRUSTED BY ===================== */}
       <section className="border-y border-border bg-secondary/20">
         <div className="max-w-7xl mx-auto px-6 py-10">
-          <div className="text-center text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-6">
+          <div className="text-center text-sm uppercase tracking-[0.25em] text-muted-foreground mb-6">
             Trusted by teams running production on
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-muted-foreground/60 font-mono text-sm">
@@ -293,7 +293,7 @@ export default function WelcomePage() {
       {/* ===================== FEATURES ===================== */}
       <section id="features" className="max-w-7xl mx-auto px-6 py-24 md:py-28">
         <div className="max-w-2xl mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-xs font-semibold text-accent mb-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-sm font-semibold text-accent mb-4">
             <Sparkles className="w-3 h-3" /> Features
           </div>
           <h2 className="text-4xl md:text-5xl font-bold tracking-tight">
@@ -324,7 +324,7 @@ export default function WelcomePage() {
       <section id="how" className="border-y border-border bg-secondary/15">
         <div className="max-w-7xl mx-auto px-6 py-24 md:py-28">
           <div className="max-w-2xl mb-14">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs font-semibold text-primary mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-sm font-semibold text-primary mb-4">
               <Terminal className="w-3 h-3" /> How it works
             </div>
             <h2 className="text-4xl md:text-5xl font-bold tracking-tight">
@@ -364,7 +364,7 @@ export default function WelcomePage() {
       <section id="correlation" className="max-w-7xl mx-auto px-6 py-24 md:py-28">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-xs font-semibold text-accent mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-sm font-semibold text-accent mb-4">
               <GitBranch className="w-3 h-3" /> Correlation engine
             </div>
             <h2 className="text-4xl md:text-5xl font-bold tracking-tight leading-tight">
@@ -398,7 +398,7 @@ export default function WelcomePage() {
               <div className="text-sm font-semibold flex items-center gap-1.5">
                 <GitBranch className="w-4 h-4 text-accent" /> Live dependency graph
               </div>
-              <span className="text-[10px] font-mono text-destructive inline-flex items-center gap-1">
+              <span className="text-sm font-mono text-destructive inline-flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3" /> 1 finding active
               </span>
             </div>
@@ -426,7 +426,7 @@ export default function WelcomePage() {
               <circle cx={460} cy={115} r={38} fill="url(#nodeOk)" />
 
               {/* Connection lines */}
-              {[[60, 175, true], [175, 290, true], [290, 405, false], [405, 460, false]].map(([x1, x2, failing], i) => {
+              {([[60, 175, true], [175, 290, true], [290, 405, false], [405, 460, false]] as [number, number, boolean][]).map(([x1, x2, failing], i) => {
                 const color = failing ? "var(--destructive)" : "var(--border)"
                 const width = failing ? 2.5 : 1.5
                 return (
@@ -509,10 +509,10 @@ export default function WelcomePage() {
               ))}
             </svg>
             <div className="mt-5 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-destructive">
+              <div className="flex items-center gap-2 text-sm font-semibold text-destructive">
                 <AlertTriangle className="w-3.5 h-3.5" /> Web tier failures caused by app-tier exhaustion
               </div>
-              <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed">
+              <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
                 nginx 5xx spike correlated with php-fpm queue saturation. Root cause: slow MariaDB query on <span className="font-mono text-foreground/80">/api/orders</span>.
               </p>
             </div>
@@ -531,7 +531,7 @@ export default function WelcomePage() {
           ].map((s) => (
             <div key={s.l} className="text-center">
               <div className="text-3xl md:text-4xl font-bold text-gradient-brand" dangerouslySetInnerHTML={{ __html: s.v }} />
-              <div className="mt-1 text-xs text-muted-foreground">{s.l}</div>
+              <div className="mt-1 text-sm text-muted-foreground">{s.l}</div>
             </div>
           ))}
         </div>
@@ -540,7 +540,7 @@ export default function WelcomePage() {
       {/* ===================== PRICING ===================== */}
       <section id="pricing" className="max-w-7xl mx-auto px-6 py-24 md:py-28">
         <div className="text-center max-w-2xl mx-auto mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs font-semibold text-primary mb-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-sm font-semibold text-primary mb-4">
             <BarChart3 className="w-3 h-3" /> Pricing
           </div>
           <h2 className="text-4xl md:text-5xl font-bold tracking-tight">Simple, per-host pricing.</h2>
@@ -574,7 +574,7 @@ export default function WelcomePage() {
               }`}
             >
               {p.highlight && (
-                <div className="absolute -top-3 left-8 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider gradient-accent text-accent-foreground">
+                <div className="absolute -top-3 left-8 px-2.5 py-0.5 rounded-full text-sm font-bold uppercase tracking-wider gradient-accent text-accent-foreground">
                   Most popular
                 </div>
               )}
@@ -583,7 +583,7 @@ export default function WelcomePage() {
                 <span className="text-4xl font-bold">{p.price}</span>
                 {p.name === "Pro" && <span className="text-sm text-muted-foreground">/host/mo</span>}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">{p.tag}</div>
+              <div className="text-sm text-muted-foreground mt-1">{p.tag}</div>
               <ul className="mt-6 space-y-2.5 flex-1">
                 {p.features.map((f) => (
                   <li key={f} className="flex items-start gap-2 text-sm">
@@ -646,7 +646,7 @@ export default function WelcomePage() {
                 <div className="text-[15px] font-bold tracking-tight">
                   <span className="text-accent">Media</span><span className="text-primary">net</span>
                 </div>
-                <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Observability</div>
+                <div className="text-sm uppercase tracking-[0.18em] text-muted-foreground">Observability</div>
               </div>
             </Link>
             <p className="text-sm text-muted-foreground max-w-sm">
@@ -664,7 +664,7 @@ export default function WelcomePage() {
             { title: "Resources", links: ["Docs", "Guides", "Status", "Support"] },
           ].map((col) => (
             <div key={col.title}>
-              <div className="text-xs font-semibold uppercase tracking-wider text-foreground mb-3">{col.title}</div>
+              <div className="text-sm font-semibold uppercase tracking-wider text-foreground mb-3">{col.title}</div>
               <ul className="space-y-2 text-sm text-muted-foreground">
                 {col.links.map((l) => (
                   <li key={l}><a href="#" className="hover:text-foreground transition-colors">{l}</a></li>
@@ -674,7 +674,7 @@ export default function WelcomePage() {
           ))}
         </div>
         <div className="border-t border-border">
-          <div className="max-w-7xl mx-auto px-6 py-5 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <div className="max-w-7xl mx-auto px-6 py-5 flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
             <div>&copy; {new Date().getFullYear()} Medianet Observability. All rights reserved.</div>
             <div className="flex gap-5">
               <a href="#" className="hover:text-foreground transition-colors">Privacy</a>

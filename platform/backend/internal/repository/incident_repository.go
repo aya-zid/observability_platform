@@ -82,3 +82,29 @@ func (r *IncidentRepository) UpsertSignal(ctx context.Context, signal *domain.In
 		DoUpdates: clause.AssignmentColumns([]string{"value", "baseline_value", "log_evidence", "updated_at"}),
 	}).Create(signal).Error
 }
+
+// ── DismissedIncident ──────────────────────────────────────────────────────────
+
+func (r *IncidentRepository) DismissIncident(ctx context.Context, tenantID uint, incidentID string) error {
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND incident_id = ?", tenantID, incidentID).
+		FirstOrCreate(&domain.DismissedIncident{
+			TenantID:   tenantID,
+			IncidentID: incidentID,
+		}).Error
+}
+
+func (r *IncidentRepository) ListDismissedIncidents(ctx context.Context, tenantID uint) ([]string, error) {
+	var rows []domain.DismissedIncident
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = r.IncidentID
+	}
+	return ids, nil
+}

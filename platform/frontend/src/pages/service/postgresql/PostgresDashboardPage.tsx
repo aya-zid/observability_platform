@@ -16,7 +16,7 @@ import { PostgresStatusSection } from "./components/PostgresStatusSection"
 import { PostgresConnectionsSection } from "./components/PostgresConnectionsSection"
 import { PostgresDatabaseHealthTable } from "./components/PostgresDatabaseHealthTable"
 import { RefreshCw } from "lucide-react"
-import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
+import { useTranslation } from "@/i18n/LanguageContext"
 
 function getTimeWindow(selection: TimeSelection) {
   if (selection.mode === "preset") {
@@ -116,7 +116,6 @@ export function PostgresDashboardPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
-            <LangToggle />
             <button
               type="button"
               onClick={() => dashQuery.refetch()}
@@ -273,7 +272,7 @@ export function PostgresDashboardPage() {
             { dataKey: "AccessShareLock", name: "AccessShare", color: PG_CHART_COLORS.slate },
             { dataKey: "RowExclusiveLock", name: "RowExclusive", color: PG_CHART_COLORS.blue },
             { dataKey: "ExclusiveLock", name: "Exclusive", color: PG_CHART_COLORS.red },
-            { dataKey: "AccessExclusiveLock", name: "AccessExclusive", color: "#b91c1c" },
+            { dataKey: "AccessExclusiveLock", name: "AccessExclusive", color: "#dc2626" },
           ]}
         />
         <DashboardBarPanel title={t("pgDashboard.chartLocksByMode")} data={(data?.locks_by_mode ?? []).map((d) => ({ name: d.label, value: d.count }))} />

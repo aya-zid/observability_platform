@@ -47,9 +47,9 @@ function severityClass(severity: string) {
 
 function Stat({ label, value, tone = "default" }: { label: string; value: number | string; tone?: "default" | "red" | "amber" }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="rounded-lg border border-border bg-card p-3">
       <div className="text-xs font-medium uppercase text-muted-foreground">{label}</div>
-      <div className={cn("mt-2 text-2xl font-semibold tabular-nums", tone === "red" && "text-red-500", tone === "amber" && "text-amber-500")}>{value}</div>
+      <div className={cn("mt-1 text-xl font-semibold tabular-nums", tone === "red" && "text-red-500", tone === "amber" && "text-amber-500")}>{value}</div>
     </div>
   )
 }
@@ -130,20 +130,20 @@ export function HostLogsPage() {
     return (
       <Fragment key={`${event.timestamp_ns}-${index}`}>
         <tr className="cursor-pointer border-b border-border/60 hover:bg-muted/40" onClick={() => setOpenRow(isOpen ? null : index)}>
-          <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-muted-foreground">{formatLocalTimestamp(event.timestamp_ns)}</td>
+          <td className="whitespace-nowrap py-2 pr-3 font-mono text-sm text-muted-foreground">{formatLocalTimestamp(event.timestamp_ns)}</td>
           <td className="whitespace-nowrap py-2 pr-3">
-            <span className={cn("rounded-full px-2 py-1 text-xs", severityClass(event.severity))}>{event.severity}</span>
+            <span className={cn("rounded-full px-2 py-1 text-sm", severityClass(event.severity))}>{event.severity}</span>
           </td>
-          <td className="max-w-[180px] truncate py-2 pr-3 font-mono text-xs" title={event.unit || "-"}>{event.unit || "-"}</td>
-          <td className="max-w-[140px] truncate py-2 pr-3 font-mono text-xs" title={event.identifier || "-"}>{event.identifier || "-"}</td>
+          <td className="max-w-[180px] truncate py-2 pr-3 font-mono text-sm" title={event.unit || "-"}>{event.unit || "-"}</td>
+          <td className="max-w-[140px] truncate py-2 pr-3 font-mono text-sm" title={event.identifier || "-"}>{event.identifier || "-"}</td>
           <td className="py-2">
-            <div className="truncate font-mono text-xs" title={event.message}>{event.message}</div>
+            <div className="truncate font-mono text-sm" title={event.message}>{event.message}</div>
           </td>
         </tr>
         {isOpen ? (
           <tr className="border-b border-border/60 bg-muted/20">
             <td colSpan={5} className="p-4">
-              <div className="grid gap-3 text-xs">
+              <div className="grid gap-3 text-sm">
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                   <div><span className="text-muted-foreground">PID: </span><span className="font-mono">{event.pid || "-"}</span></div>
                   <div><span className="text-muted-foreground">Transport: </span><span className="font-mono">{event.transport || "-"}</span></div>
@@ -183,15 +183,15 @@ export function HostLogsPage() {
   const units = summary?.units ?? []
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
-        <div className="flex items-center gap-4">
-          <Link to={`/hosts/${machineId}`} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary">
-            <ArrowLeft className="h-5 w-5" />
+    <div className="space-y-4 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link to={`/hosts/${machineId}`} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary">
+            <ArrowLeft className="h-4 w-4" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold">Host Logs</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <h1 className="text-lg font-bold">Host Logs</h1>
+            <p className="text-xs text-muted-foreground">
               <span>{host?.hostname ?? machineId}</span>
               <span className="ml-2 font-mono">{machineId}</span>
             </p>
@@ -200,19 +200,19 @@ export function HostLogsPage() {
         <button
           type="button"
           onClick={() => logsQuery.refetch()}
-          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-muted"
         >
-          <RefreshCw className={cn("h-4 w-4", logsQuery.isFetching && "animate-spin")} />
+          <RefreshCw className={cn("h-3 w-3", logsQuery.isFetching && "animate-spin")} />
           Refresh
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
         <TimeRangeSelector selected={timeSelection} onChange={(value) => { setTimeSelection(value); resetPage() }} />
-        <select value={priority} onChange={(e) => { setPriority(e.target.value); resetPage() }} className="rounded-md border border-border bg-background px-3 py-2 text-sm">
+        <select value={priority} onChange={(e) => { setPriority(e.target.value); resetPage() }} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs">
           {PRIORITIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
         </select>
-        <select value={unit} onChange={(e) => { setUnit(e.target.value); resetPage() }} className="rounded-md border border-border bg-background px-3 py-2 text-sm">
+        <select value={unit} onChange={(e) => { setUnit(e.target.value); resetPage() }} className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs">
           <option value="">All units</option>
           {units.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
@@ -220,26 +220,26 @@ export function HostLogsPage() {
           value={identifier}
           onChange={(e) => { setIdentifier(e.target.value); resetPage() }}
           placeholder="Identifier"
-          className="w-36 rounded-md border border-border bg-background px-3 py-2 text-sm"
+          className="w-32 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs"
         />
-        <div className="flex min-w-[240px] flex-1 items-center gap-2">
+        <div className="flex min-w-[200px] flex-1 items-center gap-1.5">
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") commitSearch() }}
             placeholder="Search message, unit, PID..."
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs"
           />
-          <button type="button" onClick={commitSearch} className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
-            <Search className="h-4 w-4" />
+          <button type="button" onClick={commitSearch} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground">
+            <Search className="h-3 w-3" />
             Search
           </button>
         </div>
       </div>
 
-      {timeWindow.error ? <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{timeWindow.error}</div> : null}
+      {timeWindow.error ? <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2.5 text-xs text-red-500">{timeWindow.error}</div> : null}
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-4">
         <Stat label="Total" value={summary?.total ?? 0} />
         <Stat label="Errors" value={errors} tone="red" />
         <Stat label="Warnings" value={warnings} tone="amber" />
@@ -247,10 +247,10 @@ export function HostLogsPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
           <div>
-            <div className="font-medium">Journald Events</div>
-            <div className="mt-1 text-xs text-muted-foreground">
+            <div className="text-sm font-medium">Journald Events</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
               {summary?.first_seen && summary?.last_seen ? `${summary.first_seen} to ${summary.last_seen}` : "Newest entries first"}
             </div>
           </div>
@@ -270,9 +270,9 @@ export function HostLogsPage() {
             </thead>
             <tbody>
               {logsQuery.isLoading ? (
-                <tr><td colSpan={5} className="p-6 text-center text-sm text-muted-foreground">Loading logs...</td></tr>
+                <tr><td colSpan={5} className="p-5 text-center text-xs text-muted-foreground">Loading logs...</td></tr>
               ) : events.length === 0 ? (
-                <tr><td colSpan={5} className="p-6 text-center text-sm text-muted-foreground">No host logs match the selected filters.</td></tr>
+                <tr><td colSpan={5} className="p-5 text-center text-xs text-muted-foreground">No host logs match the selected filters.</td></tr>
               ) : (
                 events.map(renderRow)
               )}
@@ -280,7 +280,7 @@ export function HostLogsPage() {
           </table>
         </div>
 
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-3">
           <LogPagination
             page={data?.page ?? page}
             total={data?.total ?? 0}

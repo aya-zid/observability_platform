@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { ChevronDown, ChevronRight, Clock } from 'lucide-react'
+import { Search, ChevronDown, ChevronRight, Clock } from 'lucide-react'
 
 import { getNginxIPInvestigation } from '@/api/nginx'
 import type { NginxIPInvestigationResult, NginxTimePoint } from '@/api/nginx'
@@ -258,7 +258,7 @@ function PathRow({ path, method, count, avgRt, statusBreakdown }: PathRowProps) 
         {/* Method badge */}
         <span
           className={cn(
-            'shrink-0 px-2 py-0.5 text-[10px] font-mono font-semibold rounded border',
+            'shrink-0 px-2 py-0.5 text-sm font-mono font-semibold rounded border',
             METHOD_COLORS[method] ?? 'bg-secondary text-foreground border-border',
           )}
         >
@@ -266,19 +266,19 @@ function PathRow({ path, method, count, avgRt, statusBreakdown }: PathRowProps) 
         </span>
 
         {/* Path */}
-        <span className="font-mono text-xs text-foreground flex-1 truncate min-w-[120px]" title={path}>
+        <span className="font-mono text-sm text-foreground flex-1 truncate min-w-[120px]" title={path}>
           {path}
         </span>
 
         {/* Avg RT */}
         {avgRt > 0 && (
-          <span className="shrink-0 text-xs text-muted-foreground">avg {Math.round(avgRt)}ms</span>
+          <span className="shrink-0 text-sm text-muted-foreground">avg {Math.round(avgRt)}ms</span>
         )}
 
         {/* Total */}
         <span className="shrink-0 text-sm font-bold text-foreground tabular-nums">
           {count.toLocaleString()}
-          <span className="text-[10px] text-muted-foreground font-normal ml-1">req</span>
+          <span className="text-sm text-muted-foreground font-normal ml-1">req</span>
         </span>
       </div>
 
@@ -316,7 +316,7 @@ function PathRow({ path, method, count, avgRt, statusBreakdown }: PathRowProps) 
                   setActiveClass(cls)
                 }}
                 className={cn(
-                  'px-1.5 py-0.5 rounded border text-[10px] font-mono transition hover:opacity-80',
+                  'px-1.5 py-0.5 rounded border text-sm font-mono transition hover:opacity-80',
                   STATUS_COLORS[cls].bg,
                   STATUS_COLORS[cls].text,
                 )}
@@ -345,12 +345,12 @@ function PathRow({ path, method, count, avgRt, statusBreakdown }: PathRowProps) 
                   isActive && 'ring-1 ring-primary/60',
                 )}
               >
-                <div className={cn('text-[11px] font-semibold mb-1.5', STATUS_COLORS[cls].text)}>
+                <div className={cn('text-sm font-semibold mb-1.5', STATUS_COLORS[cls].text)}>
                   {cls} responses
                 </div>
                 <div className="space-y-1">
                   {codes.map(([code, n]) => (
-                    <div key={code} className="flex items-center justify-between text-[11px] font-mono">
+                    <div key={code} className="flex items-center justify-between text-sm font-mono">
                       <span className={STATUS_COLORS[cls].text}>{code}</span>
                       <span className="text-foreground tabular-nums">{n.toLocaleString()}</span>
                     </div>
@@ -437,8 +437,8 @@ export function IPInvestigationBlock({
       {/* ── Header ───────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4">
         <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary text-sm">
-            🔍
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Search className="h-4 w-4" />
           </span>
           <h2 className="text-base font-semibold text-foreground">IP Investigation</h2>
         </div>
@@ -451,7 +451,7 @@ export function IPInvestigationBlock({
               type="button"
               onClick={() => setTimeSelection({ mode: 'preset', preset: r })}
               className={cn(
-                'rounded px-2.5 py-1 text-xs font-medium transition-all duration-150',
+                'rounded px-2.5 py-1 text-sm font-medium transition-all duration-150',
                 timeSelection.mode === 'preset' && timeSelection.preset.seconds === r.seconds
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
@@ -464,7 +464,7 @@ export function IPInvestigationBlock({
             type="button"
             onClick={() => setTimeSelection(timeSelection.mode === 'manual' ? timeSelection : createDefaultManualIPSelection())}
             className={cn(
-              'rounded px-2.5 py-1 text-xs font-medium transition-all duration-150',
+              'rounded px-2.5 py-1 text-sm font-medium transition-all duration-150',
               timeSelection.mode === 'manual'
                 ? 'bg-primary text-primary-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/70',
@@ -478,8 +478,8 @@ export function IPInvestigationBlock({
       <div className="p-5 space-y-6">
         {timeSelection.mode === 'manual' ? (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/25 px-3 py-2">
-            <span className="text-xs font-semibold text-foreground">IP investigation time</span>
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="text-sm font-semibold text-foreground">IP investigation time</span>
+            <label className="flex items-center gap-1 text-sm text-muted-foreground">
               Date
               <input
                 value={timeSelection.date}
@@ -488,7 +488,7 @@ export function IPInvestigationBlock({
                 className="h-8 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
               />
             </label>
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1 text-sm text-muted-foreground">
               Start
               <input
                 type="time"
@@ -497,7 +497,7 @@ export function IPInvestigationBlock({
                 className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
               />
             </label>
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1 text-sm text-muted-foreground">
               End
               <input
                 type="time"
@@ -506,10 +506,10 @@ export function IPInvestigationBlock({
                 className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
               />
             </label>
-            {timeWindow.error ? <span className="text-xs text-red-500">{timeWindow.error}</span> : null}
+            {timeWindow.error ? <span className="text-sm text-red-500">{timeWindow.error}</span> : null}
           </div>
         ) : (
-          <div className="rounded-lg border border-border bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-lg border border-border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
             IP investigation uses its own <span className="font-semibold text-foreground">{timeWindow.label}</span>, independent from the dashboard time range.
           </div>
         )}
@@ -537,9 +537,9 @@ export function IPInvestigationBlock({
         {/* ── Empty state ───────────────────────────────────────────────── */}
         {!committedIP && (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 py-14 text-center">
-            <p className="text-2xl mb-2">🕵️</p>
+            <Search className="h-8 w-8 mb-2 text-muted-foreground" />
             <p className="text-sm font-medium text-foreground">Enter an IP address above</p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               Precise timeline, status breakdown, response times and path analysis
             </p>
           </div>
@@ -553,24 +553,24 @@ export function IPInvestigationBlock({
               <span className="rounded bg-primary/10 px-2 py-1 font-mono text-sm font-semibold text-primary">
                 {committedIP}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-sm text-muted-foreground">
                 — {timeWindow.label}{domain ? ` • ${domain}` : ''}
               </span>
               {isLoading && (
-                <span className="ml-auto text-xs text-muted-foreground animate-pulse">Loading…</span>
+                <span className="ml-auto text-sm text-muted-foreground animate-pulse">Loading…</span>
               )}
             </div>
 
             {/* ── Stat cards ────────────────────────────────────────────── */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-lg border border-border bg-background p-4">
-                <p className="text-xs text-muted-foreground">Total Requests</p>
+                <p className="text-sm text-muted-foreground">Total Requests</p>
                 <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">
                   {isLoading ? '—' : formatNumber(Math.round(totalRequests), 0)}
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-background p-4">
-                <p className="text-xs text-muted-foreground">Error Rate (4xx+5xx)</p>
+                <p className="text-sm text-muted-foreground">Error Rate (4xx+5xx)</p>
                 <p
                   className={cn(
                     'mt-1 text-2xl font-bold tabular-nums',
@@ -585,13 +585,13 @@ export function IPInvestigationBlock({
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-background p-4">
-                <p className="text-xs text-muted-foreground">First Seen That Day</p>
+                <p className="text-sm text-muted-foreground">First Seen That Day</p>
                 <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-foreground">
                   {isLoading ? '—' : d?.first_seen_today || '—'}
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-background p-4">
-                <p className="text-xs text-muted-foreground">Last Seen That Day</p>
+                <p className="text-sm text-muted-foreground">Last Seen That Day</p>
                 <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-foreground">
                   {isLoading ? '—' : d?.last_seen_today || '—'}
                 </p>
@@ -603,15 +603,15 @@ export function IPInvestigationBlock({
 
               {/* Requests per minute */}
               <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
-                <h3 className="mb-3 text-xs font-semibold text-foreground uppercase tracking-wide">
+                <h3 className="mb-3 text-sm font-semibold text-foreground uppercase tracking-wide">
                   Requests / min
                 </h3>
                 {isLoading ? (
-                  <div className="h-56 flex items-center justify-center text-xs text-muted-foreground">
+                  <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">
                     Loading…
                   </div>
                 ) : reqRateData.length === 0 ? (
-                  <div className="h-56 flex items-center justify-center text-xs text-muted-foreground">
+                  <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">
                     No data
                   </div>
                 ) : (
@@ -656,11 +656,11 @@ export function IPInvestigationBlock({
 
               {/* Status Codes / min — Multi Line Chart (exactly like req/min) */}
               <div className="rounded-lg border border-border bg-card p-4 shadow-sm lg:col-span-1">
-                <h3 className="mb-3 text-xs font-semibold text-foreground uppercase tracking-wide">
+                <h3 className="mb-3 text-sm font-semibold text-foreground uppercase tracking-wide">
                   Status Codes / min
                 </h3>
                 {isLoading || statusData.length === 0 ? (
-                  <div className="h-56 flex items-center justify-center text-xs text-muted-foreground">
+                  <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">
                     {isLoading ? "Loading…" : "No data"}
                   </div>
                 ) : (
@@ -738,11 +738,11 @@ export function IPInvestigationBlock({
 
               {/* Avg Response Time */}
               <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
-                <h3 className="mb-3 text-xs font-semibold text-foreground uppercase tracking-wide">
+                <h3 className="mb-3 text-sm font-semibold text-foreground uppercase tracking-wide">
                   Avg Response Time (ms)
                 </h3>
                 {isLoading || rtData.length === 0 ? (
-                  <div className="h-56 flex items-center justify-center text-xs text-muted-foreground">
+                  <div className="h-56 flex items-center justify-center text-sm text-muted-foreground">
                     No rt= data
                   </div>
                 ) : (
@@ -789,7 +789,7 @@ export function IPInvestigationBlock({
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">Paths This IP Hit</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p className="mt-0.5 text-sm text-muted-foreground">
                     Top paths sorted by frequency • {timeWindow.label}
                   </p>
                 </div>
@@ -800,15 +800,15 @@ export function IPInvestigationBlock({
                     value={pathSearch}
                     onChange={(event) => setPathSearch(event.target.value)}
                     placeholder="Search path"
-                    className="h-8 w-44 rounded-md border border-border bg-background px-2 text-xs font-mono text-foreground outline-none focus:border-primary"
+                    className="h-8 w-44 rounded-md border border-border bg-background px-2 text-sm font-mono text-foreground outline-none focus:border-primary"
                   />
                   {availableMethods.length > 0 && (
                   <>
-                    <span className="text-xs text-muted-foreground">Method:</span>
+                    <span className="text-sm text-muted-foreground">Method:</span>
                     <button
                       onClick={() => setMethodFilter('all')}
                       className={cn(
-                        'px-2 py-0.5 text-[10px] rounded-md border font-mono transition',
+                        'px-2 py-0.5 text-sm rounded-md border font-mono transition',
                         methodFilter === 'all'
                           ? 'bg-primary text-primary-foreground border-primary'
                           : 'bg-secondary text-muted-foreground border-border hover:text-foreground',
@@ -821,7 +821,7 @@ export function IPInvestigationBlock({
                         key={m}
                         onClick={() => setMethodFilter(m)}
                         className={cn(
-                          'px-2 py-0.5 text-[10px] rounded-md border font-mono transition',
+                          'px-2 py-0.5 text-sm rounded-md border font-mono transition',
                           methodFilter === m
                             ? 'bg-primary text-primary-foreground border-primary'
                             : cn(
@@ -835,7 +835,7 @@ export function IPInvestigationBlock({
                     ))}
                   </>
                   )}
-                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground ml-1">
+                    <div className="flex items-center gap-1 text-sm text-muted-foreground ml-1">
                       <Clock className="w-3 h-3" />
                       {timeWindow.label}
                     </div>

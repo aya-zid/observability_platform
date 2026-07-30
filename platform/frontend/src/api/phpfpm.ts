@@ -210,15 +210,6 @@ export async function getPHPFPMDashboardSummary(
   return data
 }
 
-export type PHPFPMLogsParams = {
-  start: string
-  end: string
-  category?: string
-  search?: string
-  page?: number
-  page_size?: number
-}
-
 export type PHPFPMLogsTypeMeta = {
   access_count: number
   error_count: number

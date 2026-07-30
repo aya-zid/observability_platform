@@ -46,19 +46,12 @@ function getTimeWindow(selection: TimeSelection) {
 function categoryBadge(event: PHPFPMLogEvent) {
   const key = event.category.toLowerCase()
   if (key === "warning") return "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-  if (key === "error") return "bg-red-500/10 text-red-500"
+  if (key === "error") return "bg-destructive/10 text-destructive"
   if (key === "slow_request") return "bg-orange-500/10 text-orange-600 dark:text-orange-400"
   if (key === "startup") return "bg-teal-500/10 text-teal-600 dark:text-teal-300"
   if (key === "notice") return "bg-blue-500/10 text-blue-600 dark:text-blue-300"
   if (key === "access") return "bg-muted text-muted-foreground"
   return "bg-muted text-muted-foreground"
-}
-
-function formatAccessLine(event: PHPFPMLogEvent): string {
-  if (event.method && event.uri) {
-    return `${event.method} ${event.uri} → ${event.status_code} (${event.duration_ms}ms, ${event.memory_kb}KB, ${event.cpu}%)`
-  }
-  return event.message
 }
 
 function parseSlowLogMessage(msg: string): { pid: string; script: string; backtrace: string[] } {
@@ -197,31 +190,31 @@ export function PHPFPMLogsPage() {
     return (
       <Fragment key={`${event.timestamp}-${index}`}>
         <tr className="cursor-pointer border-b border-border/60 hover:bg-muted/40" onClick={() => setOpenEvent(isOpen ? null : index)}>
-          <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs text-muted-foreground">{event.timestamp}</td>
+          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs text-muted-foreground">{event.timestamp}</td>
           {isAccess ? (
             <>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs">{event.pool || "-"}</td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs font-semibold">{event.method || "-"}</td>
-              <td className="max-w-[200px] truncate py-2 pr-3 font-mono text-xs" title={event.uri}>{event.uri || "-"}</td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs">
-                <span className={cn("rounded px-1.5 py-0.5",
-                  event.status_code != null && event.status_code >= 500 ? "bg-red-500/15 text-red-500" :
+              <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">{event.pool || "-"}</td>
+              <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs font-semibold">{event.method || "-"}</td>
+              <td className="max-w-[200px] truncate py-1.5 pr-3 font-mono text-xs" title={event.uri}>{event.uri || "-"}</td>
+              <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
+                <span className={cn("rounded px-1 py-0.5 text-xs",
+                  event.status_code != null && event.status_code >= 500 ? "bg-destructive/15 text-destructive" :
                   event.status_code != null && event.status_code >= 400 ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" :
                   event.status_code != null && event.status_code >= 300 ? "bg-blue-500/15 text-blue-600 dark:text-blue-300" :
                   "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400")}>
                   {event.status_code ?? "-"}
                 </span>
               </td>
-              <td className="py-2 pr-3 text-right font-mono text-xs tabular-nums">{event.duration_ms != null ? `${formatNumber(event.duration_ms, 1)}ms` : "-"}</td>
-              <td className="py-2 pr-3 text-right font-mono text-xs tabular-nums">{event.memory_kb != null ? `${formatNumber(event.memory_kb, 0)}KB` : "-"}</td>
-              <td className="py-2 text-right font-mono text-xs tabular-nums">{event.cpu != null ? `${formatNumber(event.cpu, 2)}%` : "-"}</td>
+              <td className="py-1.5 pr-3 text-right font-mono text-xs tabular-nums">{event.duration_ms != null ? `${formatNumber(event.duration_ms, 1)}ms` : "-"}</td>
+              <td className="py-1.5 pr-3 text-right font-mono text-xs tabular-nums">{event.memory_kb != null ? `${formatNumber(event.memory_kb, 0)}KB` : "-"}</td>
+              <td className="py-1.5 text-right font-mono text-xs tabular-nums">{event.cpu != null ? `${formatNumber(event.cpu, 2)}%` : "-"}</td>
             </>
           ) : isSlow ? (
             <>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs">{slowParsed?.pid || "-"}</td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs">{event.pool || "-"}</td>
-              <td className="max-w-[300px] truncate py-2 pr-3 font-mono text-xs" title={slowParsed?.script}>{slowParsed?.script || "-"}</td>
-              <td className="py-2 font-mono text-xs text-muted-foreground">
+              <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">{slowParsed?.pid || "-"}</td>
+              <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">{event.pool || "-"}</td>
+              <td className="max-w-[300px] truncate py-1.5 pr-3 font-mono text-xs" title={slowParsed?.script}>{slowParsed?.script || "-"}</td>
+              <td className="py-1.5 font-mono text-xs text-muted-foreground">
                 {slowParsed && slowParsed.backtrace.length > 0
                   ? `${slowParsed.backtrace.length} frame(s)`
                   : event.message.split("\n")[0]?.slice(0, 60) || "-"}
@@ -229,11 +222,11 @@ export function PHPFPMLogsPage() {
             </>
           ) : (
             <>
-              <td className="whitespace-nowrap py-2 pr-3">
-                <span className={cn("rounded-full px-2 py-1 text-xs", categoryBadge(event))}>{event.category}</span>
+              <td className="whitespace-nowrap py-1.5 pr-3">
+                <span className={cn("rounded-full px-1.5 py-0.5 text-xs", categoryBadge(event))}>{event.category}</span>
               </td>
-              <td className="whitespace-nowrap py-2 pr-3 font-mono text-xs">{event.pool || "-"}</td>
-              <td className="max-w-[600px] py-2">
+              <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">{event.pool || "-"}</td>
+              <td className="max-w-[600px] py-1.5">
                 <div className="truncate font-mono text-xs" title={event.message}>{event.message}</div>
               </td>
             </>
@@ -242,7 +235,7 @@ export function PHPFPMLogsPage() {
         {isOpen && (
           <tr className="border-b border-border/60 bg-muted/20">
             <td colSpan={colCount} className="py-3 pl-4">
-              <div className="space-y-2 text-xs">
+              <div className="space-y-2 text-sm">
                 {isAccess && (
                   <>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -252,7 +245,7 @@ export function PHPFPMLogsPage() {
                     </div>
                     <div>
                       <span className="text-muted-foreground">Full Line: </span>
-                      <div className="mt-1 whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-xs">{event.message}</div>
+                      <div className="mt-1 whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-sm">{event.message}</div>
                     </div>
                   </>
                 )}
@@ -265,7 +258,7 @@ export function PHPFPMLogsPage() {
                     {slowParsed && slowParsed.backtrace.length > 0 && (
                       <div>
                         <span className="text-muted-foreground">Stack Trace:</span>
-                        <div className="mt-1 space-y-0.5 rounded border border-border bg-background p-2 font-mono text-xs">
+                        <div className="mt-1 space-y-0.5 rounded border border-border bg-background p-2 font-mono text-sm">
                           {slowParsed.backtrace.map((frame, fi) => (
                             <div key={fi} className="break-all text-muted-foreground">{frame}</div>
                           ))}
@@ -274,7 +267,7 @@ export function PHPFPMLogsPage() {
                     )}
                     <div>
                       <span className="text-muted-foreground">Raw Entry:</span>
-                      <div className="mt-1 whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-xs">{event.message}</div>
+                      <div className="mt-1 whitespace-pre-wrap break-all rounded border border-border bg-background p-2 font-mono text-sm">{event.message}</div>
                     </div>
                   </>
                 )}
@@ -337,10 +330,10 @@ export function PHPFPMLogsPage() {
           const count = tab.key === "access" ? logMeta?.access_count : tab.key === "error" ? logMeta?.error_count : logMeta?.slow_count
           return (
             <button key={tab.key} type="button" onClick={() => handleTabChange(tab.key)}
-              className={cn("rounded-md px-4 py-2 text-sm font-medium transition-colors",
+              className={cn("rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                 logTab === tab.key ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>
               {tab.label}
-              {count != null && <span className="ml-2 text-xs opacity-60">({formatNumber(count, 0)})</span>}
+              {count != null && <span className="ml-1.5 text-xs opacity-60">({formatNumber(count, 0)})</span>}
             </button>
           )
         })}
@@ -352,19 +345,19 @@ export function PHPFPMLogsPage() {
           {/* Row 1: Dropdown filters + search */}
           <div className="flex flex-wrap items-center gap-2">
             <select value={poolFilter} onChange={(e) => { setPoolFilter(e.target.value); setPage(1) }}
-              className="h-9 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[100px]">
+              className="h-8 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[100px]">
               <option value="">All Pools</option>
               {availablePools.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
             {logTab === "access" && (
               <>
                 <select value={methodFilter} onChange={(e) => { setMethodFilter(e.target.value); setPage(1) }}
-                  className="h-9 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[80px]">
+                  className="h-8 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[80px]">
                   <option value="">All Methods</option>
                   {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
                 <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
-                  className="h-9 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[100px]">
+                  className="h-8 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[100px]">
                   <option value="">All Status</option>
                   <option value="2">2xx</option>
                   <option value="3">3xx</option>
@@ -374,43 +367,43 @@ export function PHPFPMLogsPage() {
                 </select>
               </>
             )}
-            <input className="h-9 flex-1 rounded-md border border-input bg-background/70 px-3 text-xs outline-none min-w-[150px]"
+            <input className="h-8 flex-1 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[150px]"
               value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && commitSearch()} onBlur={commitSearch}
               placeholder="Search logs..." />
             <button type="button" onClick={commitSearch}
-              className="h-9 rounded-md border border-border px-3 text-xs hover:bg-muted">
+              className="h-8 rounded-md border border-border px-2 text-xs hover:bg-muted">
               {t("shared.search")}
             </button>
             <button type="button" onClick={() => {
               setPoolFilter(""); setMethodFilter(""); setStatusFilter(""); setSearch(""); setSearchInput("")
               setMinDuration(""); setMaxDuration(""); setMinMemory(""); setMaxMemory(""); setMinCPU(""); setMaxCPU("")
               setPage(1)
-            }} className="h-9 rounded-md border border-border px-3 text-xs hover:bg-muted">
+            }} className="h-8 rounded-md border border-border px-2 text-xs hover:bg-muted">
               Clear
             </button>
           </div>
           {/* Row 2: Numeric filters (access only) */}
           {logTab === "access" && (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground">Duration:</span>
+              <span className="text-sm text-muted-foreground">Duration:</span>
               <input type="number" value={minDuration} onChange={(e) => setMinDuration(e.target.value)} placeholder="min ms"
-                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-xs outline-none" />
-              <span className="text-xs text-muted-foreground">-</span>
+                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-sm outline-none" />
+              <span className="text-sm text-muted-foreground">-</span>
               <input type="number" value={maxDuration} onChange={(e) => setMaxDuration(e.target.value)} placeholder="max ms"
-                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-xs outline-none" />
-              <span className="ml-2 text-xs text-muted-foreground">Memory:</span>
+                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-sm outline-none" />
+              <span className="ml-2 text-sm text-muted-foreground">Memory:</span>
               <input type="number" value={minMemory} onChange={(e) => setMinMemory(e.target.value)} placeholder="min KB"
-                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-xs outline-none" />
-              <span className="text-xs text-muted-foreground">-</span>
+                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-sm outline-none" />
+              <span className="text-sm text-muted-foreground">-</span>
               <input type="number" value={maxMemory} onChange={(e) => setMaxMemory(e.target.value)} placeholder="max KB"
-                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-xs outline-none" />
-              <span className="ml-2 text-xs text-muted-foreground">CPU:</span>
+                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-sm outline-none" />
+              <span className="ml-2 text-sm text-muted-foreground">CPU:</span>
               <input type="number" value={minCPU} onChange={(e) => setMinCPU(e.target.value)} placeholder="min %"
-                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-xs outline-none" />
-              <span className="text-xs text-muted-foreground">-</span>
+                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-sm outline-none" />
+              <span className="text-sm text-muted-foreground">-</span>
               <input type="number" value={maxCPU} onChange={(e) => setMaxCPU(e.target.value)} placeholder="max %"
-                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-xs outline-none" />
+                className="h-8 w-20 rounded border border-input bg-background/70 px-2 text-sm outline-none" />
             </div>
           )}
         </div>
@@ -424,32 +417,32 @@ export function PHPFPMLogsPage() {
           <>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead className="text-xs uppercase text-muted-foreground">
+                <thead className="text-sm uppercase text-muted-foreground">
                   {logTab === "access" ? (
                     <tr className="border-b border-border">
-                      <th className="py-2 pr-3 text-left">Time</th>
-                      <th className="py-2 pr-3 text-left">Pool</th>
-                      <th className="py-2 pr-3 text-left">Method</th>
-                      <th className="py-2 pr-3 text-left">URI</th>
-                      <th className="py-2 pr-3 text-left">Status</th>
-                      <th className="py-2 pr-3 text-right">Duration</th>
-                      <th className="py-2 pr-3 text-right">Memory</th>
-                      <th className="py-2 text-right">CPU</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Time</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Pool</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Method</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">URI</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Status</th>
+                      <th className="py-1.5 pr-3 text-right text-xs">Duration</th>
+                      <th className="py-1.5 pr-3 text-right text-xs">Memory</th>
+                      <th className="py-1.5 text-right text-xs">CPU</th>
                     </tr>
                   ) : logTab === "slow" ? (
                     <tr className="border-b border-border">
-                      <th className="py-2 pr-3 text-left">Time</th>
-                      <th className="py-2 pr-3 text-left">PID</th>
-                      <th className="py-2 pr-3 text-left">Pool</th>
-                      <th className="py-2 pr-3 text-left">Script</th>
-                      <th className="py-2 text-left">Frames</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Time</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">PID</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Pool</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Script</th>
+                      <th className="py-1.5 text-left text-xs">Frames</th>
                     </tr>
                   ) : (
                     <tr className="border-b border-border">
-                      <th className="py-2 pr-3 text-left">Time</th>
-                      <th className="py-2 pr-3 text-left">Level</th>
-                      <th className="py-2 pr-3 text-left">Pool</th>
-                      <th className="py-2 text-left">Message</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Time</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Level</th>
+                      <th className="py-1.5 pr-3 text-left text-xs">Pool</th>
+                      <th className="py-1.5 text-left text-xs">Message</th>
                     </tr>
                   )}
                 </thead>

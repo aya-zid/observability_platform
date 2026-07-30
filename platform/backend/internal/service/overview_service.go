@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,19 +24,24 @@ import (
 // ─── Response DTOs ───────────────────────────────────────────────────────────
 
 type OverviewResponse struct {
-	Global   GlobalHealth   `json:"global"`
-	Hosts    []HostOverview `json:"hosts"`
-	Timeline TimelineData   `json:"timeline"`
-	DepGraph DepGraphData   `json:"dep_graph"`
+	Global    GlobalHealth   `json:"global"`
+	Incidents []IncidentCard `json:"incidents"`
+	Hosts     []HostOverview `json:"hosts"`
+	Timeline  TimelineData   `json:"timeline"`
 }
 
 type GlobalHealth struct {
-	HostsOnline      int `json:"hosts_online"`
-	HostsTotal       int `json:"hosts_total"`
-	ServicesHealthy  int `json:"services_healthy"`
-	ServicesDegraded int `json:"services_degraded"`
-	ServicesDown     int `json:"services_down"`
-	ActiveSignals    int `json:"active_signals"`
+	HostsOnline       int `json:"hosts_online"`
+	HostsTotal        int `json:"hosts_total"`
+	ServicesHealthy   int `json:"services_healthy"`
+	ServicesDegraded  int `json:"services_degraded"`
+	ServicesDown      int `json:"services_down"`
+	ActiveSignals     int `json:"active_signals"`
+	ActiveCritical    int `json:"active_critical"`
+	ActiveWarning     int `json:"active_warning"`
+	ContainersHealthy int `json:"containers_healthy"`
+	ContainersTotal   int `json:"containers_total"`
+	CVEExposure       int `json:"cve_exposure"`
 }
 
 type HostOverview struct {
@@ -67,32 +75,17 @@ type TimelineEvent struct {
 	Message   string `json:"message"`
 }
 
-type DepGraphData struct {
-	Nodes []DepNode `json:"nodes"`
-	Edges []DepEdge `json:"edges"`
-}
-
-type DepNode struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Status string `json:"status"`
-	Type   string `json:"type"`
-}
-
-type DepEdge struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
-	Status string `json:"status"`
-}
-
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 type OverviewService struct {
-	cfg        *config.Config
-	redis      *redis.Client
-	httpClient *http.Client
-	hostRepo   *repository.HostRepository
-	discRepo   *repository.DiscoveryRepository
+	cfg             *config.Config
+	redis           *redis.Client
+	httpClient      *http.Client
+	hostRepo        *repository.HostRepository
+	discRepo        *repository.DiscoveryRepository
+	alertRuleRepo   *repository.AlertRuleRepository
+	alertsRepo      *repository.AlertsRepository
+	incidentGrouper *IncidentGroupingService
 }
 
 func NewOverviewService(
@@ -100,13 +93,19 @@ func NewOverviewService(
 	redisClient *redis.Client,
 	hostRepo *repository.HostRepository,
 	discRepo *repository.DiscoveryRepository,
+	alertRuleRepo *repository.AlertRuleRepository,
+	alertsRepo *repository.AlertsRepository,
+	incidentGrouper *IncidentGroupingService,
 ) *OverviewService {
 	return &OverviewService{
-		cfg:        cfg,
-		redis:      redisClient,
-		httpClient: &http.Client{Timeout: 45 * time.Second},
-		hostRepo:   hostRepo,
-		discRepo:   discRepo,
+		cfg:             cfg,
+		redis:           redisClient,
+		httpClient:      &http.Client{Timeout: 45 * time.Second},
+		hostRepo:        hostRepo,
+		discRepo:        discRepo,
+		alertRuleRepo:   alertRuleRepo,
+		alertsRepo:      alertsRepo,
+		incidentGrouper: incidentGrouper,
 	}
 }
 
@@ -128,6 +127,28 @@ func (s *OverviewService) GetOverview(
 	}
 
 	now := time.Now()
+	global := GlobalHealth{}
+
+	if containers, err := s.discRepo.ListContainerServicesByTenantCtx(ctx, tenantID); err == nil {
+		global.ContainersTotal = len(containers)
+		for _, c := range containers {
+			if now.Sub(c.LastSeenAt) <= 7*time.Minute {
+				global.ContainersHealthy++
+			}
+		}
+	}
+	if s.alertRuleRepo != nil {
+		if counts, err := s.alertRuleRepo.CountFiringEventsByTenantCtx(ctx, tenantID); err == nil {
+			global.ActiveSignals = counts.Total
+			global.ActiveCritical = counts.Critical
+			global.ActiveWarning = counts.Warning
+		}
+	}
+	if s.alertsRepo != nil {
+		if cveExposure, err := s.alertsRepo.CountHighRiskVulnerableServicesCtx(ctx, tenantID); err == nil {
+			global.CVEExposure = cveExposure
+		}
+	}
 
 	svcsByHost := map[string][]serviceBrief{}
 	for _, svc := range services {
@@ -162,10 +183,8 @@ func (s *OverviewService) GetOverview(
 	}
 
 	var (
-		global    GlobalHealth
 		hostCards []HostOverview
 		timeline  TimelineData
-		depGraph  DepGraphData
 		mu        sync.Mutex
 		wg        sync.WaitGroup
 	)
@@ -215,9 +234,6 @@ func (s *OverviewService) GetOverview(
 				summary = strings.Join(summaryParts, ", ")
 			}
 
-			// Build dep graph nodes + edges.
-			hostDepNodes, hostDepEdges := s.buildDepGraph(hb.machineID, hb.hostname, chips)
-
 			// Build timeline events from logs using the requested window.
 			hostTimeline := s.getTimelineEvents(ctx, tenantUUID, hb.machineID, hb.hostname, svcsByHost[hb.machineID], timelineStartNs, timelineEndNs)
 
@@ -242,8 +258,6 @@ func (s *OverviewService) GetOverview(
 				Summary:   summary,
 				Services:  chips,
 			})
-			depGraph.Nodes = append(depGraph.Nodes, hostDepNodes...)
-			depGraph.Edges = append(depGraph.Edges, hostDepEdges...)
 			timeline.Events = append(timeline.Events, hostTimeline...)
 			mu.Unlock()
 		}(hb)
@@ -258,13 +272,23 @@ func (s *OverviewService) GetOverview(
 		timeline.Events = timeline.Events[:100]
 	}
 
+	incidents := []IncidentCard{}
+	if s.incidentGrouper != nil {
+		if grouped, err := s.incidentGrouper.GroupIncidents(ctx, tenantID); err == nil {
+			incidents = grouped
+		} else {
+			slog.Warn("incident grouping failed", "tenant_id", tenantID, "error", err)
+		}
+	}
+
 	return &OverviewResponse{
-		Global:   global,
-		Hosts:    hostCards,
-		Timeline: timeline,
-		DepGraph: depGraph,
+		Global:    global,
+		Incidents: incidents,
+		Hosts:     hostCards,
+		Timeline:  timeline,
 	}, nil
 }
+
 
 // ─── Service health ───────────────────────────────────────────────────────────
 
@@ -275,13 +299,38 @@ type serviceBrief struct {
 	MetricColl bool
 }
 
-var supportedServices = map[string]bool{
-	"nginx":    true,
-	"apache":   true,
-	"phpfpm":   true,
-	"mariadb":  true,
-	"postgres": true,
-	"redis":    true,
+var supportedServiceKinds = map[string]bool{
+	"nginx":      true,
+	"apache":     true,
+	"phpfpm":     true,
+	"mariadb":    true,
+	"postgresql": true,
+	"redis":      true,
+	"container":  true,
+}
+
+func serviceKind(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case n == "nginx":
+		return "nginx"
+	case n == "apache" || n == "apache2" || n == "httpd":
+		return "apache"
+	case n == "phpfpm" || strings.Contains(n, "fpm"):
+		return "phpfpm"
+	case n == "mariadb" || n == "mysql":
+		return "mariadb"
+	case n == "postgres" || n == "postgresql" || strings.HasPrefix(n, "postgresql"):
+		return "postgresql"
+	case n == "redis" || n == "redis-server":
+		return "redis"
+	default:
+		return n
+	}
+}
+
+func isSupportedService(name string) bool {
+	return supportedServiceKinds[serviceKind(name)]
 }
 
 func (s *OverviewService) getServiceChips(
@@ -290,7 +339,7 @@ func (s *OverviewService) getServiceChips(
 ) []ServiceChip {
 	chips := make([]ServiceChip, 0, len(svcs))
 	for _, svc := range svcs {
-		if !supportedServices[svc.Name] {
+		if !isSupportedService(svc.Name) {
 			continue
 		}
 		status := s.getServiceHealth(ctx, tenantID, tenantUUID, machineID, svc, timeSec, startNs, endNs)
@@ -315,48 +364,62 @@ func (s *OverviewService) getServiceHealth(
 		return "unknown"
 	}
 
-	upMetric := fmt.Sprintf(`%s_up{host_id="%s"}`, svc.Name, machineID)
-	up := s.queryVMInstantSafe(ctx, tenantID, upMetric, timeSec)
-	if up != nil && *up == 0 {
-		return "down"
-	}
-
-	scrapeErr := s.queryVMInstantSafe(ctx, tenantID,
-		fmt.Sprintf(`%s_scrape_error{host_id="%s"}`, svc.Name, machineID), timeSec)
-	if scrapeErr != nil && *scrapeErr > 0 {
-		return "down"
-	}
-
-	switch svc.Name {
+	switch kind := serviceKind(svc.Name); kind {
 	case "phpfpm":
+		up := s.queryVMInstantSafe(ctx, tenantID,
+			fmt.Sprintf(`phpfpm_up{host_id="%s"}`, machineID), timeSec)
+		if up != nil && *up == 0 {
+			return "down"
+		}
 		sat := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`phpfpm_active_workers{host_id="%s"} / phpfpm_total_workers{host_id="%s"} > 0.85`, machineID, machineID), timeSec)
+			fmt.Sprintf(`phpfpm_active_processes{host_id="%s"} / clamp_min(phpfpm_total_processes{host_id="%s"}, 1) > 0.85`, machineID, machineID), timeSec)
 		if sat != nil && *sat > 0.85 {
 			return "degraded"
 		}
 	case "mariadb":
+		up := s.queryVMInstantSafe(ctx, tenantID,
+			fmt.Sprintf(`mysql_up{host_id="%s"}`, machineID), timeSec)
+		if up != nil && *up == 0 {
+			return "down"
+		}
 		bp := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`mysql_global_status_innodb_buffer_pool_hit_ratio{host_id="%s"} < 0.95`, machineID), timeSec)
-		if bp != nil && *bp < 0.95 {
+			fmt.Sprintf(`rate(mysql_global_status_innodb_buffer_pool_reads{host_id="%s"}[5m]) / rate(mysql_global_status_innodb_buffer_pool_read_requests{host_id="%s"}[5m]) > 0.05`, machineID, machineID), timeSec)
+		if bp != nil && *bp > 0.05 {
 			return "degraded"
 		}
-	case "postgres":
+	case "postgresql":
+		up := s.queryVMInstantSafe(ctx, tenantID,
+			fmt.Sprintf(`pg_up{host_id="%s"}`, machineID), timeSec)
+		if up != nil && *up == 0 {
+			return "down"
+		}
 		conn := s.queryVMInstantSafe(ctx, tenantID,
 			fmt.Sprintf(`pg_stat_activity_count{host_id="%s",datname!~"template.*|postgres"} > 80`, machineID), timeSec)
 		if conn != nil && *conn > 80 {
 			return "degraded"
 		}
 	case "redis":
+		up := s.queryVMInstantSafe(ctx, tenantID,
+			fmt.Sprintf(`redis_up{host_id="%s"}`, machineID), timeSec)
+		if up != nil && *up == 0 {
+			return "down"
+		}
 		hitRatio := s.queryVMInstantSafe(ctx, tenantID,
 			fmt.Sprintf(`rate(redis_keyspace_hits_total{host_id="%s"}[5m]) / (rate(redis_keyspace_hits_total{host_id="%s"}[5m]) + rate(redis_keyspace_misses_total{host_id="%s"}[5m])) < 0.9`, machineID, machineID, machineID), timeSec)
 		if hitRatio != nil && *hitRatio < 0.9 {
 			return "degraded"
 		}
-	case "nginx", "apache":
-		err5xx := s.queryVMInstantSafe(ctx, tenantID,
-			fmt.Sprintf(`rate(%s_http_requests_total{host_id="%s",status=~"5.."}[5m]) / rate(%s_http_requests_total{host_id="%s"}[5m]) > 0.05`, svc.Name, machineID, svc.Name, machineID), timeSec)
-		if err5xx != nil && *err5xx > 0.05 {
-			return "degraded"
+	case "nginx":
+		total := s.queryVMInstantSafe(ctx, tenantID,
+			fmt.Sprintf(`nginx_requests_total{host_id="%s"}`, machineID), timeSec)
+		if total == nil {
+			return "down"
+		}
+	case "apache":
+		total := s.queryVMInstantSafe(ctx, tenantID,
+			fmt.Sprintf(`apache_requests_total{host_id="%s"}`, machineID), timeSec)
+		if total == nil {
+			return "down"
 		}
 	}
 
@@ -368,79 +431,133 @@ func (s *OverviewService) getServiceHealth(
 	return "healthy"
 }
 
-// ─── Dependency graph with edge coloring ──────────────────────────────────────
+// ─── Timeline signal profiles ────────────────────────────────────────────────
 
-func (s *OverviewService) buildDepGraph(machineID, hostname string, chips []ServiceChip) ([]DepNode, []DepEdge) {
-	nodes := []DepNode{
-		{ID: machineID + ":host", Label: hostname, Status: "healthy", Type: "host"},
+type timelineSignalProfile struct {
+	Label          string
+	LinePattern    string
+	ErrorPatterns   []*regexp.Regexp
+	WarningPatterns []*regexp.Regexp
+}
+
+var timelineProfiles = map[string]timelineSignalProfile{
+	"nginx": {
+		Label:       "nginx",
+		LinePattern: `(?i)(\[[a-z]*error\]|\b(emerg|alert|crit|error|warn)\b|" [45][0-9]{2} | [45][0-9]{2} )`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(\[[a-z]*error\]|\b(emerg|alert|crit|error)\b|" 5[0-9]{2} | 5[0-9]{2} )`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(\bwarn\b|" 4[0-9]{2} | 4[0-9]{2} )`),
+		},
+	},
+	"apache": {
+		Label:       "apache",
+		LinePattern: `(?i)(\[[^]]*:(emerg|alert|crit|error|warn)\]|\b(emerg|alert|crit|error|warn)\b|" [45][0-9]{2} | [45][0-9]{2} )`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(\[[^]]*:(emerg|alert|crit|error)\]|\b(emerg|alert|crit|error)\b|" 5[0-9]{2} | 5[0-9]{2} )`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(\[[^]]*:warn\]|\bwarn\b|" 4[0-9]{2} | 4[0-9]{2} )`),
+		},
+	},
+	"phpfpm": {
+		Label:       "phpfpm",
+		LinePattern: `(?i)(ERROR|WARNING|ALERT|FATAL|failed|timeout|max_children|child exited|segmentation fault)`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(ERROR|ALERT|FATAL|failed|timeout|child exited|segmentation fault)`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(WARNING|max_children)`),
+		},
+	},
+	"mariadb": {
+		Label:       "mariadb",
+		LinePattern: `(?i)(\[ERROR\]|\[Warning\]|ERROR|Fatal|deadlock|aborted connection|crash|slow query|Query_time)`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(\[ERROR\]|ERROR|Fatal|deadlock|crash|aborted connection)`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(\[Warning\]|warning|slow query|Query_time)`),
+		},
+	},
+	"postgresql": {
+		Label:       "postgresql",
+		LinePattern: `(?i)(ERROR:|FATAL:|PANIC:|WARNING:|deadlock detected|duration:|slow query|terminating connection|could not)`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(ERROR:|FATAL:|PANIC:|deadlock detected|terminating connection|could not)`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(WARNING:|duration:|slow query)`),
+		},
+	},
+	"redis": {
+		Label:       "redis",
+		LinePattern: `(?i)(error|fatal|OOM|MISCONF|BUSY|LOADING|warning|slow|blocked|WAIT)`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(error|fatal|OOM|MISCONF|BUSY|LOADING)`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(warning|slow|blocked|WAIT)`),
+		},
+	},
+	"host": {
+		Label:       "host",
+		LinePattern: `(?i)(error|failed|failure|panic|oom|killed|denied|segfault|critical|warning|timeout)`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(error|failed|failure|panic|oom|killed|denied|segfault|critical)`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(warning|timeout)`),
+		},
+	},
+	"container": {
+		Label:       "container",
+		LinePattern: `(?i)(error|failed|failure|exception|panic|oom|killed|crash|warning|timeout|unhealthy)`,
+		ErrorPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(error|failed|failure|exception|panic|oom|killed|crash)`),
+		},
+		WarningPatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)(warning|timeout|unhealthy)`),
+		},
+	},
+}
+
+func serviceLogQuery(service, machineID string) string {
+	profile, ok := timelineProfiles[serviceKind(service)]
+	if !ok {
+		return fmt.Sprintf(`{service_name=%q, host_id=%q} |~ "(?i)(error|warn|failed)"`, service, machineID)
 	}
-	var edges []DepEdge
+	return fmt.Sprintf(`{service_name=%q, host_id=%q} |~ "%s"`, service, machineID, escapeLokiString(profile.LinePattern))
+}
 
-	hasWeb := false
-	hasApp := false
-	hasDB := false
-	hasCache := false
+func hostLogQuery(machineID string) string {
+	profile := timelineProfiles["host"]
+	return fmt.Sprintf(`{service_name="journald"} | host_id=%q |~ "%s"`, machineID, escapeLokiString(profile.LinePattern))
+}
 
-	// First pass: determine which service types exist.
-	for _, c := range chips {
-		switch c.Name {
-		case "nginx", "apache":
-			hasWeb = true
-		case "phpfpm":
-			hasApp = true
-		case "mariadb", "postgres":
-			hasDB = true
-		case "redis":
-			hasCache = true
+func escapeLokiString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+func classifyTimelineEvent(kind, line string) string {
+	profile, ok := timelineProfiles[kind]
+	if !ok {
+		profile = timelineProfiles[serviceKind(kind)]
+	}
+	for _, pattern := range profile.ErrorPatterns {
+		if pattern.MatchString(line) {
+			return "error"
 		}
 	}
-
-	// Second pass: build nodes and edges.
-	for _, c := range chips {
-		switch c.Name {
-		case "nginx", "apache":
-			webID := machineID + ":web"
-			nodes = append(nodes, DepNode{ID: webID, Label: c.Name, Status: c.Status, Type: "web"})
-			edges = append(edges, DepEdge{Source: webID, Target: machineID + ":host", Status: c.Status})
-		case "phpfpm":
-			appID := machineID + ":app"
-			nodes = append(nodes, DepNode{ID: appID, Label: c.Name, Status: c.Status, Type: "app"})
-			edges = append(edges, DepEdge{Source: appID, Target: machineID + ":host", Status: c.Status})
-		case "mariadb", "postgres":
-			dbID := machineID + ":db"
-			nodes = append(nodes, DepNode{ID: dbID, Label: c.Name, Status: c.Status, Type: "db"})
-			edges = append(edges, DepEdge{Source: dbID, Target: machineID + ":host", Status: c.Status})
-		case "redis":
-			cacheID := machineID + ":cache"
-			nodes = append(nodes, DepNode{ID: cacheID, Label: c.Name, Status: c.Status, Type: "cache"})
-			edges = append(edges, DepEdge{Source: cacheID, Target: machineID + ":host", Status: c.Status})
+	for _, pattern := range profile.WarningPatterns {
+		if pattern.MatchString(line) {
+			return "warning"
 		}
 	}
-
-	// Add dependency edges between services.
-	if hasWeb && hasApp {
-		edges = append(edges, DepEdge{
-			Source: machineID + ":web",
-			Target: machineID + ":app",
-			Status: "healthy",
-		})
-	}
-	if hasApp && hasDB {
-		edges = append(edges, DepEdge{
-			Source: machineID + ":app",
-			Target: machineID + ":db",
-			Status: "healthy",
-		})
-	}
-	if hasApp && hasCache {
-		edges = append(edges, DepEdge{
-			Source: machineID + ":app",
-			Target: machineID + ":cache",
-			Status: "healthy",
-		})
-	}
-
-	return nodes, edges
+	return "warning"
 }
 
 // ─── Timeline events ─────────────────────────────────────────────────────────
@@ -450,14 +567,12 @@ func (s *OverviewService) getTimelineEvents(
 	svcs []serviceBrief, startNs, endNs int64,
 ) []TimelineEvent {
 	var events []TimelineEvent
-	for _, svc := range svcs {
-		if !supportedServices[svc.Name] || !svc.LogCollOn {
-			continue
-		}
-		q := fmt.Sprintf(`{service=%q, host_id=%q} |= "error"`, svc.Name, machineID)
-		entries, err := s.lokiQueryLogEntries(ctx, tenantUUID, q, startNs, endNs, 20)
+
+	appendEntries := func(serviceLabel, kind, query string, limit int) {
+		entries, err := s.lokiQueryLogEntries(ctx, tenantUUID, query, startNs, endNs, limit)
 		if err != nil {
-			continue
+			slog.Warn("timeline loki query failed", "service", serviceLabel, "host", machineID, "error", err)
+			return
 		}
 		for _, e := range entries {
 			tsNs, _ := strconv.ParseInt(e.TimestampNs, 10, 64)
@@ -465,11 +580,20 @@ func (s *OverviewService) getTimelineEvents(
 			events = append(events, TimelineEvent{
 				Timestamp: ts,
 				Hostname:  hostname,
-				Service:   svc.Name,
-				EventType: "error",
-				Message:   truncateString(e.Line, 120),
+				Service:   serviceLabel,
+				EventType: classifyTimelineEvent(kind, e.Line),
+				Message:   truncateString(extractTimelineMessage(e.Line), 140),
 			})
 		}
+	}
+
+	appendEntries("host", "host", hostLogQuery(machineID), 12)
+
+	for _, svc := range svcs {
+		if !isSupportedService(svc.Name) || !svc.LogCollOn {
+			continue
+		}
+		appendEntries(svc.Name, serviceKind(svc.Name), serviceLogQuery(svc.Name, machineID), 12)
 	}
 	return events
 }
@@ -505,8 +629,31 @@ func (s *OverviewService) queryVMInstantSafe(ctx context.Context, tenantID uint,
 	return &series[0].Values[0][1]
 }
 
+func serviceErrorPattern(service string) string {
+	switch serviceKind(service) {
+	case "nginx", "apache":
+		return `(?i)(error|emerg|alert|crit| 5[0-9]{2} )`
+	case "phpfpm":
+		return `(?i)(error|alert|fatal|timeout|child exited|segmentation)`
+	case "mariadb":
+		return `(?i)(error|fatal|deadlock|crash|aborted connection)`
+	case "postgresql":
+		return `(?i)(error:|fatal:|panic:|deadlock detected|terminating connection|could not)`
+	case "redis":
+		return `(?i)(error|fatal|oom|misconf|busy|loading)`
+	default:
+		return `error`
+	}
+}
+
 func (s *OverviewService) queryLogErrorCount(ctx context.Context, tenantUUID, machineID, serviceName string, startNs, endNs int64) float64 {
-	q := fmt.Sprintf(`count_over_time({service=%q, host_id=%q} |= "error" [5m])`, serviceName, machineID)
+	pattern := serviceErrorPattern(serviceName)
+	var q string
+	if pattern == "error" {
+		q = fmt.Sprintf(`count_over_time({service_name=%q, host_id=%q} |= "error" [5m])`, serviceName, machineID)
+	} else {
+		q = fmt.Sprintf(`count_over_time({service_name=%q, host_id=%q} |~ "%s" [5m])`, serviceName, machineID, escapeLokiString(pattern))
+	}
 	rows, err := s.lokiQueryRange(ctx, tenantUUID, q, startNs, endNs, "5m", 1)
 	if err != nil || len(rows) == 0 || len(rows[0].Values) == 0 {
 		return 0
@@ -574,13 +721,28 @@ func (s *OverviewService) lokiQueryLogEntries(ctx context.Context, tenantUUID, q
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+func extractTimelineMessage(line string) string {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "{") {
+		var raw map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &raw); err == nil {
+			if msg, ok := raw["MESSAGE"].(string); ok && strings.TrimSpace(msg) != "" {
+				return strings.TrimSpace(msg)
+			}
+			if msg, ok := raw["message"].(string); ok && strings.TrimSpace(msg) != "" {
+				return strings.TrimSpace(msg)
+			}
+			if msg, ok := raw["msg"].(string); ok && strings.TrimSpace(msg) != "" {
+				return strings.TrimSpace(msg)
+			}
+		}
+	}
+	return line
+}
+
 func truncateString(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
 	return s[:n] + "..."
 }
-
-
-
-

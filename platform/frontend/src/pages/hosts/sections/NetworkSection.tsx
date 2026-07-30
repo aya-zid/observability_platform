@@ -33,12 +33,12 @@ export function NetworkSection({ machineId, params }: Props) {
   const conntrack = useMemo(() => formatTimePoints(d?.conntrack), [d])
 
   return (
-    <div className="grid gap-6">
-      <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
         <StackedAreaCard title="Network Throughput" data={throughput} areas={DIR_AREAS} loading={query.isLoading} />
         <StackedAreaCard title="Network Packets" data={packets} areas={DIR_AREAS} loading={query.isLoading} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-3">
         <LineChartCard title="Network Errors" data={errors} lines={[{ dataKey: "value", color: "#ef4444", name: "Errors/s" }]} loading={query.isLoading} />
         <LineChartCard title="Dropped Packets" data={dropped} lines={[{ dataKey: "value", color: "#f59e0b", name: "Drops/s" }]} loading={query.isLoading} />
         <LineChartCard title="Conntrack Usage" data={conntrack} lines={[{ dataKey: "value", color: "#8b5cf6", name: "%" }]} loading={query.isLoading} />

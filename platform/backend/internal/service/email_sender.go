@@ -203,9 +203,9 @@ func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, hostname, 
                 </tr>`, domain)
 	}
 	if metricValue != nil {
-		mv := fmt.Sprintf("%.2f", *metricValue)
+		mv := formatFloat(*metricValue)
 		if unit != "" {
-			mv += unit
+			mv += " " + unit
 		}
 		detailRows += fmt.Sprintf(`                <tr>
                   <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Current Value</td>
@@ -213,9 +213,9 @@ func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, hostname, 
                 </tr>`, mv)
 	}
 	if thresholdValue != nil {
-		tv := fmt.Sprintf("%.2f", *thresholdValue)
+		tv := formatFloat(*thresholdValue)
 		if unit != "" {
-			tv += unit
+			tv += " " + unit
 		}
 		detailRows += fmt.Sprintf(`                <tr>
                   <td style="padding:10px 0;border-top:1px solid #e2e8f0;font-size:14px;color:#64748b">Threshold</td>

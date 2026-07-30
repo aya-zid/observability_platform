@@ -14,7 +14,6 @@ interface Props {
   idleWorkers: number | null
   load1: number | null
   load5: number | null
-  load15: number | null
   workersData: Record<string, number | string>[]
   trafficData: Record<string, number | string>[]
   loadData: Record<string, number | string>[]
@@ -32,7 +31,6 @@ export function ApacheServerView({
   idleWorkers,
   load1,
   load5,
-  load15,
   workersData,
   trafficData,
   loadData,
@@ -44,25 +42,21 @@ export function ApacheServerView({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Uptime"
-          icon="⏱️"
           value={formatUptime(uptimeSeconds)}
           loading={isLoading}
         />
         <StatCard
           title="CPU Load"
-          icon="⚡"
-          value={cpuLoadPercent !== null ? `${cpuLoadPercent.toFixed(1)}%` : '—'}
+          value={cpuLoadPercent !== null ? `${Number(cpuLoadPercent.toFixed(1))}%` : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Total Requests"
-          icon="📊"
           value={requestsLatest !== null ? formatNumber(requestsLatest) : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Total Traffic"
-          icon="💾"
           value={trafficBytesTotal !== null ? formatBytes(trafficBytesTotal) : '—'}
           loading={isLoading}
         />
@@ -71,27 +65,23 @@ export function ApacheServerView({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Busy Workers"
-          icon="🔴"
           value={busyWorkers !== null ? formatNumber(busyWorkers) : '—'}
           loading={isLoading}
           status={busyWorkers !== null && idleWorkers !== null && busyWorkers > idleWorkers ? 'red' : undefined}
         />
         <StatCard
           title="Idle Workers"
-          icon="🟢"
           value={idleWorkers !== null ? formatNumber(idleWorkers) : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Load (1m)"
-          icon="📈"
-          value={load1 !== null ? load1.toFixed(2) : '—'}
+          value={load1 !== null ? Number(load1.toFixed(2)).toString() : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Load (5m)"
-          icon="📈"
-          value={load5 !== null ? load5.toFixed(2) : '—'}
+          value={load5 !== null ? Number(load5.toFixed(2)).toString() : '—'}
           loading={isLoading}
         />
       </div>

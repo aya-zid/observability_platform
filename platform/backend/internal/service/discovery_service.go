@@ -103,6 +103,7 @@ func (s *DiscoveryService) ListServices(ctx context.Context, tenantID uint, mach
 		return nil, err
 	}
 
+	now := time.Now()
 	out := make([]dto.DiscoveryServiceListItem, 0, len(rows))
 	for _, row := range rows {
 		def, supported := catalog.ResolveService(row.ServiceName)
@@ -112,6 +113,8 @@ func (s *DiscoveryService) ListServices(ctx context.Context, tenantID uint, mach
 			category = def.Category
 		}
 		logPathSource := normalizedLogPathSource(row.LogPathSource)
+		status := computeServiceStatus(row.LastSeenAt, now)
+		lastSeenAt := row.LastSeenAt.UTC().Format(time.RFC3339)
 
 		out = append(out, dto.DiscoveryServiceListItem{
 			ID:                 row.ID,
@@ -129,6 +132,8 @@ func (s *DiscoveryService) ListServices(ctx context.Context, tenantID uint, mach
 			VulnScanSupported:  scannable,
 			VulnScanStatus:     string(row.VulnerabilityScanStatus),
 			LastVulnScanAt:     formatTimePtr(row.LastVulnerabilityScanAt),
+			LastSeenAt:         lastSeenAt,
+			Status:             status,
 		})
 	}
 
@@ -241,6 +246,8 @@ func (s *DiscoveryService) GetServiceDetail(ctx context.Context, tenantID uint, 
 		Catalog:            def,
 		NginxVirtualHosts:  nginxVirtualHosts,
 		ApacheVirtualHosts: apacheVirtualHosts,
+		LastSeenAt:         service.LastSeenAt.UTC().Format(time.RFC3339),
+		Status:             computeServiceStatus(service.LastSeenAt, time.Now()),
 	}
 
 	return resp, nil
@@ -575,6 +582,7 @@ func (s *DiscoveryService) ListContainerServices(ctx context.Context, tenantID u
 		return nil, err
 	}
 
+	now := time.Now()
 	out := make([]dto.ContainerServiceListItem, 0, len(rows))
 	for _, row := range rows {
 		hostname := ""
@@ -582,6 +590,8 @@ func (s *DiscoveryService) ListContainerServices(ctx context.Context, tenantID u
 		if err2 == nil && host != nil {
 			hostname = host.Hostname
 		}
+		status := computeContainerStatus(row.LastSeenAt, now)
+		lastSeenAt := row.LastSeenAt.UTC().Format(time.RFC3339)
 		out = append(out, dto.ContainerServiceListItem{
 			ID:                 row.ID,
 			MachineID:          row.MachineID,
@@ -591,6 +601,8 @@ func (s *DiscoveryService) ListContainerServices(ctx context.Context, tenantID u
 			LogCollectionOn:    row.LogCollectionOn,
 			MetricCollectionOn: row.MetricCollectionOn,
 			Hostname:           hostname,
+			LastSeenAt:         lastSeenAt,
+			Status:             status,
 		})
 	}
 	return out, nil
@@ -620,7 +632,33 @@ func (s *DiscoveryService) GetContainerServiceDetail(ctx context.Context, tenant
 		ContainerImage:     svc.ContainerImage,
 		LogCollectionOn:    svc.LogCollectionOn,
 		MetricCollectionOn: svc.MetricCollectionOn,
+		LastSeenAt:         svc.LastSeenAt.UTC().Format(time.RFC3339),
+		Status:             computeContainerStatus(svc.LastSeenAt, time.Now()),
 	}, nil
+}
+
+// computeServiceStatus returns "running", "warning", or "stopped" based on LastSeenAt.
+// Thresholds match the host heartbeat interval (5 min) plus margin.
+func computeServiceStatus(lastSeenAt time.Time, now time.Time) string {
+	elapsed := now.Sub(lastSeenAt)
+	switch {
+	case elapsed <= 7*time.Minute:
+		return "running"
+	case elapsed <= 15*time.Minute:
+		return "warning"
+	default:
+		return "stopped"
+	}
+}
+
+// computeContainerStatus returns "running" or "stopped" based on LastSeenAt.
+// Containers report metrics every 30s and heartbeat confirms running state every 5 min.
+func computeContainerStatus(lastSeenAt time.Time, now time.Time) string {
+	elapsed := now.Sub(lastSeenAt)
+	if elapsed <= 7*time.Minute {
+		return "running"
+	}
+	return "stopped"
 }
 
 func formatTimePtr(t *time.Time) string {

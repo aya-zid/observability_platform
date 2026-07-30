@@ -10,8 +10,10 @@ type HostRegisterRequest struct {
 }
 
 type HostHeartbeatRequest struct {
-	MachineID    string `json:"machine_id" validate:"required,min=4,max=255"`
-	Hostname     string `json:"hostname,omitempty" validate:"omitempty,max=255"`
-	AgentVersion string `json:"agent_version,omitempty" validate:"omitempty,max=64"`
+	MachineID         string   `json:"machine_id" validate:"required,min=4,max=255"`
+	Hostname          string   `json:"hostname,omitempty" validate:"omitempty,max=255"`
+	AgentVersion      string   `json:"agent_version,omitempty" validate:"omitempty,max=64"`
+	RunningServices   []string `json:"running_services,omitempty"`
+	RunningContainers []string `json:"running_containers,omitempty"`
 }
 

@@ -34,6 +34,15 @@ type Incident struct {
 	Signals []IncidentSignal `gorm:"foreignKey:IncidentID;constraint:OnDelete:CASCADE" json:"signals,omitempty"`
 }
 
+// DismissedIncident tracks which incident cards the user has dismissed.
+// Once dismissed, the card won't appear in the overview.
+type DismissedIncident struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	TenantID    uint      `gorm:"not null;uniqueIndex:idx_tenant_incident" json:"tenant_id"`
+	IncidentID  string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_incident" json:"incident_id"`
+	DismissedAt time.Time `gorm:"autoCreateTime" json:"dismissed_at"`
+}
+
 // IncidentSignal is evidence backing an incident — one row per contributing metric/log/alert.
 type IncidentSignal struct {
 	ID         uint   `gorm:"primaryKey" json:"id"`

@@ -2,15 +2,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
 import { getAlertTemplatesByService, createAlertRule, type AlertTemplate, type ScopeInput, type ThresholdInput } from "@/api/alerts"
-import { getDiscoveryHosts, getDiscoveryServices, type DiscoveryHost, type DiscoveryService } from "@/api/discovery"
+import { getDiscoveryHosts, getDiscoveryServices } from "@/api/discovery"
 import { getNginxDomains } from "@/api/nginx"
 import { getApacheDomains } from "@/api/apache"
-import { getContainerServices, type ContainerService } from "@/api/container"
+import { getContainerServices } from "@/api/container"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 
 const serviceTypes = [
   { key: "host", label: "Host" },
+  { key: "host_service", label: "Host Service" },
   { key: "nginx", label: "Nginx" },
   { key: "apache", label: "Apache" },
   { key: "postgres", label: "PostgreSQL" },
@@ -90,7 +90,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
         } else {
           scopes.push({ scope_type: "all_containers" })
         }
-      } else if (serviceType !== "host") {
+      } else if (serviceType !== "host" && serviceType !== "host_service") {
         scopes.push({ scope_type: "all_services_of_type" })
       }
 
@@ -205,11 +205,11 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                   <div className="font-medium">{tpl.name}</div>
                   <div className="text-sm text-muted-foreground mt-1">{tpl.description}</div>
                   {tpl.explanation && (
-                    <div className="text-xs text-muted-foreground/70 mt-1.5 italic border-l-2 border-border pl-2">
+                    <div className="text-sm text-muted-foreground/70 mt-1.5 italic border-l-2 border-border pl-2">
                       {tpl.explanation}
                     </div>
                   )}
-                  <div className="text-xs text-muted-foreground mt-1.5">
+                  <div className="text-sm text-muted-foreground mt-1.5">
                     Default threshold: {tpl.default_threshold}{tpl.unit}
                   </div>
                 </button>
@@ -234,7 +234,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
             {selectedTemplate.name} &middot; {selectedTemplate.description}
           </p>
           {selectedTemplate.explanation && (
-            <p className="text-xs text-muted-foreground/70 mb-4 italic border-l-2 border-border pl-2">
+            <p className="text-sm text-muted-foreground/70 mb-4 italic border-l-2 border-border pl-2">
               {selectedTemplate.explanation}
             </p>
           )}
@@ -289,7 +289,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                     {selectedHosts.map((host) => (
                       <span
                         key={host.id}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-xs"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-sm"
                       >
                         {host.hostname}
                         <button onClick={() => toggleHost(host.id)} className="text-muted-foreground hover:text-foreground">&times;</button>
@@ -352,7 +352,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                       {containersQuery.data?.filter((c) => selectedContainerIds.includes(c.id)).map((c) => (
                         <span
                           key={c.id}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-xs"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-sm"
                         >
                           {c.container_name}
                           <button onClick={() => toggleContainer(c.id)} className="text-muted-foreground hover:text-foreground">&times;</button>
@@ -364,8 +364,8 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
               </div>
             )}
 
-            {/* Services (not for host or container service type) */}
-            {serviceType !== "host" && serviceType !== "container" && (
+            {/* Services (not for host, host_service, or container service type) */}
+            {serviceType !== "host" && serviceType !== "host_service" && serviceType !== "container" && (
               <div>
                 <label className="text-sm font-medium text-muted-foreground">Services</label>
                 <div className="mt-1.5">
@@ -416,7 +416,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                       {selectedServices.map((svc) => (
                         <span
                           key={svc.id}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-xs"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-muted text-sm"
                         >
                           {svc.service_name}
                           <button onClick={() => toggleService(svc.id)} className="text-muted-foreground hover:text-foreground">&times;</button>
@@ -478,11 +478,11 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                 {thresholds.map((t, i) => (
                   <div key={i} className="border border-border rounded-xl p-3">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-muted-foreground">Threshold #{i + 1}</span>
+                      <span className="text-sm text-muted-foreground">Threshold #{i + 1}</span>
                       {thresholds.length > 1 && (
                         <button
                           onClick={() => removeThreshold(i)}
-                          className="text-xs text-destructive hover:underline"
+                          className="text-sm text-destructive hover:underline"
                         >
                           Remove
                         </button>
@@ -490,7 +490,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-xs text-muted-foreground">Label</label>
+                        <label className="text-sm text-muted-foreground">Label</label>
                         <input
                           type="text"
                           value={t.label}
@@ -500,7 +500,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-muted-foreground">
+                        <label className="text-sm text-muted-foreground">
                           Threshold ({selectedTemplate.unit})
                         </label>
                         <input
@@ -511,7 +511,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                         />
                       </div>
                       <div>
-                        <label className="text-xs text-muted-foreground">Severity</label>
+                        <label className="text-sm text-muted-foreground">Severity</label>
                         <select
                           value={t.severity}
                           onChange={(e) => updateThreshold(i, "severity", e.target.value)}
@@ -523,7 +523,7 @@ export default function CreateAlertRuleModal({ onClose }: { onClose: () => void 
                         </select>
                       </div>
                       <div>
-                        <label className="text-xs text-muted-foreground">For Duration</label>
+                        <label className="text-sm text-muted-foreground">For Duration</label>
                         <select
                           value={t.for_duration ?? forDuration}
                           onChange={(e) => updateThreshold(i, "for_duration", e.target.value)}

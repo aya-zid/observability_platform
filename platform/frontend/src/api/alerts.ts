@@ -76,6 +76,7 @@ export type AlertEvent = {
   status: string
   is_notified: boolean
   domain: string
+  container_name: string
   triggered_at: string
   resolved_at: string | null
   acknowledged_by: number | null

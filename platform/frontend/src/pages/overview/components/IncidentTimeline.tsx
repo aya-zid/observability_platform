@@ -1,24 +1,27 @@
-import { useState, useMemo } from "react"
-import { Filter, X } from "lucide-react"
+import { useMemo, useState } from "react"
+import { AlertCircle, AlertTriangle, Search, ShieldAlert, X } from "lucide-react"
 
 import type { TimelineEvent } from "@/api/overview"
 import { cn } from "@/lib/utils"
 
-const typeConfig: Record<string, { dot: string; bg: string; label: string }> = {
+const typeConfig: Record<string, { dot: string; badge: string; label: string; icon: typeof AlertCircle }> = {
   error: {
     dot: "bg-red-500",
-    bg: "bg-red-100 dark:bg-red-900/30",
-    label: "error",
+    badge: "border-red-500/25 bg-red-500/[0.06] text-red-600 dark:text-red-400",
+    label: "Error",
+    icon: AlertCircle,
   },
   warning: {
     dot: "bg-amber-500",
-    bg: "bg-amber-100 dark:bg-amber-900/30",
-    label: "warning",
+    badge: "border-amber-500/25 bg-amber-500/[0.06] text-amber-600 dark:text-amber-400",
+    label: "Warning",
+    icon: AlertTriangle,
   },
   finding: {
-    dot: "bg-purple-500",
-    bg: "bg-purple-100 dark:bg-purple-900/30",
-    label: "finding",
+    dot: "bg-violet-500",
+    badge: "border-violet-500/25 bg-violet-500/[0.06] text-violet-600 dark:text-violet-400",
+    label: "Finding",
+    icon: ShieldAlert,
   },
 }
 
@@ -29,6 +32,16 @@ const RANGE_MS: Record<TimeRange, number> = {
   "15m": 15 * 60 * 1000,
   "1h": 60 * 60 * 1000,
   "6h": 6 * 60 * 60 * 1000,
+}
+
+function formatTime(value: string) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return "unknown"
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+}
+
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 export function IncidentTimeline({
@@ -43,125 +56,127 @@ export function IncidentTimeline({
   const [timeRange, setTimeRange] = useState<TimeRange>("5m")
   const [hostFilter, setHostFilter] = useState<string>(externalHostFilter ?? "")
   const [typeFilter, setTypeFilter] = useState<string>("")
+  const [query, setQuery] = useState("")
 
   const safe = events ?? []
-
-  const hostnames = useMemo(() => {
-    const set = new Set<string>()
-    for (const e of safe) if (e.hostname) set.add(e.hostname)
-    return Array.from(set).sort()
-  }, [safe])
-
-  const types = useMemo(() => {
-    const set = new Set<string>()
-    for (const e of safe) if (e.event_type) set.add(e.event_type)
-    return Array.from(set).sort()
-  }, [safe])
+  const hostnames = useMemo(() => uniqueSorted(safe.map((event) => event.hostname)), [safe])
+  const types = useMemo(() => uniqueSorted(safe.map((event) => event.event_type)), [safe])
 
   const filtered = useMemo(() => {
-    let result = safe
-    const now = Date.now()
-    const rangeMs = RANGE_MS[timeRange]
-    const cutoff = now - rangeMs
-
-    result = result.filter((e) => {
-      const ts = new Date(e.timestamp).getTime()
-      return ts >= cutoff
+    const cutoff = Date.now() - RANGE_MS[timeRange]
+    const q = query.trim().toLowerCase()
+    return safe.filter((event) => {
+      const ts = new Date(event.timestamp).getTime()
+      if (Number.isFinite(ts) && ts < cutoff) return false
+      if (hostFilter && event.hostname !== hostFilter) return false
+      if (typeFilter && event.event_type !== typeFilter) return false
+      if (q) {
+        const haystack = `${event.hostname} ${event.service} ${event.event_type} ${event.message}`.toLowerCase()
+        if (!haystack.includes(q)) return false
+      }
+      return true
     })
+  }, [safe, timeRange, hostFilter, typeFilter, query])
 
-    if (hostFilter) {
-      result = result.filter((e) => e.hostname === hostFilter)
-    }
-    if (typeFilter) {
-      result = result.filter((e) => e.event_type === typeFilter)
-    }
-
-    // Update parent with the effective time window (last 5m by default, or selected range)
-    if (onTimeRangeChange) {
-      // The parent uses the selected time range for the API call
-    }
-
-    return result
-  }, [safe, timeRange, hostFilter, typeFilter, onTimeRangeChange])
+  const counts = useMemo(() => {
+    return filtered.reduce(
+      (acc, event) => {
+        if (event.event_type === "error") acc.errors += 1
+        else if (event.event_type === "warning") acc.warnings += 1
+        else acc.other += 1
+        return acc
+      },
+      { errors: 0, warnings: 0, other: 0 }
+    )
+  }, [filtered])
 
   const handleRangeChange = (range: TimeRange) => {
     setTimeRange(range)
     const now = Date.now()
-    const rangeMs = RANGE_MS[range]
-    if (onTimeRangeChange) {
-      onTimeRangeChange(now - rangeMs, now)
-    }
+    onTimeRangeChange?.(now - RANGE_MS[range], now)
   }
 
-  if (safe.length === 0 && !hostFilter) {
-    return (
-      <div className="space-y-3">
-        <div className="rounded-lg border border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
-          No recent log events in the selected window
-        </div>
-      </div>
-    )
+  const clearFilters = () => {
+    setHostFilter("")
+    setTypeFilter("")
+    setQuery("")
   }
 
   return (
     <div className="space-y-3">
-      {/* Filters bar */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Time range selector */}
-        <div className="flex items-center gap-1 rounded-md border border-border bg-card p-0.5">
-          {(["5m", "15m", "1h", "6h"] as TimeRange[]).map((r) => (
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="rounded-lg border border-border bg-muted/20 p-2.5">
+          <div className="text-base font-semibold tabular-nums text-foreground">{filtered.length}</div>
+          <div className="text-xs text-muted-foreground">matching events</div>
+        </div>
+        <div className="rounded-lg border border-red-500/20 bg-red-500/[0.04] p-2.5">
+          <div className="text-base font-semibold tabular-nums text-red-500">{counts.errors}</div>
+          <div className="text-xs text-muted-foreground">errors</div>
+        </div>
+        <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-2.5">
+          <div className="text-base font-semibold tabular-nums text-amber-500">{counts.warnings}</div>
+          <div className="text-xs text-muted-foreground">warnings</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5">
+          {(["5m", "15m", "1h", "6h"] as TimeRange[]).map((range) => (
             <button
-              key={r}
+              key={range}
               type="button"
-              onClick={() => handleRangeChange(r)}
+              onClick={() => handleRangeChange(range)}
               className={cn(
-                "rounded px-2 py-0.5 text-xs font-medium transition-colors",
-                timeRange === r
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:text-foreground"
+                "h-6 rounded px-2 text-xs font-medium transition-colors",
+                timeRange === range ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {r}
+              {range}
             </button>
           ))}
         </div>
 
-        <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+        <div className="relative min-w-[160px] flex-1 sm:max-w-[200px]">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search activity"
+            className="h-7 w-full rounded-md border border-border bg-card pl-7 pr-2 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/50"
+          />
+        </div>
 
-        {/* Host filter */}
         {hostnames.length > 0 ? (
           <select
             value={hostFilter}
-            onChange={(e) => setHostFilter(e.target.value)}
-            className="h-7 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground"
+            onChange={(event) => setHostFilter(event.target.value)}
+            className="h-7 rounded-md border border-border bg-card px-1.5 text-xs text-muted-foreground outline-none"
           >
             <option value="">All hosts</option>
-            {hostnames.map((h) => (
-              <option key={h} value={h}>{h}</option>
+            {hostnames.map((hostname) => (
+              <option key={hostname} value={hostname}>{hostname}</option>
             ))}
           </select>
         ) : null}
 
-        {/* Type filter */}
         {types.length > 0 ? (
           <select
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="h-7 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground"
+            onChange={(event) => setTypeFilter(event.target.value)}
+            className="h-7 rounded-md border border-border bg-card px-1.5 text-xs text-muted-foreground outline-none"
           >
             <option value="">All types</option>
-            {types.map((t) => (
-              <option key={t} value={t}>{t}</option>
+            {types.map((type) => (
+              <option key={type} value={type}>{type}</option>
             ))}
           </select>
         ) : null}
 
-        {/* Clear filters */}
-        {(hostFilter || typeFilter) ? (
+        {hostFilter || typeFilter || query ? (
           <button
             type="button"
-            onClick={() => { setHostFilter(""); setTypeFilter("") }}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={clearFilters}
+            className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="h-3 w-3" />
             Clear
@@ -169,51 +184,32 @@ export function IncidentTimeline({
         ) : null}
       </div>
 
-      {/* Timeline */}
       {filtered.length === 0 ? (
-        <div className="rounded-lg border border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
-          No matching events in the selected window
+        <div className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center">
+          <p className="text-xs font-medium text-foreground">No activity matches this view</p>
+          <p className="mt-1 text-xs text-muted-foreground">Try a wider time range or clear the filters.</p>
         </div>
       ) : (
-        <div className="relative">
-          <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-border" />
-
-          <div className="space-y-2">
-            {filtered.map((ev, i) => {
-              const cfg = typeConfig[ev.event_type] ?? typeConfig.warning
-              const ts = new Date(ev.timestamp).toLocaleTimeString()
-
+        <div className="relative max-h-[380px] overflow-y-auto pr-1">
+          <div className="absolute bottom-2 left-[7px] top-2 w-px bg-border" />
+          <div className="space-y-1.5">
+            {filtered.map((event, index) => {
+              const cfg = typeConfig[event.event_type] ?? typeConfig.warning
+              const Icon = cfg.icon
               return (
-                <div key={i} className="relative flex gap-3 pl-5">
-                  <span
-                    className={cn(
-                      "absolute left-0 top-1.5 z-10 inline-block h-3.5 w-3.5 rounded-full border-2 border-background",
-                      cfg.dot
-                    )}
-                  />
-
-                  <div className="min-w-0 flex-1 rounded-md border border-border bg-card/50 px-3 py-1.5">
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="font-medium">{ts}</span>
-                      <span className={cn("rounded px-1 py-0.5 text-[10px] uppercase", cfg.bg, cfg.dot.replace("bg-", "text-"))}>
+                <div key={`${event.timestamp}-${event.hostname}-${index}`} className="relative flex gap-2 pl-5">
+                  <span className={cn("absolute left-0 top-2.5 z-10 h-3 w-3 rounded-full border-2 border-background", cfg.dot)} />
+                  <div className="min-w-0 flex-1 rounded-md border border-border bg-card px-2.5 py-1.5 transition-colors hover:bg-muted/20">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="font-semibold tabular-nums text-foreground">{formatTime(event.timestamp)}</span>
+                      <span className={cn("inline-flex items-center gap-1 rounded-md border px-1 py-0.5 text-[11px] font-semibold uppercase tracking-wide", cfg.badge)}>
+                        <Icon className="h-2.5 w-2.5" />
                         {cfg.label}
                       </span>
-                      {ev.hostname ? (
-                        <>
-                          <span className="text-muted-foreground">·</span>
-                          <span className="text-muted-foreground">{ev.hostname}</span>
-                        </>
-                      ) : null}
-                      {ev.service ? (
-                        <>
-                          <span className="text-muted-foreground">·</span>
-                          <span className="text-muted-foreground">{ev.service}</span>
-                        </>
-                      ) : null}
+                      {event.hostname ? <span className="text-muted-foreground">{event.hostname}</span> : null}
+                      {event.service ? <span className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">{event.service}</span> : null}
                     </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
-                      {ev.message}
-                    </p>
+                    <p className="mt-0.5 line-clamp-2 text-xs leading-4 text-muted-foreground">{event.message}</p>
                   </div>
                 </div>
               )

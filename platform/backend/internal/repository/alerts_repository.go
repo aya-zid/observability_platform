@@ -104,6 +104,16 @@ func (r *AlertsRepository) ListServiceVulnerabilitiesCtx(ctx context.Context, te
 	return out, nil
 }
 
+func (r *AlertsRepository) CountHighRiskVulnerableServicesCtx(ctx context.Context, tenantID uint) (int, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&domain.ServiceVulnerability{}).
+		Where("tenant_id = ? AND (cvss_score >= ? OR upper(severity) IN ?)", tenantID, 7.0, []string{"HIGH", "CRITICAL"}).
+		Distinct("discovered_service_id").
+		Count(&count).Error
+	return int(count), err
+}
+
 func (r *AlertsRepository) ListAllDiscoveredServicesCtx(ctx context.Context) ([]ScannableService, error) {
 	var rows []ScannableService
 	err := r.db.WithContext(ctx).

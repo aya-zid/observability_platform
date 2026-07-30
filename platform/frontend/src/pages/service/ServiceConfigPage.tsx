@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useParams, useNavigate } from "react-router-dom"
 import {
@@ -180,7 +180,7 @@ export default function ServiceConfigPage() {
           <div className="flex-1">
             <h1 className="text-xl font-bold text-foreground">{data.service_name} Configuration</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {data.hostname} · <span className="font-mono text-xs text-primary/70">{data.machine_id.slice(0, 12)}...</span>
+              {data.hostname} · <span className="font-mono text-sm text-primary/70">{data.machine_id.slice(0, 12)}...</span>
             </p>
           </div>
         </div>
@@ -196,7 +196,7 @@ export default function ServiceConfigPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {infoItems.map((item) => (
               <div key={item.label} className="bg-background/50 rounded-lg px-4 py-3 border border-border/50">
-                <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">{item.label}</p>
+                <p className="text-sm uppercase tracking-wider text-muted-foreground font-medium">{item.label}</p>
                 <p className="text-sm text-foreground font-semibold mt-1 capitalize">{item.value}</p>
               </div>
             ))}
@@ -213,7 +213,7 @@ export default function ServiceConfigPage() {
           {/* Log path - only for services without virtual-host log mapping */}
           {data.service_name !== "nginx" && data.service_name !== "apache" ? (
             <div>
-              <label className="text-xs font-medium text-foreground mb-1.5 block">Confirmed Log Path</label>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Confirmed Log Path</label>
               <input
                 value={confirmedLogPath}
                 onChange={(e) => setConfirmedLogPath(e.target.value)}
@@ -225,15 +225,15 @@ export default function ServiceConfigPage() {
 
           {data.detected_log_paths.length && data.service_name !== "nginx" && data.service_name !== "apache" ? (
             <div>
-              <label className="text-xs font-medium text-foreground mb-1.5 block">Detected Log Paths</label>
-              <p className="text-xs text-muted-foreground mb-2">Click to select</p>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Detected Log Paths</label>
+              <p className="text-sm text-muted-foreground mb-2">Click to select</p>
               <div className="flex flex-wrap gap-2">
                 {data.detected_log_paths.map((path) => (
                   <button
                     key={path}
                     type="button"
                     className={cn(
-                      "rounded-full border px-3 py-1 text-xs transition-colors",
+                      "rounded-full border px-3 py-1 text-sm transition-colors",
                       confirmedLogPath === path
                         ? "border-foreground bg-foreground text-background"
                         : "border-border bg-background/70 hover:bg-muted"
@@ -249,12 +249,12 @@ export default function ServiceConfigPage() {
 
           {/* Metrics endpoint */}
           <div>
-            <label className="text-xs font-medium text-foreground mb-1.5 block">Metrics Endpoint</label>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Metrics Endpoint</label>
             <input
               value={metricsEndpoint}
               onChange={(e) => setMetricsEndpoint(e.target.value)}
               placeholder={data.suggested_metrics_endpoint || "http://127.0.0.1:8080/metrics"}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 font-mono text-xs text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors placeholder:text-muted-foreground"
+              className="w-full bg-background border border-border rounded-lg px-3 py-2.5 font-mono text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors placeholder:text-muted-foreground"
             />
           </div>
 
@@ -337,7 +337,7 @@ export default function ServiceConfigPage() {
             <Zap className="w-4 h-4 text-primary" />
             Install Integration
           </h2>
-          <p className="text-xs text-muted-foreground mb-4">
+          <p className="text-sm text-muted-foreground mb-4">
             Generate a host-specific command, then run it on <span className="font-semibold text-primary">{data.hostname}</span> to
             activate collection using the confirmed log paths and metrics settings above.
           </p>
@@ -354,14 +354,14 @@ export default function ServiceConfigPage() {
             <div className="relative rounded-lg overflow-hidden border border-primary/20">
               <div className="px-3 py-1.5 border-b border-primary/10 bg-primary/5 flex items-center gap-1.5">
                 <Zap className="w-3 h-3 text-primary" />
-                <span className="text-[10px] text-primary uppercase tracking-wider font-semibold">Run on {data.hostname}</span>
+                <span className="text-sm text-primary uppercase tracking-wider font-semibold">Run on {data.hostname}</span>
               </div>
-              <pre className="p-4 text-xs text-primary font-mono whitespace-pre-wrap break-all overflow-x-auto bg-[hsl(240,15%,5%)] leading-relaxed">
+              <pre className="p-4 text-sm text-primary font-mono whitespace-pre-wrap break-all overflow-x-auto bg-[hsl(240,15%,5%)] leading-relaxed">
                 {installCommand}
               </pre>
               <button
                 onClick={handleCopy}
-                className="absolute top-9 right-2 px-3 py-1.5 rounded-md bg-gradient-to-r from-primary/80 to-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-opacity flex items-center gap-1.5"
+                className="absolute top-9 right-2 px-3 py-1.5 rounded-md bg-gradient-to-r from-primary/80 to-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity flex items-center gap-1.5"
               >
                 {copied ? (
                   <>

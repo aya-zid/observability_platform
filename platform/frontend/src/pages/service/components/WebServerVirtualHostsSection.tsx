@@ -62,7 +62,7 @@ function VirtualHostRow({
 
         <div className="flex items-center gap-3 flex-wrap">
           {/* Enabled toggle */}
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground select-none">
+          <label className="flex cursor-pointer items-center gap-1.5 text-sm text-muted-foreground select-none">
             <div
               className={cn(
                 "relative h-5 w-9 rounded-full transition-colors",
@@ -95,26 +95,26 @@ function VirtualHostRow({
       {/* Log paths */}
       <div className="grid gap-2 pl-6 sm:grid-cols-2">
         <label className="grid gap-1">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <FileText className="h-3 w-3" />
             Access log
           </span>
           <input
             type="text"
-            className="h-9 rounded-md border border-input bg-background/60 px-3 text-xs font-mono outline-none focus:border-foreground/40 transition-colors"
+            className="h-9 rounded-md border border-input bg-background/60 px-3 text-sm font-mono outline-none focus:border-foreground/40 transition-colors"
             value={vh.access_log}
             onChange={(e) => update({ access_log: e.target.value })}
             placeholder={service === "apache" ? "/var/log/apache2/shop.access.log" : "/var/log/nginx/shop.access.log"}
           />
         </label>
         <label className="grid gap-1">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <FileText className="h-3 w-3" />
             Error log
           </span>
           <input
             type="text"
-            className="h-9 rounded-md border border-input bg-background/60 px-3 text-xs font-mono outline-none focus:border-foreground/40 transition-colors"
+            className="h-9 rounded-md border border-input bg-background/60 px-3 text-sm font-mono outline-none focus:border-foreground/40 transition-colors"
             value={vh.error_log}
             onChange={(e) => update({ error_log: e.target.value })}
             placeholder={service === "apache" ? "/var/log/apache2/shop.error.log" : "/var/log/nginx/shop.error.log"}
@@ -125,12 +125,12 @@ function VirtualHostRow({
       {/* Badges */}
       <div className="flex flex-wrap gap-2 pl-6">
         {!vh.access_log && !vh.error_log && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-orange-300/40 bg-orange-500/10 px-2 py-0.5 text-xs text-orange-600 dark:text-orange-400">
+          <span className="inline-flex items-center gap-1 rounded-full border border-orange-300/40 bg-orange-500/10 px-2 py-0.5 text-sm text-orange-600 dark:text-orange-400">
             <AlertTriangle className="h-3 w-3" /> No log paths set
           </span>
         )}
         {(vh.access_log || vh.error_log) && vh.enabled && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-300">
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/40 bg-emerald-500/10 px-2 py-0.5 text-sm text-emerald-700 dark:text-emerald-300">
             <CheckCircle2 className="h-3 w-3" /> Ready to collect
           </span>
         )}
@@ -170,7 +170,7 @@ export default function WebServerVirtualHostsSection({ hosts, onChange, service 
         <div className="rounded-xl border border-dashed border-border bg-muted/10 py-10 text-center text-sm text-muted-foreground">
           <Globe className="mx-auto mb-3 h-8 w-8 opacity-30" />
           <div>No virtual hosts detected yet.</div>
-          <div className="mt-1 text-xs">The agent reads your {displayName} site configs on the next discovery run, or add one manually below.</div>
+          <div className="mt-1 text-sm">The agent reads your {displayName} site configs on the next discovery run, or add one manually below.</div>
         </div>
       ) : (
         <div className="grid gap-3">
@@ -197,7 +197,7 @@ export default function WebServerVirtualHostsSection({ hosts, onChange, service 
       </button>
 
       {!hideGuide && (
-        <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground leading-relaxed">
+        <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground leading-relaxed">
           <strong>How this works:</strong> Each row is one domain (virtual host). Per-domain log files let us show you separate dashboards per domain.
           The agent auto-detects this table by reading your {displayName} site configs.
         </div>

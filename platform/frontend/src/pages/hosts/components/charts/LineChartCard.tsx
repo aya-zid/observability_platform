@@ -51,7 +51,7 @@ export function LineChartCard({
 }) {
   return (
     <ChartBox title={title} loading={loading} empty={empty || data.length === 0} hint={hint}>
-      <div className="h-64">
+      <div className="h-48">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
             <CartesianGrid stroke={chartStyle.grid} strokeDasharray="3 3" />

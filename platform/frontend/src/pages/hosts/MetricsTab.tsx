@@ -12,8 +12,8 @@ import { LogsHealthSection } from "@/pages/hosts/sections/LogsHealthSection"
 
 function SectionHeading({ title }: { title: string }) {
   return (
-    <div className="border-b border-border pb-2">
-      <h2 className="text-lg font-bold text-foreground">{title}</h2>
+    <div className="border-b border-border pb-1">
+      <h2 className="text-sm font-bold text-foreground">{title}</h2>
     </div>
   )
 }
@@ -44,49 +44,49 @@ export function MetricsTab({ machineId }: { machineId: string }) {
   }, [timeSelection])
 
   return (
-    <div className="grid gap-8">
+    <div className="grid gap-5">
       <TimeRangeSelector selected={timeSelection} onChange={setTimeSelection} />
 
       <SummaryCards machineId={machineId} />
 
       <div>
         <SectionHeading title="CPU" />
-        <div className="mt-4">
+        <div className="mt-3">
           <CPUSection machineId={machineId} params={params} />
         </div>
       </div>
 
       <div>
         <SectionHeading title="Memory" />
-        <div className="mt-4">
+        <div className="mt-3">
           <MemorySection machineId={machineId} params={params} />
         </div>
       </div>
 
       <div>
         <SectionHeading title="Disk" />
-        <div className="mt-4">
+        <div className="mt-3">
           <DiskSection machineId={machineId} params={params} />
         </div>
       </div>
 
       <div>
         <SectionHeading title="Network" />
-        <div className="mt-4">
+        <div className="mt-3">
           <NetworkSection machineId={machineId} params={params} />
         </div>
       </div>
 
       <div>
         <SectionHeading title="Processes" />
-        <div className="mt-4">
+        <div className="mt-3">
           <ProcessesSection machineId={machineId} params={params} />
         </div>
       </div>
 
       <div>
         <SectionHeading title="Log Health" />
-        <div className="mt-4">
+        <div className="mt-3">
           <LogsHealthSection machineId={machineId} params={params} />
         </div>
       </div>

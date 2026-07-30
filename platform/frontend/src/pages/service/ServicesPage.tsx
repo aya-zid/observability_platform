@@ -8,9 +8,8 @@ import {
   getDiscoveryServices,
   type DiscoveryService,
 } from "@/api/discovery"
-import { Page, PageHeader } from "@/components/shared/Page"
 import { cn } from "@/lib/utils"
-import { Search, Activity, Server, FileText, BarChart3, Settings, Wifi, WifiOff, CheckCircle, XCircle, LayoutDashboard } from "lucide-react"
+import { Search, Activity, Server, FileText, BarChart3, Settings, Wifi, WifiOff, CheckCircle, XCircle } from "lucide-react"
 
 function HostSidebar({
   hosts,
@@ -22,18 +21,18 @@ function HostSidebar({
   onSelectHost: (id: string) => void
 }) {
   return (
-    <div className="w-64 border-r border-border bg-card flex flex-col h-full shrink-0">
-      <div className="p-4 border-b border-border">
-        <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
-          <Server className="w-4 h-4 text-primary" />
+    <div className="w-56 border-r border-border bg-card flex flex-col h-full shrink-0">
+      <div className="p-3 border-b border-border">
+        <h2 className="text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+          <Server className="w-3.5 h-3.5 text-primary" />
           Hosts
         </h2>
-        <p className="text-xs text-muted-foreground mt-1">{hosts.length} discovered</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{hosts.length} discovered</p>
       </div>
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
         <button onClick={() => onSelectHost("")}
           className={cn(
-            "w-full text-left px-3 py-2.5 rounded-md text-sm transition-all",
+            "w-full text-left px-2.5 py-2 rounded-md text-xs transition-all",
             selectedHost === ""
               ? "bg-primary/15 text-primary border border-primary/30"
               : "text-secondary-foreground hover:bg-surface-hover"
@@ -43,20 +42,20 @@ function HostSidebar({
         {hosts.map((host) => (
           <button key={host.machine_id} onClick={() => onSelectHost(host.machine_id)}
             className={cn(
-              "w-full text-left px-3 py-2.5 rounded-md transition-all group",
+              "w-full text-left px-2.5 py-2 rounded-md transition-all group",
               selectedHost === host.machine_id ? "bg-primary/15 border border-primary/30" : "hover:bg-surface-hover"
             )}>
             <div className="flex items-center justify-between">
-              <span className={cn("text-sm font-medium", selectedHost === host.machine_id ? "text-primary" : "text-foreground")}>
+              <span className={cn("text-xs font-medium", selectedHost === host.machine_id ? "text-primary" : "text-foreground")}>
                 {host.hostname}
               </span>
               {host.status === "online" ? (
-                <Wifi className="w-3.5 h-3.5 text-green-500" />
+                <Wifi className="w-3 h-3 text-green-500" />
               ) : (
-                <WifiOff className="w-3.5 h-3.5 text-red-500" />
+                <WifiOff className="w-3 h-3 text-red-500" />
               )}
             </div>
-            <div className="flex items-center justify-between mt-1">
+            <div className="flex items-center justify-between mt-0.5">
               <span className="text-xs text-muted-foreground">{host.private_ip_v4 || host.machine_id.slice(0, 12)}</span>
               <span className="text-xs text-muted-foreground">{host.os_name}</span>
             </div>
@@ -134,82 +133,91 @@ export default function ServicesPage() {
     <div className="flex h-full overflow-hidden">
       <HostSidebar hosts={hosts} selectedHost={selectedHost} onSelectHost={setSelectedHost} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="border-b border-border bg-card/50 backdrop-blur-sm px-6 py-4 shrink-0">
+        <header className="border-b border-border bg-card/50 backdrop-blur-sm px-4 py-2 shrink-0">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-                <Activity className="w-5 h-5 text-primary" />
+              <h1 className="text-base font-bold text-foreground flex items-center gap-2">
+                <Activity className="w-3.5 h-3.5 text-primary" />
                 {selectedHost ? hosts.find(h => h.machine_id === selectedHost)?.hostname || "All Services" : "All Services"}
               </h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 {selectedHost
                   ? `${hosts.find(h => h.machine_id === selectedHost)?.os_name || ""} · ${services.length} services`
                   : `${totalOnline}/${hosts.length} hosts online · ${services.length} services discovered`}
               </p>
             </div>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
               <input
                 type="text" placeholder="Search services…" value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-secondary border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/25 w-64 transition-colors"
+                className="pl-7 pr-2.5 py-1 bg-secondary border border-border rounded-lg text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/25 w-56 transition-colors"
               />
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6 space-y-8">
+        <main className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4">
           {!selectedHost && !servicesQuery.isLoading && (
             <div className="text-sm text-muted-foreground">Select a host from the sidebar.</div>
           )}
           {servicesQuery.isLoading && <div className="text-sm text-muted-foreground">Loading services…</div>}
           {categoryOrder.map((category) => (
             <section key={category} className="animate-fade-in">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4 flex items-center gap-2">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
                 {categoryLabelByKey[category] || category}
-                <span className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full ml-2">{servicesByCategory[category].length}</span>
+                <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded-full ml-1">{servicesByCategory[category].length}</span>
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                 {servicesByCategory[category].map((service) => {
                   const bothOn = service.log_collection_on && service.metric_collection_on
                   return (
-                    <div key={service.id} className="bg-card border border-border rounded-lg p-4 hover:border-primary/30 transition-all group">
-                      <div className="flex items-start justify-between mb-3">
+                    <div key={service.id} className="bg-card border border-border rounded-lg p-2.5 hover:border-primary/30 transition-all group">
+                      <div className="flex items-start justify-between mb-1.5">
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-semibold text-foreground">{service.service_name}</h3>
+                          <h3 className="text-xs font-semibold text-foreground">{service.service_name}</h3>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {service.version ? `v${service.version}` : ""}{service.port ? ` · port ${service.port}` : ""}
                           </p>
                         </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-1.5">
+                          {service.status === "running" ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-500"><Wifi className="w-2.5 h-2.5" /> running</span>
+                          ) : service.status === "warning" ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-yellow-500"><Wifi className="w-2.5 h-2.5" /> warning</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-500"><WifiOff className="w-2.5 h-2.5" /> stopped</span>
+                          )}
+                        </div>
                         {service.is_supported && (
-                          <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <div className="flex items-center gap-1 shrink-0 ml-1.5">
                             <Link to={`/services/${service.id}`}
-                              className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Configure">
-                              <Settings className="w-4 h-4" />
+                              className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Configure">
+                              <Settings className="w-3 h-3" />
                             </Link>
                           </div>
                         )}
                       </div>
 
                       {service.is_supported && (
-                        <div className={cn("inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium mb-3",
+                        <div className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium mb-1.5",
                           bothOn ? "text-green-600 dark:text-green-400 bg-green-500/10" : "text-muted-foreground bg-secondary"
                         )}>
-                          {bothOn ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                          {bothOn ? <CheckCircle className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
                           {bothOn ? "Active" : "Not configured"}
                         </div>
                       )}
 
                       {!service.is_supported && (
-                        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium mb-3 text-muted-foreground bg-secondary">
-                          <XCircle className="w-3 h-3" />
+                        <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium mb-1.5 text-muted-foreground bg-secondary">
+                          <XCircle className="w-2.5 h-2.5" />
                           Unknown service
                         </div>
                       )}
 
-                      <div className="space-y-2">
+                      <div className="space-y-1">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                          <div className="flex items-center gap-1">
+                            <FileText className="w-2.5 h-2.5 text-muted-foreground" />
                             <span className="text-xs text-muted-foreground">Log Collection</span>
                           </div>
                           <span className={cn("text-xs font-semibold", service.log_collection_on ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
@@ -217,8 +225,8 @@ export default function ServicesPage() {
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <BarChart3 className="w-3.5 h-3.5 text-muted-foreground" />
+                          <div className="flex items-center gap-1">
+                            <BarChart3 className="w-2.5 h-2.5 text-muted-foreground" />
                             <span className="text-xs text-muted-foreground">Metrics Collection</span>
                           </div>
                           <span className={cn("text-xs font-semibold", service.metric_collection_on ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>
@@ -226,7 +234,7 @@ export default function ServicesPage() {
                           </span>
                         </div>
                         {bothOn && service.is_supported && (
-                          <div className="flex gap-2 pt-2">
+                          <div className="flex gap-1 pt-1">
                             <ServiceQuickLinks serviceId={service.id} serviceName={service.service_name} />
                           </div>
                         )}
@@ -239,7 +247,7 @@ export default function ServicesPage() {
           ))}
           {!servicesQuery.isLoading && services.length === 0 && selectedHost && (
             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-              <Search className="w-10 h-10 mb-3 opacity-30" />
+              <Search className="w-8 h-8 mb-3 opacity-30" />
               <p className="text-sm">No services found</p>
             </div>
           )}
@@ -288,7 +296,7 @@ function ServiceQuickLinks({ serviceId, serviceName }: { serviceId: number; serv
       {dashPath && (
         <Link
           to={`${dashPath}/${serviceId}`}
-          className="flex-1 text-center px-2 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 rounded-md text-xs font-semibold transition-colors"
+          className="flex-1 text-center px-1.5 py-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/25 rounded-md text-xs font-semibold transition-colors"
         >
           Dashboard
         </Link>
@@ -296,7 +304,7 @@ function ServiceQuickLinks({ serviceId, serviceName }: { serviceId: number; serv
       {logsPath && (
         <Link
           to={`${logsPath}/${serviceId}`}
-          className="flex-1 text-center px-2 py-1.5 bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border rounded-md text-xs font-semibold transition-colors"
+          className="flex-1 text-center px-1.5 py-1 bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border rounded-md text-xs font-semibold transition-colors"
         >
           Logs
         </Link>

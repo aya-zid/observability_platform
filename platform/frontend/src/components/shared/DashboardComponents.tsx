@@ -69,11 +69,11 @@ export function DashboardStatCard({
   }[tone]
 
   return (
-    <div className={cn("rounded-lg border bg-card p-3", borderColor)}>
+    <div className={cn("rounded-lg border bg-card p-2.5", borderColor)}>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-bold">{value}</p>
+      <p className="mt-0.5 text-sm font-semibold">{value}</p>
       {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
-      {icon ? <span className="text-lg">{icon}</span> : null}
+      {icon ? <span className="text-base">{icon}</span> : null}
     </div>
   )
 }
@@ -86,8 +86,8 @@ export function DashboardSectionHeader({
   description?: string
 }) {
   return (
-    <div className="mb-3">
-      <h3 className="font-semibold text-foreground">{title}</h3>
+    <div className="mb-2">
+      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
       {description ? <p className="text-xs text-muted-foreground mt-0.5">{description}</p> : null}
     </div>
   )
@@ -96,7 +96,7 @@ export function DashboardSectionHeader({
 export function DashboardNoData() {
   const { t } = useTranslation()
   return (
-    <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+    <div className="flex h-48 items-center justify-center text-xs text-muted-foreground">
       {t("dashboard.noData")}
     </div>
   )
@@ -119,10 +119,10 @@ export function DashboardLinePanel({
 }) {
   const hasData = data.length > 0
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <h3 className="mb-3 text-sm font-semibold text-foreground">{title}</h3>
+    <div className="rounded-lg border border-border bg-card p-3">
+      <h3 className="mb-2 text-xs font-semibold text-foreground">{title}</h3>
       {!hasData ? (
-        <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        <div className="flex h-48 items-center justify-center text-xs text-muted-foreground">
           No data
         </div>
       ) : (
@@ -134,7 +134,7 @@ export function DashboardLinePanel({
               <YAxis tick={DASHBOARD_CHART_STYLE.tick} tickLine={false} axisLine={false} width={50} />
               <Tooltip
                 contentStyle={DASHBOARD_CHART_STYLE.tooltip}
-                formatter={formatter ? (val: number, name: string) => formatter(val, name) : undefined}
+                formatter={formatter ? ((val: number, name: string) => formatter(val, name)) as any : undefined}
               />
               <Legend wrapperStyle={{ fontSize: "11px" }} />
               {lines.map((l) => (
@@ -169,17 +169,17 @@ export function DashboardAreaPanel({
   title: string
   data: Array<Record<string, string | number>>
   areas: Array<{ dataKey: string; color: string; name: string }>
-  formatter?: (value: number) => string
+  formatter?: (value: number, name: string) => string
   height?: number
   stacked?: boolean
   onClickTime?: (time: number) => void
 }) {
   const hasData = data.length > 0
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <h3 className="mb-3 text-sm font-semibold text-foreground">{title}</h3>
+    <div className="rounded-lg border border-border bg-card p-3">
+      <h3 className="mb-2 text-xs font-semibold text-foreground">{title}</h3>
       {!hasData ? (
-        <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        <div className="flex h-48 items-center justify-center text-xs text-muted-foreground">
           No data
         </div>
       ) : (
@@ -191,7 +191,7 @@ export function DashboardAreaPanel({
               <YAxis tick={DASHBOARD_CHART_STYLE.tick} tickLine={false} axisLine={false} width={50} />
               <Tooltip
                 contentStyle={DASHBOARD_CHART_STYLE.tooltip}
-                formatter={formatter ? (val: number) => formatter(val) : undefined}
+                formatter={formatter ? ((val: number, name: string) => formatter(val, name)) as any : undefined}
               />
               <Legend wrapperStyle={{ fontSize: "11px" }} />
               {areas.map((a) => (
@@ -230,10 +230,10 @@ export function DashboardBarPanel({
 }) {
   const hasData = data.length > 0
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <h3 className="mb-3 text-sm font-semibold text-foreground">{title}</h3>
+    <div className="rounded-lg border border-border bg-card p-3">
+      <h3 className="mb-2 text-xs font-semibold text-foreground">{title}</h3>
       {!hasData ? (
-        <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        <div className="flex h-48 items-center justify-center text-xs text-muted-foreground">
           No data
         </div>
       ) : (
@@ -245,7 +245,7 @@ export function DashboardBarPanel({
               <YAxis type="category" dataKey="name" tick={DASHBOARD_CHART_STYLE.tick} tickLine={false} axisLine={false} width={80} />
               <Tooltip
                 contentStyle={DASHBOARD_CHART_STYLE.tooltip}
-                formatter={formatter ? (val: number) => formatter(val) : undefined}
+                formatter={formatter ? ((val: number) => formatter(val)) as any : undefined}
               />
               <Bar dataKey="value" fill={DASHBOARD_COLORS.blue} radius={[0, 4, 4, 0]} />
             </BarChart>
@@ -271,17 +271,17 @@ export function DashboardDonutCard({
 }) {
   const data = [{ name: label, value }, { name: "remaining", value: 100 - value }]
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
-      <p className="mb-2 text-xs text-muted-foreground">{title}</p>
-      <ResponsiveContainer width="100%" height={80}>
+    <div className="rounded-lg border border-border bg-card p-2.5">
+      <p className="mb-1 text-xs text-muted-foreground">{title}</p>
+      <ResponsiveContainer width="100%" height={60}>
         <PieChart>
-          <Pie data={data} cx="50%" cy="50%" innerRadius={20} outerRadius={35} dataKey="value" startAngle={90} endAngle={-270}>
+          <Pie data={data} cx="50%" cy="50%" innerRadius={16} outerRadius={28} dataKey="value" startAngle={90} endAngle={-270}>
             <Cell fill={color} />
             <Cell fill="hsl(var(--muted))" />
           </Pie>
         </PieChart>
       </ResponsiveContainer>
-      <p className="text-center text-lg font-bold" style={{ color }}>{value}{hint || "%"}</p>
+      <p className="text-center text-sm font-bold" style={{ color }}>{value}{hint || "%"}</p>
       <p className="text-center text-xs text-muted-foreground">{label}</p>
     </div>
   )
@@ -301,24 +301,24 @@ export function DashboardCustomBarPanel({
   const hasData = data.length > 0
   const maxVal = Math.max(...data.map((d) => d.value), 1)
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <h3 className="mb-3 text-sm font-semibold text-foreground">{title}</h3>
+    <div className="rounded-lg border border-border bg-card p-3">
+      <h3 className="mb-2 text-xs font-semibold text-foreground">{title}</h3>
       {!hasData ? (
-        <div className="flex items-center justify-center text-sm text-muted-foreground" style={{ height }}>
+        <div className="flex items-center justify-center text-xs text-muted-foreground" style={{ height }}>
           No data
         </div>
       ) : (
-        <div className="space-y-2" style={{ height }}>
+        <div className="space-y-1.5" style={{ height }}>
           {data.map((d) => (
-            <div key={d.name} className="flex items-center gap-2">
-              <span className="w-24 truncate text-xs text-muted-foreground">{d.name}</span>
-              <div className="flex-1 h-5 rounded bg-muted overflow-hidden">
+            <div key={d.name} className="flex items-center gap-1.5">
+              <span className="w-20 truncate text-xs text-muted-foreground">{d.name}</span>
+              <div className="flex-1 h-4 rounded bg-muted overflow-hidden">
                 <div
                   className="h-full rounded bg-blue-500 transition-all"
                   style={{ width: `${(d.value / maxVal) * 100}%` }}
                 />
               </div>
-              <span className="w-16 text-right text-xs font-medium">
+              <span className="w-14 text-right text-xs font-medium">
                 {formatter ? formatter(d.value) : d.value}
               </span>
             </div>

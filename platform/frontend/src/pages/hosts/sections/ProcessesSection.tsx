@@ -26,8 +26,8 @@ export function ProcessesSection({ machineId, params }: Props) {
   const createRate = (d?.creation_rate as number) ?? null
 
   return (
-    <div className="grid gap-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div className="grid gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <StatCard
           title="Zombie Processes"
           value={zombies != null ? String(Math.round(zombies)) : "\u2014"}

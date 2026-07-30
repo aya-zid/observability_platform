@@ -66,16 +66,16 @@ export function DiagnosedIssues({ issues }: { issues: DiagnosedIssue[] | null | 
               <SeverityIcon className={cn("mt-0.5 h-4 w-4 shrink-0", issue.severity === "critical" ? "text-red-500" : issue.severity === "warning" ? "text-amber-500" : "text-blue-500")} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", cfg.badge)}>
+                  <span className={cn("rounded px-1.5 py-0.5 text-sm font-medium", cfg.badge)}>
                     {issue.severity}
                   </span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-sm text-muted-foreground">
                     {issue.hostname} · {issue.service}
                   </span>
-                  <span className="text-xs text-muted-foreground">· {issue.duration}</span>
+                  <span className="text-sm text-muted-foreground">· {issue.duration}</span>
                 </div>
                 <p className="mt-0.5 text-sm font-medium">{issue.diagnosis}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{issue.what}</p>
+                <p className="mt-0.5 text-sm text-muted-foreground line-clamp-1">{issue.what}</p>
               </div>
               {isOpen ? <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />}
             </button>
@@ -83,7 +83,7 @@ export function DiagnosedIssues({ issues }: { issues: DiagnosedIssue[] | null | 
             {/* Expanded detail */}
             {isOpen ? (
               <div className="border-t border-border px-3 pb-3 pt-2">
-                <div className="grid gap-3 text-xs sm:grid-cols-2">
+                <div className="grid gap-3 text-sm sm:grid-cols-2">
                   <div className="space-y-1">
                     <span className="font-medium text-muted-foreground">What happened</span>
                     <p className="text-foreground/80">{issue.what}</p>
@@ -108,7 +108,7 @@ export function DiagnosedIssues({ issues }: { issues: DiagnosedIssue[] | null | 
                       <span
                         key={i}
                         className={cn(
-                          "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs",
+                          "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-sm",
                           e.status === "critical"
                             ? "border-red-200 bg-red-50/50 dark:border-red-900/40 dark:bg-red-950/20"
                             : e.status === "warning"
@@ -124,7 +124,7 @@ export function DiagnosedIssues({ issues }: { issues: DiagnosedIssue[] | null | 
                 ) : null}
 
                 {issue.log_snippet ? (
-                  <div className="mt-3 rounded-md border border-border bg-background/50 p-2 font-mono text-[11px] text-muted-foreground">
+                  <div className="mt-3 rounded-md border border-border bg-background/50 p-2 font-mono text-sm text-muted-foreground">
                     {issue.log_snippet}
                   </div>
                 ) : null}

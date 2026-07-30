@@ -44,27 +44,27 @@ export function OverviewTab({ host, machineId }: { host: DiscoveryHost | undefin
         {host ? (
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Hostname</div>
+              <div className="text-sm text-muted-foreground uppercase tracking-wide">Hostname</div>
               <div className="mt-1 font-medium">{host.hostname}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Machine ID</div>
+              <div className="text-sm text-muted-foreground uppercase tracking-wide">Machine ID</div>
               <div className="mt-1 font-mono text-sm">{host.machine_id}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Operating System</div>
+              <div className="text-sm text-muted-foreground uppercase tracking-wide">Operating System</div>
               <div className="mt-1">{host.os_name}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Architecture</div>
+              <div className="text-sm text-muted-foreground uppercase tracking-wide">Architecture</div>
               <div className="mt-1">{host.arch}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Agent Version</div>
+              <div className="text-sm text-muted-foreground uppercase tracking-wide">Agent Version</div>
               <div className="mt-1">{host.agent_version}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wide">Status</div>
+              <div className="text-sm text-muted-foreground uppercase tracking-wide">Status</div>
               <div className="mt-1 flex items-center gap-2">
                 <span className={cn("size-2 rounded-full", statusColor(host.status))} />
                 <span className="capitalize">{host.status}</span>
@@ -97,11 +97,11 @@ export function OverviewTab({ host, machineId }: { host: DiscoveryHost | undefin
               >
                 <div>
                   <div className="font-medium">{svc.service_name}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
+                  <div className="text-sm text-muted-foreground mt-0.5">
                     {svc.category} {svc.port ? `\u2022 Port ${svc.port}` : null} {svc.version ? `\u2022 v${svc.version}` : null}
                   </div>
                 </div>
-                <div className="flex items-center gap-3 text-xs">
+                <div className="flex items-center gap-3 text-sm">
                   <span className={cn(svc.log_collection_on ? "text-emerald-500" : "text-muted-foreground")}>
                     Logs {svc.log_collection_on ? "ON" : "OFF"}
                   </span>

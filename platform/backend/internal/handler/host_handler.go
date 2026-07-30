@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"strings"
+	"unicode"
 
 	"github.com/labstack/echo/v4"
 
@@ -14,10 +16,11 @@ import (
 type HostHandler struct {
 	hostRepo         *repository.HostRepository
 	subscriptionRepo *repository.SubscriptionRepository
+	discoveryRepo    *repository.DiscoveryRepository
 }
 
-func NewHostHandler(hostRepo *repository.HostRepository, subscriptionRepo *repository.SubscriptionRepository) *HostHandler {
-	return &HostHandler{hostRepo: hostRepo, subscriptionRepo: subscriptionRepo}
+func NewHostHandler(hostRepo *repository.HostRepository, subscriptionRepo *repository.SubscriptionRepository, discoveryRepo *repository.DiscoveryRepository) *HostHandler {
+	return &HostHandler{hostRepo: hostRepo, subscriptionRepo: subscriptionRepo, discoveryRepo: discoveryRepo}
 }
 
 func (h *HostHandler) Register(c echo.Context) error {
@@ -91,5 +94,48 @@ func (h *HostHandler) Heartbeat(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update heartbeat"})
 	}
 
+	// Update LastSeenAt for running services and containers
+	if len(req.RunningServices) > 0 {
+		if err := h.discoveryRepo.TouchServiceHeartbeatCtx(c.Request().Context(), tenant.ID, req.MachineID, req.RunningServices); err != nil {
+			c.Logger().Errorf("[hosts] service heartbeat failed: %v", err)
+		}
+	}
+	if len(req.RunningContainers) > 0 {
+		if err := h.discoveryRepo.TouchContainerHeartbeatCtx(c.Request().Context(), tenant.ID, req.MachineID, normalizeContainerHeartbeatNames(req.RunningContainers)); err != nil {
+			c.Logger().Errorf("[hosts] container heartbeat failed: %v", err)
+		}
+	}
+
 	return c.JSON(http.StatusOK, dto.OkResponse{OK: true})
+}
+
+func normalizeContainerHeartbeatNames(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		normalized := safeContainerName(name)
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func safeContainerName(name string) string {
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }

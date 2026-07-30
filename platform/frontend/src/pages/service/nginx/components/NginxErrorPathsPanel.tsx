@@ -20,13 +20,13 @@ export function NginxErrorPathsPanel({
   return (
     <div className="rounded-lg border border-border bg-card p-5 shadow-sm">
       <h3 className="mb-1 text-sm font-semibold text-foreground">{title}</h3>
-      <p className="mb-4 text-xs text-muted-foreground">{subtitle}</p>
+      <p className="mb-4 text-sm text-muted-foreground">{subtitle}</p>
       <div className="max-h-64 space-y-2 overflow-y-auto">
         {isLoading ? (
           <p className="py-4 text-center text-sm text-muted-foreground">Loading...</p>
         ) : data.length > 0 ? (
           data.map((item, index) => (
-            <div key={`${item.path}-${index}`} className="flex items-center gap-2 rounded px-2 py-2 text-xs hover:bg-muted/50 transition-colors">
+            <div key={`${item.path}-${index}`} className="flex items-center gap-2 rounded px-2 py-2 text-sm hover:bg-muted/50 transition-colors">
               <span
                 className={cn(
                   'flex-shrink-0 rounded px-2 py-0.5 font-medium',

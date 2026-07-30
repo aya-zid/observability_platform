@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useParams } from "react-router-dom"
 
 import { getDiscoveryService } from "@/api/discovery"
-import { getMariaDBLogs, getMariaDBErrorLogs, type MariaDBLogEvent } from "@/api/mariadb"
+import { getMariaDBLogs, getMariaDBErrorLogs } from "@/api/mariadb"
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { LogPagination } from "@/components/shared/LogPagination"
 import { TIME_RANGES, TimeRangeSelector, type TimeSelection } from "@/components/shared/TimeRangeSelector"
@@ -16,7 +16,7 @@ import {
 } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
 import { RefreshCw } from "lucide-react"
-import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
+import { useTranslation } from "@/i18n/LanguageContext"
 
 const PAGE_SIZE = 100
 
@@ -50,16 +50,16 @@ function NumericRange({ label, min, max, onMinChange, onMaxChange, placeholder, 
 }) {
   return (
     <>
-      <span className="text-xs text-muted-foreground whitespace-nowrap">{label}:</span>
+      <span className="text-sm text-muted-foreground whitespace-nowrap">{label}:</span>
       <input type="number" min="0" step={step || "1"} value={min}
         onChange={(e) => onMinChange(e.target.value)}
         placeholder={placeholder ? `min ${placeholder}` : "min"}
-        className="h-8 w-[72px] rounded border border-input bg-background/70 px-2 text-xs outline-none" />
-      <span className="text-xs text-muted-foreground">-</span>
+        className="h-8 w-[72px] rounded border border-input bg-background/70 px-2 text-sm outline-none" />
+      <span className="text-sm text-muted-foreground">-</span>
       <input type="number" min="0" step={step || "1"} value={max}
         onChange={(e) => onMaxChange(e.target.value)}
         placeholder={placeholder ? `max ${placeholder}` : "max"}
-        className="h-8 w-[72px] rounded border border-input bg-background/70 px-2 text-xs outline-none" />
+        className="h-8 w-[72px] rounded border border-input bg-background/70 px-2 text-sm outline-none" />
     </>
   )
 }
@@ -177,7 +177,6 @@ export function MariaDBLogsPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={handleTimeChange} />
-            <LangToggle />
             <button
               type="button"
               onClick={() => logsQuery.refetch()}
@@ -204,15 +203,15 @@ export function MariaDBLogsPage() {
 
       {/* Log type toggle — Event Logs vs Error Logs */}
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">{t("mdbLogs.logType")}:</span>
-        <div className="flex gap-1 rounded-lg border border-border bg-muted p-1">
+        <span className="text-xs font-medium text-muted-foreground">{t("mdbLogs.logType")}:</span>
+        <div className="flex gap-1 rounded-lg border border-border bg-muted p-0.5">
           {(["event", "error"] as const).map((type) => (
             <button
               key={type}
               type="button"
               onClick={() => { setLogType(type); setPage(1); setOpenEvent(null) }}
               className={cn(
-                "rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors",
+                "rounded-md px-3 py-1 text-xs font-medium capitalize transition-colors",
                 logType === type
                   ? type === "error"
                     ? "bg-red-600 text-white"
@@ -228,28 +227,28 @@ export function MariaDBLogsPage() {
 
       {/* ── ERROR LOGS VIEW ─────────────────────────────────── */}
       {logType === "error" && (
-        <div className="space-y-4 mt-4">
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+        <div className="space-y-3 mt-3">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
             <p className="font-semibold">{t("mdbLogs.errorLogsTitle")}</p>
             <p className="mt-0.5 text-xs">{t("mdbLogs.errorLogsDesc")}</p>
           </div>
 
           {errorLogsQuery.isFetching ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+            <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
               {t("shared.loading")}
             </div>
           ) : errorLogsQuery.isError ? (
-            <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-700">
               {t("mdbLogs.errorLogsFailed")}
             </div>
           ) : !errorLogsQuery.data?.lines?.length ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+            <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
               {t("mdbLogs.errorLogsEmpty")}
             </div>
           ) : (
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="border-b border-border p-4 flex items-center justify-between">
-                <h3 className="font-semibold">
+              <div className="border-b border-border p-3 flex items-center justify-between">
+                <h3 className="text-xs font-semibold">
                   {t("mdbLogs.errorLogsCount", String(errorLogsQuery.data.lines.length))}
                 </h3>
               </div>
@@ -258,7 +257,7 @@ export function MariaDBLogsPage() {
                   <div
                     key={idx}
                     className={cn(
-                      "border-b border-border/50 px-4 py-2 font-mono text-xs leading-relaxed",
+                      "border-b border-border/50 px-3 py-1.5 font-mono text-xs leading-relaxed",
                       line.includes("[ERROR]") || line.includes("[FATAL]")
                         ? "text-red-700 dark:text-red-400 bg-red-50/30 dark:bg-red-900/10"
                         : line.includes("[Warning]")
@@ -278,11 +277,11 @@ export function MariaDBLogsPage() {
       {/* ── EVENT LOGS VIEW ─────────────────────────────────── */}
       {logType === "event" && (<>
       <SectionCard title="">
-        <div className="space-y-3">
+        <div className="space-y-2">
           {/* Row 1: Text filters + message search */}
           <div className="flex flex-wrap items-center gap-2">
             <input
-              className="h-9 flex-1 rounded-md border border-input bg-background/70 px-3 text-xs outline-none min-w-[150px]"
+              className="h-8 flex-1 rounded-md border border-input bg-background/70 px-2 text-xs outline-none min-w-[150px]"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && commitSearch()}
@@ -292,14 +291,14 @@ export function MariaDBLogsPage() {
             <button
               type="button"
               onClick={() => { commitSearch() }}
-              className="h-9 rounded-md border border-border px-3 text-xs hover:bg-muted"
+              className="h-8 rounded-md border border-border px-2 text-xs hover:bg-muted"
             >
               {t("shared.search")}
             </button>
             <button
               type="button"
               onClick={clearAllFilters}
-              className="h-9 rounded-md border border-border px-3 text-xs hover:bg-muted"
+              className="h-8 rounded-md border border-border px-2 text-xs hover:bg-muted"
             >
               Clear
             </button>
@@ -352,21 +351,21 @@ export function MariaDBLogsPage() {
           <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-xs uppercase text-muted-foreground">
+                <thead className="text-sm uppercase text-muted-foreground">
                   <tr className="border-b border-border">
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">{t("mdbLogs.colTime")}</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">{t("mdbLogs.colUser")}</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">{t("mdbLogs.colHost")}</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">{t("mdbLogs.colThread")}</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">{t("mdbLogs.colDuration")}</th>
-                    <th className="py-2 pr-4 text-right whitespace-nowrap">Rows Sent</th>
-                    <th className="py-2 pr-4 text-right whitespace-nowrap">Rows Examined</th>
-                    <th className="py-2 pr-4 text-right whitespace-nowrap">Lock Time</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">Schema</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">QC Hit</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">Rows Affected</th>
-                    <th className="py-2 pr-4 text-left whitespace-nowrap">Bytes Sent</th>
-                    <th className="py-2 text-left">{t("mdbLogs.colMessage")}</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">{t("mdbLogs.colTime")}</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">{t("mdbLogs.colUser")}</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">{t("mdbLogs.colHost")}</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">{t("mdbLogs.colThread")}</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">{t("mdbLogs.colDuration")}</th>
+                    <th className="py-1.5 pr-3 text-right whitespace-nowrap text-xs">Rows Sent</th>
+                    <th className="py-1.5 pr-3 text-right whitespace-nowrap text-xs">Rows Examined</th>
+                    <th className="py-1.5 pr-3 text-right whitespace-nowrap text-xs">Lock Time</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">Schema</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">QC Hit</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">Rows Affected</th>
+                    <th className="py-1.5 pr-3 text-left whitespace-nowrap text-xs">Bytes Sent</th>
+                    <th className="py-1.5 text-left text-xs">{t("mdbLogs.colMessage")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -378,47 +377,47 @@ export function MariaDBLogsPage() {
                           className="cursor-pointer border-b border-border/60 hover:bg-muted/40"
                           onClick={() => setOpenEvent(isOpen ? null : index)}
                         >
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-muted-foreground">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs text-muted-foreground">
                             {event.timestamp}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.user || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.host || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.thread_id || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.duration_ms != null
                               ? `${formatNumber(event.duration_ms)} ms`
                               : "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-right tabular-nums">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs text-right tabular-nums">
                             {event.rows_sent != null ? formatNumber(event.rows_sent) : "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-right tabular-nums">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs text-right tabular-nums">
                             {event.rows_examined != null ? formatNumber(event.rows_examined) : "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-right tabular-nums">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs text-right tabular-nums">
                             {event.lock_time_s != null
                               ? `${formatNumber(event.lock_time_s * 1000, 1)} ms`
                               : "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.schema || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.qc_hit || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.rows_affected != null ? formatNumber(event.rows_affected) : "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.bytes_sent != null ? formatNumber(event.bytes_sent) : "-"}
                           </td>
-                          <td className="max-w-[240px] py-2">
+                          <td className="max-w-[240px] py-1.5">
                             <div className="truncate font-mono text-xs" title={event.message}>
                               {event.message}
                             </div>
@@ -427,7 +426,7 @@ export function MariaDBLogsPage() {
                         {isOpen ? (
                           <tr className="border-b border-border/60 bg-muted/20">
                             <td colSpan={13} className="py-3 pl-4 pr-4">
-                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2 text-xs">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2 text-sm">
                                 <div>
                                   <span className="text-muted-foreground">Timestamp</span>
                                   <div className="font-mono mt-0.5">{event.timestamp}</div>

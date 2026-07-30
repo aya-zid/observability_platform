@@ -424,3 +424,6 @@ export const translations: Translations = {
   "integrations.openDashboard": { en: "Open PostgreSQL Dashboard", fr: "Ouvrir le tableau de bord PostgreSQL" },
   "integrations.openLogs": { en: "Open PostgreSQL Logs", fr: "Ouvrir les logs PostgreSQL" },
 }
+
+// Calculate required export
+export default translations;

@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/domain"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/repository"
 )
+
+func formatFloat(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
 
 // evalContext holds a resolved (host, service, domain, pool, containerName) tuple for a single evaluation.
 type evalContext struct {
@@ -29,23 +34,26 @@ type breachKey struct {
 	serviceID     uint // 0 means nil
 	domain        string
 	pool          string
+	containerName string
 }
 
 var domainScopedTemplates = map[string]bool{
-	"nginx_5xx":             true,
-	"nginx_4xx":             true,
-	"nginx_p99":             true,
-	"nginx_auth_brute_force": true,
-	"nginx_traffic_drop":    true,
-	"apache_5xx":            true,
-	"apache_4xx":            true,
-	"apache_p99":            true,
+	"nginx_5xx":               true,
+	"nginx_4xx":               true,
+	"nginx_p99":               true,
+	"nginx_auth_brute_force":  true,
+	"nginx_traffic_drop":      true,
+	"apache_5xx":              true,
+	"apache_4xx":              true,
+	"apache_p99":              true,
+	"apache_auth_brute_force": true,
+	"apache_traffic_drop":     true,
 }
 
 var poolScopedTemplates = map[string]bool{
-	"phpfpm_processes":           true,
-	"phpfpm_queue_saturation":    true,
-	"phpfpm_slow_requests":       true,
+	"phpfpm_processes":            true,
+	"phpfpm_queue_saturation":     true,
+	"phpfpm_slow_requests":        true,
 	"phpfpm_max_children_reached": true,
 }
 
@@ -141,15 +149,17 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 		return
 	}
 
-	// Group candidates by (host_machine_id, service_id, domain, pool) so we fetch the
-	// metric once per host and pick a single winner across all rules.
+	// Group candidates by metric identity so we fetch each metric once and pick a
+	// single winner across overlapping rules.
 	// Domain is critical for nginx/apache rules where each virtual host has its own metric.
 	// Pool is critical for PHP-FPM rules where each pool has its own metric.
+	// Container name is critical for all_containers rules where each container has its own status.
 	type hostKey struct {
-		machineID string
-		serviceID uint
-		domain    string
-		pool      string
+		machineID     string
+		serviceID     uint
+		domain        string
+		pool          string
+		containerName string
 	}
 	hostGroups := make(map[hostKey][]evalCandidate)
 	for _, c := range candidates {
@@ -157,7 +167,7 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 		if c.ec.serviceID != nil {
 			svcID = *c.ec.serviceID
 		}
-		key := hostKey{machineID: c.ec.hostMachineID, serviceID: svcID, domain: c.ec.domain, pool: c.ec.pool}
+		key := hostKey{machineID: c.ec.hostMachineID, serviceID: svcID, domain: c.ec.domain, pool: c.ec.pool, containerName: c.ec.containerName}
 		hostGroups[key] = append(hostGroups[key], c)
 	}
 
@@ -187,9 +197,12 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 		// breached threshold value.
 		var winner *evalCandidate
 		for _, c := range group {
-			if s.isBreached(*currentValue, c.threshold.Threshold, c.rule.ComparisonOp) {
-				if winner == nil || c.threshold.Threshold > winner.threshold.Threshold {
-					winner = &c
+			candidate := c
+			if s.isBreached(*currentValue, candidate.threshold.Threshold, candidate.rule.ComparisonOp) {
+				if winner == nil ||
+					candidate.threshold.Threshold > winner.threshold.Threshold ||
+					(candidate.threshold.Threshold == winner.threshold.Threshold && candidate.rule.ID < winner.rule.ID) {
+					winner = &candidate
 				}
 			}
 		}
@@ -235,6 +248,9 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 				if !matchesPool {
 					continue
 				}
+				if fe.ContainerName != first.ec.containerName {
+					continue
+				}
 
 				if isWinningRule && fe.ThresholdID != nil && *fe.ThresholdID == winner.threshold.ID {
 					// This IS the winning event — keep it alive.
@@ -245,8 +261,13 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 				if err := s.alertRuleRepo.ResolveEventCtx(ctx, fe.ID); err != nil {
 					log.Printf("[alert-engine] resolve cross-rule event %d: %v", fe.ID, err)
 				} else {
-					log.Printf("[alert-engine] CROSS-RULE RESOLVED event %d for rule %d (superseded by rule %d)",
-						fe.ID, c.rule.ID, winner.rule.ID)
+					if winner != nil {
+						log.Printf("[alert-engine] CROSS-RULE RESOLVED event %d for rule %d (superseded by rule %d)",
+							fe.ID, c.rule.ID, winner.rule.ID)
+					} else {
+						log.Printf("[alert-engine] CROSS-RULE RESOLVED event %d for rule %d (recovered)",
+							fe.ID, c.rule.ID)
+					}
 				}
 			}
 		}
@@ -260,6 +281,7 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 				serviceID:     svcIDVal,
 				domain:        first.ec.domain,
 				pool:          first.ec.pool,
+				containerName: first.ec.containerName,
 			}
 			activeBreaches[key] = true
 
@@ -280,6 +302,9 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 						if fe.Pool != first.ec.pool {
 							continue
 						}
+						if fe.ContainerName != first.ec.containerName {
+							continue
+						}
 						if fe.ThresholdID != nil && *fe.ThresholdID == winner.threshold.ID {
 							alreadyFiring = true
 							break
@@ -289,7 +314,7 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 			}
 
 			if !alreadyFiring {
-				eventMetricString := metricString + fmt.Sprintf(" threshold=%.2f%s", winner.threshold.Threshold, winner.rule.Unit)
+				eventMetricString := metricString + fmt.Sprintf(" threshold=%s%s", formatFloat(winner.threshold.Threshold), winner.rule.Unit)
 				event := &domain.AlertEvent{
 					RuleID:        winner.rule.ID,
 					ThresholdID:   &winner.threshold.ID,
@@ -298,6 +323,7 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 					ServiceID:     first.ec.serviceID,
 					Domain:        first.ec.domain,
 					Pool:          first.ec.pool,
+					ContainerName: first.ec.containerName,
 					Status:        "firing",
 					TriggeredAt:   time.Now(),
 					ActualValue:   currentValue,
@@ -306,9 +332,9 @@ func (s *AlertEngineService) evaluateRuleGroup(ctx context.Context, rules []doma
 				if err := s.alertRuleRepo.CreateAlertEventCtx(ctx, event); err != nil {
 					log.Printf("[alert-engine] failed to create event for rule %d: %v", winner.rule.ID, err)
 				} else {
-					log.Printf("[alert-engine] FIRED rule=%q template=%q threshold=%.2f value=%.2f host=%s service=%s domain=%s pool=%s",
-						winner.rule.TemplateName, winner.rule.TemplateID, winner.threshold.Threshold,
-						*currentValue, first.ec.hostname, first.ec.serviceName, first.ec.domain, first.ec.pool)
+					log.Printf("[alert-engine] FIRED rule=%q template=%q threshold=%s value=%s host=%s service=%s domain=%s pool=%s",
+						winner.rule.TemplateName, winner.rule.TemplateID, formatFloat(winner.threshold.Threshold),
+						formatFloat(*currentValue), first.ec.hostname, first.ec.serviceName, first.ec.domain, first.ec.pool)
 				}
 			}
 		}
@@ -338,7 +364,7 @@ func (s *AlertEngineService) expandEvalContexts(ctx context.Context, rule *domai
 	if domainScopedTemplates[rule.TemplateID] && rule.Domain == "" {
 		// "All domains" — enumerate enabled vhosts from DB.
 		var domains []string
-		if svc.ServiceName == "nginx" {
+		if rule.ServiceType == "nginx" {
 			rows, err := s.discoveryRepo.ListVirtualHostsByServiceCtx(ctx, rule.TenantID, svc.ID)
 			if err == nil {
 				seen := map[string]bool{}
@@ -351,7 +377,7 @@ func (s *AlertEngineService) expandEvalContexts(ctx context.Context, rule *domai
 					domains = append(domains, d)
 				}
 			}
-		} else if svc.ServiceName == "apache" {
+		} else if rule.ServiceType == "apache" {
 			rows, err := s.discoveryRepo.ListApacheVirtualHostsByServiceCtx(ctx, rule.TenantID, svc.ID)
 			if err == nil {
 				seen := map[string]bool{}
@@ -405,12 +431,13 @@ func (s *AlertEngineService) expandEvalContexts(ctx context.Context, rule *domai
 // resolveContexts expands the rule's scopes into concrete evalContexts.
 func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.AlertRule) []evalContext {
 	isHostTemplate := rule.ServiceType == "host"
+	isHostServiceTemplate := rule.ServiceType == "host_service"
 	var contexts []evalContext
 
 	for _, scope := range rule.Scopes {
 		switch scope.ScopeType {
 		case "all_hosts":
-			if !isHostTemplate {
+			if !isHostTemplate && !isHostServiceTemplate {
 				continue
 			}
 			hosts, err := s.alertRuleRepo.ListHostsByTenantCtx(ctx, rule.TenantID)
@@ -419,14 +446,31 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 				continue
 			}
 			for _, h := range hosts {
-				contexts = append(contexts, evalContext{
-					hostMachineID: h.MachineID,
-					hostname:      h.Hostname,
-				})
+				if isHostServiceTemplate {
+					services, err := s.discoveryRepo.ListServicesByTenantMachineCtx(ctx, rule.TenantID, h.MachineID)
+					if err != nil {
+						log.Printf("[alert-engine] list services for host %s: %v", h.MachineID, err)
+						continue
+					}
+					for _, svc := range services {
+						svcID := svc.ID
+						contexts = append(contexts, evalContext{
+							hostMachineID: h.MachineID,
+							hostname:      h.Hostname,
+							serviceID:     &svcID,
+							serviceName:   svc.ServiceName,
+						})
+					}
+				} else {
+					contexts = append(contexts, evalContext{
+						hostMachineID: h.MachineID,
+						hostname:      h.Hostname,
+					})
+				}
 			}
 
 		case "host":
-			if !isHostTemplate {
+			if !isHostTemplate && !isHostServiceTemplate {
 				continue
 			}
 			if scope.ScopeID == nil {
@@ -440,13 +484,30 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 			if host == nil {
 				continue
 			}
-			contexts = append(contexts, evalContext{
-				hostMachineID: host.MachineID,
-				hostname:      host.Hostname,
-			})
+			if isHostServiceTemplate {
+				services, err := s.discoveryRepo.ListServicesByTenantMachineCtx(ctx, rule.TenantID, host.MachineID)
+				if err != nil {
+					log.Printf("[alert-engine] list services for host %s: %v", host.MachineID, err)
+					continue
+				}
+				for _, svc := range services {
+					svcID := svc.ID
+					contexts = append(contexts, evalContext{
+						hostMachineID: host.MachineID,
+						hostname:      host.Hostname,
+						serviceID:     &svcID,
+						serviceName:   svc.ServiceName,
+					})
+				}
+			} else {
+				contexts = append(contexts, evalContext{
+					hostMachineID: host.MachineID,
+					hostname:      host.Hostname,
+				})
+			}
 
 		case "all_services_of_type":
-			if isHostTemplate {
+			if isHostTemplate || isHostServiceTemplate {
 				continue
 			}
 			services, err := s.alertRuleRepo.ListServicesByTypeCtx(ctx, rule.TenantID, rule.ServiceType)
@@ -459,7 +520,7 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 			}
 
 		case "service":
-			if isHostTemplate {
+			if isHostTemplate || isHostServiceTemplate {
 				continue
 			}
 			if scope.ScopeID == nil {
@@ -476,7 +537,7 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 			contexts = append(contexts, s.expandEvalContexts(ctx, rule, svc)...)
 
 		case "all_containers":
-			if isHostTemplate {
+			if isHostTemplate || isHostServiceTemplate {
 				continue
 			}
 			containers, err := s.discoveryRepo.ListContainerServicesByTenantCtx(ctx, rule.TenantID)
@@ -498,7 +559,7 @@ func (s *AlertEngineService) resolveContexts(ctx context.Context, rule *domain.A
 			}
 
 		case "container":
-			if isHostTemplate {
+			if isHostTemplate || isHostServiceTemplate {
 				continue
 			}
 			if scope.ScopeID == nil {
@@ -547,6 +608,8 @@ func (s *AlertEngineService) fetchMetric(ctx context.Context, rule *domain.Alert
 			return nil, ""
 		}
 		value, err = s.queryBuilder.ExecuteLogQL(ctx, tenant.UUID, bq.Query)
+	case QueryTypeStatus:
+		value, err = s.fetchMetricStatus(ctx, rule, ec)
 	}
 
 	if err != nil {
@@ -571,9 +634,47 @@ func (s *AlertEngineService) fetchMetric(ctx context.Context, rule *domain.Alert
 	if ec.containerName != "" {
 		metricString += fmt.Sprintf(" container=%s", ec.containerName)
 	}
-	metricString += fmt.Sprintf(" value=%.2f%s", *value, rule.Unit)
+	metricString += fmt.Sprintf(" value=%s%s", formatFloat(*value), rule.Unit)
 
 	return value, metricString
+}
+
+// fetchMetricStatus queries the database to compute elapsed seconds since last_seen_at
+// for a container or host service. Returns nil (no value) if the record is not found
+// (meaning the entity has never been seen — treated as an extreme elapsed value).
+func (s *AlertEngineService) fetchMetricStatus(ctx context.Context, rule *domain.AlertRule, ec *evalContext) (*float64, error) {
+	now := time.Now()
+
+	if ec.containerName != "" {
+		// Container stopped check: look up by host + container name
+		container, err := s.discoveryRepo.FindContainerByNameMachineCtx(ctx, rule.TenantID, ec.hostMachineID, ec.containerName)
+		if err != nil {
+			return nil, fmt.Errorf("find container %s: %w", ec.containerName, err)
+		}
+		if container == nil || container.LastSeenAt.IsZero() {
+			// Never seen — treat as very old
+			val := 999999.0
+			return &val, nil
+		}
+		elapsed := now.Sub(container.LastSeenAt).Seconds()
+		return &elapsed, nil
+	}
+
+	if ec.serviceID != nil {
+		// Host service stopped check: look up by service ID
+		svc, err := s.alertRuleRepo.FindServiceByIDCtx(ctx, *ec.serviceID, rule.TenantID)
+		if err != nil {
+			return nil, fmt.Errorf("find service %d: %w", *ec.serviceID, err)
+		}
+		if svc == nil || svc.LastSeenAt.IsZero() {
+			val := 999999.0
+			return &val, nil
+		}
+		elapsed := now.Sub(svc.LastSeenAt).Seconds()
+		return &elapsed, nil
+	}
+
+	return nil, fmt.Errorf("fetchMetricStatus: neither containerName nor serviceID set")
 }
 
 func (s *AlertEngineService) isBreached(currentValue, threshold float64, comparisonOp string) bool {
@@ -622,6 +723,7 @@ func (s *AlertEngineService) resolveRecovered(ctx context.Context, activeBreache
 				serviceID:     svcID,
 				domain:        ev.Domain,
 				pool:          ev.Pool,
+				containerName: ev.ContainerName,
 			}
 			if !activeBreaches[key] {
 				if err := s.alertRuleRepo.ResolveEventCtx(ctx, ev.ID); err != nil {

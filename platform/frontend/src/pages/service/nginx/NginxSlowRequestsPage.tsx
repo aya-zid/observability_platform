@@ -55,21 +55,21 @@ function SlowRequestRow({
       <button
         type="button"
         onClick={onToggle}
-        className="grid w-full grid-cols-1 gap-2 px-3 py-3 text-left text-xs hover:bg-muted/40 md:grid-cols-[180px_132px_76px_78px_minmax(0,1fr)_96px] md:items-center md:gap-3"
+        className="grid w-full grid-cols-1 gap-1.5 px-2.5 py-1.5 text-left text-xs hover:bg-muted/40 md:grid-cols-[160px_120px_60px_64px_minmax(0,1fr)_72px] md:items-center md:gap-2"
       >
-        <span className="font-mono text-muted-foreground" title={req.timestamp || undefined}>
+        <span className="font-mono text-muted-foreground truncate" title={req.timestamp || undefined}>
           {req.timestamp || '-'}
         </span>
         <span className="truncate font-mono text-muted-foreground" title={req.ip || undefined}>
           {req.ip || '-'}
         </span>
         <span
-          className="w-fit rounded px-1.5 py-0.5 font-semibold text-white"
+          className="w-fit rounded px-1 py-0.5 font-semibold text-white"
           style={{ background: methodBadgeColor(req.method) }}
         >
           {req.method || '-'}
         </span>
-        <span className={cn('w-fit rounded px-1.5 py-0.5 font-semibold', getStatusBadgeClass(req.status))}>
+        <span className={cn('w-fit rounded px-1 py-0.5 font-semibold', getStatusBadgeClass(req.status))}>
           {req.status || '-'}
         </span>
         <span className="min-w-0 truncate font-mono" title={req.path}>
@@ -85,14 +85,14 @@ function SlowRequestRow({
         </span>
       </button>
       {expanded ? (
-        <div className="border-t border-border bg-muted/30 px-3 py-3 text-xs">
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <div className="border-t border-border bg-muted/30 px-2.5 py-2 text-xs">
+          <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2">
             <div>
-              <span className="text-muted-foreground">Client IP:</span>{' '}
+              <span className="text-muted-foreground">IP:</span>{' '}
               <span className="font-mono">{req.ip || '-'}</span>
             </div>
             <div>
-              <span className="text-muted-foreground">Response Time:</span>{' '}
+              <span className="text-muted-foreground">RT:</span>{' '}
               <span className="font-mono">{req.rt.toFixed(3)}s</span>
             </div>
             <div className="md:col-span-2">
@@ -100,7 +100,7 @@ function SlowRequestRow({
               <span className="font-mono break-all">{req.path}</span>
             </div>
             <div className="md:col-span-2">
-              <span className="text-muted-foreground">Normalized Path:</span>{' '}
+              <span className="text-muted-foreground">Normalized:</span>{' '}
               <span className="font-mono break-all">{req.normalized_path || '-'}</span>
             </div>
             <div className="md:col-span-2">
@@ -176,78 +176,67 @@ export function NginxSlowRequestsPage() {
   if (!id) return <div className="p-6 text-sm text-red-600">Missing service id.</div>
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">Slow Nginx Requests</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Service: <span className="font-mono font-semibold">{serviceName}</span>
-            {domain ? (
-              <>
-                {' '}• Domain: <span className="font-mono font-semibold">{domain}</span>
-              </>
-            ) : null}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {formatWindowLabel(start, end)} • RT &gt; {slowQuery.data?.min_rt ?? minRT}s
-          </p>
+    <div className="space-y-3 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold">Slow Nginx Requests</h1>
+          <span className="text-xs text-muted-foreground">· {serviceName}</span>
+          {domain ? <span className="text-xs text-muted-foreground">· {domain}</span> : null}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => slowQuery.refetch()}
-            className="rounded-md border border-border bg-background p-2 text-foreground hover:bg-muted"
+            className="rounded-md border border-border p-1.5 text-foreground hover:bg-muted"
             title="Refresh"
           >
-            <RefreshCw className={`h-4 w-4 ${slowQuery.isRefetching ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3 w-3 ${slowQuery.isRefetching ? 'animate-spin' : ''}`} />
           </button>
           <Link
             to={dashboardHref}
-            className="rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted"
+            className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
           >
-            Back to Dashboard
+            Dashboard
           </Link>
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            Showing page {formatNumber(page, 0)} of {formatNumber(totalPages, 0)} • {formatNumber(total, 0)} total slow requests
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={page <= 1 || slowQuery.isFetching}
-              onClick={() => setPage(page - 1)}
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              disabled={page >= totalPages || slowQuery.isFetching}
-              onClick={() => setPage(page + 1)}
-              className="rounded-md border border-border px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Next
-            </button>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-1.5">
+        <span className="text-xs text-muted-foreground">
+          Page {formatNumber(page, 0)} of {formatNumber(totalPages, 0)} · {formatNumber(total, 0)} total · {formatWindowLabel(start, end)} · RT &gt; {slowQuery.data?.min_rt ?? minRT}s
+        </span>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={page <= 1 || slowQuery.isFetching}
+            onClick={() => setPage(page - 1)}
+            className="rounded-md border border-border px-2 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            disabled={page >= totalPages || slowQuery.isFetching}
+            onClick={() => setPage(page + 1)}
+            className="rounded-md border border-border px-2 py-0.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
         </div>
       </div>
 
       {slowQuery.isLoading ? (
-        <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">Loading slow requests...</div>
+        <div className="rounded-lg border border-border bg-card p-6 text-center text-xs text-muted-foreground">Loading slow requests...</div>
       ) : slowQuery.isError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
           Failed to load slow requests.
         </div>
       ) : rows.length === 0 ? (
-        <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-border bg-card p-6 text-center text-xs text-muted-foreground">
           No slow requests found for this range.
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {rows.map((req, index) => (
             <SlowRequestRow
               key={`${req.timestamp}-${req.ip}-${req.path}-${index}`}

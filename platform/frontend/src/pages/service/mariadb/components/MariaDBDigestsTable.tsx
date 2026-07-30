@@ -21,7 +21,7 @@ export function MariaDBDigestsTable({
     <SectionCard title={title}>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="text-xs uppercase text-muted-foreground">
+          <thead className="text-sm uppercase text-muted-foreground">
             <tr className="border-b border-border">
               <th className="py-2 pr-4 text-left">Query</th>
               <th className="py-2 pr-4 text-left">DB</th>
@@ -35,8 +35,8 @@ export function MariaDBDigestsTable({
           <tbody>
             {digests.length ? digests.map((d, i) => (
               <tr key={d.digest || i} className="border-b border-border/60 hover:bg-muted/30">
-                <td className="max-w-[360px] truncate py-2 pr-4 font-mono text-xs" title={d.digest_text || d.digest}>{d.digest_text || `${d.digest.slice(0, 20)}…`}</td>
-                <td className="py-2 pr-4 font-mono text-xs">{d.database}</td>
+                <td className="max-w-[360px] truncate py-2 pr-4 font-mono text-sm" title={d.digest_text || d.digest}>{d.digest_text || `${d.digest.slice(0, 20)}…`}</td>
+                <td className="py-2 pr-4 font-mono text-sm">{d.database}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{formatNumber(d.exec_count, 0)}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{valueFormatter(valueFn(d))}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{formatDuration(d.avg_time_seconds)}</td>

@@ -16,7 +16,7 @@ import {
 } from "@/lib/queryHelpers"
 import { cn } from "@/lib/utils"
 import { RefreshCw } from "lucide-react"
-import { useTranslation, LangToggle } from "@/i18n/LanguageContext"
+import { useTranslation } from "@/i18n/LanguageContext"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ function Pagination({
   const to = Math.min(page * pageSize, total)
 
   return (
-    <div className="flex items-center justify-between border-t border-border pt-4">
+    <div className="flex items-center justify-between border-t border-border pt-3">
       <span className="text-xs text-muted-foreground">
         {total === 0 ? t("pgLogs.paginationNoResults") : t("pgLogs.paginationOf", formatNumber(from, 0), formatNumber(to, 0), formatNumber(total, 0))}
       </span>
@@ -102,7 +102,7 @@ function Pagination({
           type="button"
           onClick={() => onChange(1)}
           disabled={page <= 1}
-          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted"
+          className="rounded border border-border px-1.5 py-0.5 text-xs disabled:opacity-40 hover:bg-muted"
         >
           «
         </button>
@@ -110,18 +110,18 @@ function Pagination({
           type="button"
           onClick={() => onChange(page - 1)}
           disabled={page <= 1}
-          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted"
+          className="rounded border border-border px-1.5 py-0.5 text-xs disabled:opacity-40 hover:bg-muted"
         >
           ‹
         </button>
-        <span className="px-3 text-xs">
+        <span className="px-2 text-xs">
           {t("pgLogs.pageOf", String(page), String(totalPages))}
         </span>
         <button
           type="button"
           onClick={() => onChange(page + 1)}
           disabled={!hasMore}
-          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted"
+          className="rounded border border-border px-1.5 py-0.5 text-xs disabled:opacity-40 hover:bg-muted"
         >
           ›
         </button>
@@ -129,7 +129,7 @@ function Pagination({
           type="button"
           onClick={() => onChange(totalPages)}
           disabled={!hasMore}
-          className="rounded border border-border px-2 py-1 text-xs disabled:opacity-40 hover:bg-muted"
+          className="rounded border border-border px-1.5 py-0.5 text-xs disabled:opacity-40 hover:bg-muted"
         >
           »
         </button>
@@ -209,7 +209,6 @@ export function PostgresLogsPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <TimeRangeSelector selected={timeSelection} onChange={handleTimeChange} />
-            <LangToggle />
             <button
               type="button"
               onClick={() => logsQuery.refetch()}
@@ -236,9 +235,9 @@ export function PostgresLogsPage() {
 
       {/* ── Filters ── */}
       <SectionCard title={t("pgLogs.filters")}>
-        <div className="grid gap-3 lg:grid-cols-[220px_1fr_auto_auto]">
+        <div className="grid gap-2 lg:grid-cols-[180px_1fr_auto_auto]">
           <select
-            className="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none"
+            className="h-8 rounded-md border border-input bg-background/70 px-2 text-xs outline-none"
             value={category}
             onChange={(e) => handleCategoryChange(e.target.value as (typeof CATEGORIES)[number])}
           >
@@ -249,7 +248,7 @@ export function PostgresLogsPage() {
             ))}
           </select>
           <input
-            className="h-10 rounded-md border border-input bg-background/70 px-3 text-sm outline-none"
+            className="h-8 rounded-md border border-input bg-background/70 px-2 text-xs outline-none"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && commitSearch()}
@@ -259,7 +258,7 @@ export function PostgresLogsPage() {
           <button
             type="button"
             onClick={commitSearch}
-            className="h-10 rounded-md border border-border px-4 text-sm hover:bg-muted"
+            className="h-8 rounded-md border border-border px-2 text-xs hover:bg-muted"
           >
             {t("shared.search")}
           </button>
@@ -285,15 +284,15 @@ export function PostgresLogsPage() {
           <>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead className="text-xs uppercase text-muted-foreground">
+                <thead className="text-sm uppercase text-muted-foreground">
                   <tr className="border-b border-border">
-                    <th className="py-2 pr-4 text-left">{t("pgLogs.colTime")}</th>
-                    <th className="py-2 pr-4 text-left">{t("pgLogs.colKind")}</th>
-                    <th className="py-2 pr-4 text-left">{t("pgLogs.colUser")}</th>
-                    <th className="py-2 pr-4 text-left">{t("pgLogs.colDatabase")}</th>
-                    <th className="py-2 pr-4 text-left">{t("pgLogs.colClient")}</th>
-                    <th className="py-2 pr-4 text-left">{t("pgLogs.colDuration")}</th>
-                    <th className="py-2 text-left">{t("pgLogs.colMessage")}</th>
+                    <th className="py-1.5 pr-3 text-left">{t("pgLogs.colTime")}</th>
+                    <th className="py-1.5 pr-3 text-left">{t("pgLogs.colKind")}</th>
+                    <th className="py-1.5 pr-3 text-left">{t("pgLogs.colUser")}</th>
+                    <th className="py-1.5 pr-3 text-left">{t("pgLogs.colDatabase")}</th>
+                    <th className="py-1.5 pr-3 text-left">{t("pgLogs.colClient")}</th>
+                    <th className="py-1.5 pr-3 text-left">{t("pgLogs.colDuration")}</th>
+                    <th className="py-1.5 text-left">{t("pgLogs.colMessage")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -305,29 +304,29 @@ export function PostgresLogsPage() {
                           className="cursor-pointer border-b border-border/60 hover:bg-muted/40"
                           onClick={() => setOpenEvent(isOpen ? null : index)}
                         >
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs text-muted-foreground">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs text-muted-foreground">
                             {event.timestamp}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4">
-                            <span className={cn("rounded-full px-2 py-1 text-xs", categoryTone(event))}>
+                          <td className="whitespace-nowrap py-1.5 pr-3">
+                            <span className={cn("rounded-full px-1.5 py-0.5 text-xs", categoryTone(event))}>
                               {event.category}
                             </span>
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.user || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.database || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4 font-mono text-xs">
+                          <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-xs">
                             {event.client || "-"}
                           </td>
-                          <td className="whitespace-nowrap py-2 pr-4">
+                          <td className="whitespace-nowrap py-1.5 pr-3 text-xs">
                             {event.duration_ms != null
                               ? `${formatNumber(event.duration_ms)} ms`
                               : "-"}
                           </td>
-                          <td className="max-w-[760px] py-2">
+                          <td className="max-w-[760px] py-1.5">
                             <div className="truncate font-mono text-xs" title={event.message}>
                               {event.message}
                             </div>
@@ -336,7 +335,7 @@ export function PostgresLogsPage() {
                         {isOpen ? (
                           <tr className="border-b border-border/60 bg-muted/20">
                             <td colSpan={7} className="py-3 pl-4">
-                              <div className="space-y-2 text-xs">
+                              <div className="space-y-2 text-sm">
                                 <div>
                                   <span className="text-muted-foreground">{t("pgLogs.labelSeverity")}</span>{" "}
                                   <span className="font-mono">{event.severity}</span>

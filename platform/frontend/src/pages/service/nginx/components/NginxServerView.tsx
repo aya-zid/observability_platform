@@ -60,13 +60,11 @@ export function NginxServerView({
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <StatCard
           title="Active Connections"
-          icon="🔌"
           value={activeConnectionsLatest !== null ? formatNumber(activeConnectionsLatest) : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Total Connections"
-          icon="🔗"
           value={totalConnectionsLatest !== null ? formatNumber(totalConnectionsLatest) : '—'}
           loading={isLoading}
         />
@@ -75,19 +73,16 @@ export function NginxServerView({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           title="Reading"
-          icon="📥"
           value={readingConnectionsLatest !== null ? formatNumber(readingConnectionsLatest) : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Writing"
-          icon="📤"
           value={writingConnectionsLatest !== null ? formatNumber(writingConnectionsLatest) : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Waiting"
-          icon="⏸️"
           value={waitingConnectionsLatest !== null ? formatNumber(waitingConnectionsLatest) : '—'}
           loading={isLoading}
         />
@@ -96,19 +91,16 @@ export function NginxServerView({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
           title="Accepted"
-          icon="✅"
           value={acceptedLatest !== null ? formatNumber(acceptedLatest) : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Handled"
-          icon="🛠️"
           value={handledLatest !== null ? formatNumber(handledLatest) : '—'}
           loading={isLoading}
         />
         <StatCard
           title="Total Requests"
-          icon="📊"
           value={requestsLatest !== null ? formatNumber(requestsLatest) : '—'}
           loading={isLoading}
         />

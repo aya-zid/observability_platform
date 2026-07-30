@@ -103,8 +103,8 @@ var AlertTemplates = []AlertTemplate{
 	},
 	{
 		ID: "nginx_auth_brute_force", ServiceType: "nginx", Name: "Brute-force attack detected", DefaultThreshold: 10, Unit: "attempts/5m",
-		Description: "Rate of 401/403 responses on authentication-related paths (admin, login, wp-login, etc.) — fires when the count exceeds the threshold.",
-		Explanation: "A high rate of unauthorized/forbidden responses on authentication endpoints indicates an active brute-force or credential-stuffing attack. Attackers probe common paths like /admin, /wp-login, /api/auth with stolen or guessed credentials. Each 401/403 represents a failed attempt. Immediate actions: rate-limit auth endpoints, enable Web Application Firewall (WAF) rules, check for leaked credentials, and review access logs for the attacking IPs.",
+		Description: "Count of 401/403 HTTP responses in the evaluation window — fires when unauthorized/forbidden responses exceed the threshold.",
+		Explanation: "A high rate of 401/403 responses indicates an active brute-force or credential-stuffing attack. Each 401/403 represents a failed authentication or access attempt. Attackers probe endpoints with stolen or guessed credentials, regardless of the specific path. Immediate actions: rate-limit endpoints returning 401/403, enable Web Application Firewall (WAF) rules, check for leaked credentials, and review access logs for the attacking IPs.",
 		DefaultSeverity: "critical", ComparisonOp: ">", DefaultForDuration: "5m",
 	},
 	{
@@ -122,7 +122,7 @@ var AlertTemplates = []AlertTemplate{
 	{
 		ID: "nginx_4xx", ServiceType: "nginx", Name: "High 4xx error rate", DefaultThreshold: 15, Unit: "%",
 		Description: "Percentage of HTTP responses that are 4xx client errors — fires when the rate exceeds threshold.",
-		Explanation: "A high 4xx rate means clients are sending bad requests. Common causes: misconfigured application (wrong base URLs, missing assets), bot/scanner traffic probing for vulnerabilities, expired or invalid API tokens, or recently changed API contracts. A sudden spike in 401/403 responses paired with known attack paths suggests an active brute-force attack.",
+		Explanation: "A high 4xx rate means clients are sending bad requests. Common causes: misconfigured application (wrong base URLs, missing assets), bot/scanner traffic probing for vulnerabilities, expired or invalid API tokens, or recently changed API contracts.",
 		DefaultSeverity: "warning", ComparisonOp: ">", DefaultForDuration: "5m",
 	},
 
@@ -130,8 +130,20 @@ var AlertTemplates = []AlertTemplate{
 	{
 		ID: "apache_4xx", ServiceType: "apache", Name: "High 4xx error rate", DefaultThreshold: 15, Unit: "%",
 		Description: "Percentage of HTTP responses that are 4xx client errors — fires when the rate exceeds threshold.",
-		Explanation: "A high 4xx rate means clients are sending bad requests. Common causes: misconfigured application (wrong base URLs, missing assets), bot/scanner traffic probing for vulnerabilities, expired or invalid API tokens, or recently changed API contracts. A sudden spike in 401/403 responses paired with known attack paths suggests an active brute-force attack.",
+		Explanation: "A high 4xx rate means clients are sending bad requests. Common causes: misconfigured application (wrong base URLs, missing assets), bot/scanner traffic probing for vulnerabilities, expired or invalid API tokens, or recently changed API contracts.",
 		DefaultSeverity: "warning", ComparisonOp: ">", DefaultForDuration: "5m",
+	},
+	{
+		ID: "apache_auth_brute_force", ServiceType: "apache", Name: "Brute-force attack detected", DefaultThreshold: 10, Unit: "attempts/5m",
+		Description: "Count of 401/403 HTTP responses in the evaluation window — fires when unauthorized/forbidden responses exceed the threshold.",
+		Explanation: "A high rate of 401/403 responses indicates an active brute-force or credential-stuffing attack. Each 401/403 represents a failed authentication or access attempt. Attackers probe endpoints with stolen or guessed credentials, regardless of the specific path. Immediate actions: rate-limit endpoints returning 401/403, enable Web Application Firewall (WAF) rules, check for leaked credentials, and review access logs for the attacking IPs.",
+		DefaultSeverity: "critical", ComparisonOp: ">", DefaultForDuration: "5m",
+	},
+	{
+		ID: "apache_traffic_drop", ServiceType: "apache", Name: "Traffic drop detected", DefaultThreshold: -50, Unit: "%",
+		Description: "Percentage change in request rate between the current window (default 5m) and the trailing 1-hour window — fires when traffic drops more than the threshold (e.g. -50% means current rate is half the 1-hour average).",
+		Explanation: "A sudden traffic drop can indicate infrastructure problems: the upstream service is unreachable (502/503), DNS resolution failures, a CDN or load balancer misconfiguration, or a routing change that stopped directing traffic to this host. The evaluation compares the current request rate (over the evaluation window, e.g. 5m) against the rate over the last hour. A value of -50% means current traffic is half of what it was over the last hour. Investigate upstream connectivity, DNS health, and load balancer configuration.",
+		DefaultSeverity: "warning", ComparisonOp: "<", DefaultForDuration: "5m",
 	},
 	{
 		ID: "apache_workers_saturation", ServiceType: "apache", Name: "Worker saturation", DefaultThreshold: 85, Unit: "%",
@@ -330,6 +342,20 @@ var AlertTemplates = []AlertTemplate{
 		Description: "Count of AUTH failures or security attack messages from Redis logs — fires when any event is detected.",
 		Explanation: "AUTH failures mean clients are attempting to connect with wrong passwords. A single event may be a misconfigured client, but repeated failures indicate an active brute-force attack on Redis credentials. Redis is a frequent target for ransomware attacks when exposed without authentication. Check requirepass configuration and ensure Redis is not directly exposed to the internet.",
 		DefaultSeverity: "critical", ComparisonOp: ">=", DefaultForDuration: "5m",
+	},
+
+	// ── Container stopped templates (status-based) ─────────────────
+	{
+		ID: "container_stopped", ServiceType: "container", Name: "Container stopped", DefaultThreshold: 420, Unit: "s",
+		Description: "Fires if a container stops sending heartbeats via the agent.",
+		Explanation: "The agent reports running containers every 5 minutes via heartbeat. If no heartbeat is received within the threshold window, the container is likely stopped, crashed, or the host is unreachable. Use this to detect down containers.",
+		DefaultSeverity: "warning", ComparisonOp: ">", DefaultForDuration: "5m",
+	},
+	{
+		ID: "host_service_stopped", ServiceType: "host_service", Name: "Host service stopped", DefaultThreshold: 420, Unit: "s",
+		Description: "Fires if a systemd service (nginx, apache, postgres, etc.) stops sending heartbeats via the agent.",
+		Explanation: "The agent reports running systemd services every 5 minutes via heartbeat. If no heartbeat is received within the threshold window, the service is likely stopped, crashed, or the host is unreachable. Use this to detect down services.",
+		DefaultSeverity: "warning", ComparisonOp: ">", DefaultForDuration: "5m",
 	},
 
 	// ── Container templates ────────────────────────────────────────

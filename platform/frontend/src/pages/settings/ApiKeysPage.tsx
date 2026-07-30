@@ -89,7 +89,7 @@ export default function ApiKeysPage() {
           {q.data?.api_key && (
             <button
               onClick={() => navigator.clipboard.writeText(q.data!.api_key)}
-              className="ml-2 text-xs text-primary hover:underline shrink-0"
+              className="ml-2 text-sm text-primary hover:underline shrink-0"
             >
               Copy
             </button>
@@ -97,13 +97,13 @@ export default function ApiKeysPage() {
         </div>
 
         {q.data?.api_key && (
-          <div className="mt-2 text-xs text-muted-foreground">
+          <div className="mt-2 text-sm text-muted-foreground">
             Last used: {meQuery.data?.company_name ? "tracked" : "N/A"}
           </div>
         )}
 
         {rotateError ? (
-          <div className="mt-2 text-xs text-destructive">{rotateError}</div>
+          <div className="mt-2 text-sm text-destructive">{rotateError}</div>
         ) : null}
       </SectionCard>
 
@@ -130,7 +130,7 @@ export default function ApiKeysPage() {
                         `curl -sSL http://${getPlatformHost()}/install.sh | sudo API_KEY=${q.data!.api_key} bash`
                       )
                     }
-                    className="ml-2 text-xs text-primary hover:underline shrink-0"
+                    className="ml-2 text-sm text-primary hover:underline shrink-0"
                   >
                     Copy
                   </button>
@@ -152,13 +152,13 @@ export default function ApiKeysPage() {
                       `curl -sSL http://${getPlatformHost()}/uninstall.sh | sudo bash`
                     )
                   }
-                  className="ml-2 text-xs text-primary hover:underline shrink-0"
+                  className="ml-2 text-sm text-primary hover:underline shrink-0"
                 >
                   Copy
                 </button>
               </div>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-sm text-muted-foreground">
               Removes the agent from the host. Does not affect stored telemetry data.
             </p>
           </div>

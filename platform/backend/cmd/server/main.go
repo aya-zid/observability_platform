@@ -48,6 +48,7 @@ func main() {
 		&domain.Incident{},
 		&domain.IncidentSignal{},
 		&domain.DismissedIncident{},
+		&domain.Report{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}

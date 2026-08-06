@@ -2,6 +2,8 @@
 .codex
 .DS_Store
 Thumbs.db
+docs/
+whattodo.txt
 
 # IDE settings
 .vscode/

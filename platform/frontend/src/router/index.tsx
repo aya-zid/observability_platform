@@ -25,7 +25,8 @@ import { MariaDBLogsPage } from "@/pages/service/mariadb/MariaDBLogsPage"
 import HostsPage from "@/pages/hosts/HostsPage"
 import HostDetailPage from "@/pages/hosts/HostDetailPage"
 import ContainersPage from "@/pages/container/ContainersPage"
-import GetStartedPage from "@/pages/getstarted/GetStartedPage"
+import ReportsListPage from "@/pages/reports/ReportsListPage"
+import ReportViewPage from "@/pages/reports/ReportViewPage"
 import DocsPage from "@/pages/docs/DocsPage"
 import { ContainerDashboardPage } from "@/pages/container/ContainerDashboardPage"
 import { ContainerLogsPage } from "@/pages/container/ContainerLogsPage"
@@ -58,13 +59,14 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           { path: "/overview", element: <OverviewPage /> },
-          { path: "/get-started", element: <GetStartedPage /> },
           { path: "/docs", element: <DocsPage /> },
           { path: "/alerts", element: <AlertsPage /> },
           { path: "/hosts", element: <HostsPage /> },
           { path: "/hosts/:machineId", element: <HostDetailPage /> },
           { path: "/hosts/:machineId/logs", element: <HostLogsPage /> },
           { path: "/containers", element: <ContainersPage /> },
+          { path: "/reports", element: <ReportsListPage /> },
+          { path: "/reports/:id", element: <ReportViewPage /> },
           { path: "/containers/:id/dashboard", element: <ContainerDashboardPage /> },
           { path: "/containers/:id/logs", element: <ContainerLogsPage /> },
           { path: "/services", element: <ServicesPage /> },

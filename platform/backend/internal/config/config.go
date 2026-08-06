@@ -87,6 +87,14 @@ type Config struct {
 	SMTPFromAddress string
 	SMTPFromName    string
 	PlatformURL     string // public URL for invite links in emails
+
+	// ── AI reports ─────────────────────────────────────────────
+	GeminiAPIKey string // empty = AI reports disabled (fails gracefully)
+	GeminiModel  string // e.g. "gemini-3.5-flash"
+	GroqAPIKey   string // empty = Groq fallback disabled
+	GroqModel    string // e.g. "llama-3.3-70b-versatile"
+	AIProvider   string // "gemini" | "groq" — primary provider (default gemini)
+	AIChunkBytes int    // payloads above this size are split per UTC region
 }
 
 func Load() *Config {
@@ -167,6 +175,14 @@ func Load() *Config {
 		SMTPFromAddress: getEnv("SMTP_FROM_ADDRESS", ""),
 		SMTPFromName:    getEnv("SMTP_FROM_NAME", "Observability Platform"),
 		PlatformURL:     getEnv("PLATFORM_URL", "http://localhost:5173"),
+
+		// AI reports
+		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
+		GeminiModel:  getEnv("GEMINI_MODEL", "gemini-3.5-flash"),
+		GroqAPIKey:   getEnv("GROQ_API_KEY", ""),
+		GroqModel:    getEnv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+		AIProvider:   getEnv("AI_PROVIDER", "gemini"),
+		AIChunkBytes: getEnvInt("AI_CHUNK_BYTES", 20000),
 	}
 
 	// Hard requirements

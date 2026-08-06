@@ -128,6 +128,17 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 	overviewHandler := NewOverviewHandler(overviewService, tenantRepo)
 	incidentHandler := NewIncidentHandler(incidentRepo, tenantRepo)
 
+	reportRepo := repository.NewReportRepository(infrastructure.DB)
+	reportService := service.NewReportService(
+		reportRepo,
+		alertRuleRepo,
+		hostRepo,
+		incidentGroupingService,
+		service.NewAIProvider(cfg.AIProvider, cfg.GeminiAPIKey, cfg.GeminiModel, cfg.GroqAPIKey, cfg.GroqModel, cfg.AIChunkBytes),
+		nginxDashboardService,
+	)
+	reportHandler := NewReportHandler(reportService, tenantRepo)
+
 	hostDashboardService := service.NewHostDashboardService(cfg, infrastructure.Redis)
 	hostLogsService := service.NewHostLogsService(cfg, infrastructure.Redis)
 	hostDashboardHandler := NewHostDashboardHandler(
@@ -207,8 +218,14 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 			r.PATCH("/alerts/rules/:id", alertRulesHandler.UpdateRule)
 			r.DELETE("/alerts/rules/:id", alertRulesHandler.DeleteRule)
 			r.GET("/alerts/events", alertRulesHandler.ListAlertEvents)
+			r.GET("/alerts/events/firing", alertRulesHandler.ListFiringEvents)
 			r.POST("/alerts/events/:id/acknowledge", alertRulesHandler.AcknowledgeEvent)
 			r.GET("/overview", overviewHandler.GetOverview)
+			r.POST("/reports/generate", reportHandler.Generate)
+			r.GET("/reports", reportHandler.List)
+			r.GET("/reports/:id", reportHandler.Get)
+			r.POST("/reports/:id/regenerate", reportHandler.Regenerate)
+			r.DELETE("/reports/:id", reportHandler.Delete)
 			r.GET("/alerts/vulnerabilities", alertsHandler.ListVulnerabilityAlerts)
 			r.GET("/catalog", discoveryAPIHandler.ListCatalog)
 			r.GET("/discovery/hosts", discoveryAPIHandler.ListHosts)

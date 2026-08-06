@@ -3,22 +3,22 @@ import { NavLink, useLocation } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
   LayoutDashboard, Bell, Server, Compass, Box, Settings, User,
-  ChevronLeft, ChevronRight, Sun, Moon, Activity, Rocket, Languages, BookOpen,
+  ChevronLeft, ChevronRight, Sun, Moon, Activity, Languages, BookOpen, FileText,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/store/themeStore"
 import { useTranslation } from "@/i18n/LanguageContext"
-import { getAlertEvents } from "@/api/alerts"
+import { getAlertFiringEvents } from "@/api/alerts"
 
 const navItems = [
   { to: "/overview", icon: LayoutDashboard, label: "Overview", end: true },
-  { to: "/get-started", icon: Rocket, label: "Get Started" },
   { to: "/docs", icon: BookOpen, label: "Documentation" },
   { to: "/alerts", icon: Bell, label: "Alerts" },
   { to: "/hosts", icon: Server, label: "Hosts" },
   { to: "/services", icon: Compass, label: "Services" },
   { to: "/containers", icon: Box, label: "Containers" },
+  { to: "/reports", icon: FileText, label: "Reports" },
 ]
 
 export default function Sidebar() {
@@ -29,10 +29,10 @@ export default function Sidebar() {
   const { lang, setLang } = useTranslation()
 
   const firingCount = useQuery({
-    queryKey: ["alert-events", "sidebar"],
+    queryKey: ["alert-firing-events", "sidebar"],
     queryFn: async () => {
-      const events = await getAlertEvents(50)
-      return events.filter(e => e.status === "firing" && !e.acknowledged_by).length
+      const events = await getAlertFiringEvents()
+      return events.filter(e => !e.acknowledged_by).length
     },
     refetchInterval: 30_000,
   })

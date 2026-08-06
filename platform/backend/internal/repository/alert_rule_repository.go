@@ -206,6 +206,19 @@ func (r *AlertRuleRepository) ListRecentEventsByTenantCtx(ctx context.Context, t
 	return rows, err
 }
 
+// ListEventsByTenantInRange returns alert events whose trigger time falls within
+// [start, end). Used by reports to count/list alerts fired during a day window.
+func (r *AlertRuleRepository) ListEventsByTenantInRange(ctx context.Context, tenantID uint, start, end time.Time) ([]domain.AlertEvent, error) {
+	var rows []domain.AlertEvent
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND triggered_at >= ? AND triggered_at < ?", tenantID, start, end).
+		Preload("Rule").
+		Preload("Threshold").
+		Order("triggered_at ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
 
 func (r *AlertRuleRepository) FindFiringEventByThresholdCtx(ctx context.Context, ruleID uint, thresholdID uint, hostMachineID string, serviceID *uint) (*domain.AlertEvent, error) {
 	var event domain.AlertEvent

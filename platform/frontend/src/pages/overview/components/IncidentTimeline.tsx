@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, AlertTriangle, Search, ShieldAlert, X } from "lucide-react"
 
 import type { TimelineEvent } from "@/api/overview"
@@ -40,8 +40,60 @@ function formatTime(value: string) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
 }
 
+// Strip a leading ts=… field (the log-level timestamp) since the row already
+// shows its own timestamp above the message.
+function stripLeadingLogTimestamp(message: string): string {
+  return message.replace(/^\s*ts="?[^\s"]+"?\s*/i, "")
+}
+
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b))
+}
+
+function TimelineMessage({
+  message,
+  expanded,
+  onToggle,
+}: {
+  message: string
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const ref = useRef<HTMLParagraphElement>(null)
+  const [overflows, setOverflows] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const check = () => setOverflows(el.scrollHeight > el.clientHeight + 1)
+    check()
+    const observer = new ResizeObserver(check)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [expanded, message])
+
+  return (
+    <div>
+      <p
+        ref={ref}
+        className={cn(
+          "mt-0.5 whitespace-pre-wrap text-xs leading-4 text-muted-foreground",
+          !expanded && "line-clamp-2"
+        )}
+      >
+        {message}
+      </p>
+      {overflows ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="mt-1 text-xs font-medium text-primary hover:underline"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  )
 }
 
 export function IncidentTimeline({
@@ -57,6 +109,7 @@ export function IncidentTimeline({
   const [hostFilter, setHostFilter] = useState<string>(externalHostFilter ?? "")
   const [typeFilter, setTypeFilter] = useState<string>("")
   const [query, setQuery] = useState("")
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
   const safe = events ?? []
   const hostnames = useMemo(() => uniqueSorted(safe.map((event) => event.hostname)), [safe])
@@ -196,8 +249,11 @@ export function IncidentTimeline({
             {filtered.map((event, index) => {
               const cfg = typeConfig[event.event_type] ?? typeConfig.warning
               const Icon = cfg.icon
+              const key = `${event.timestamp}-${event.hostname}-${index}`
+              const expanded = expandedKey === key
+              const displayMessage = stripLeadingLogTimestamp(event.message)
               return (
-                <div key={`${event.timestamp}-${event.hostname}-${index}`} className="relative flex gap-2 pl-5">
+                <div key={key} className="relative flex gap-2 pl-5">
                   <span className={cn("absolute left-0 top-2.5 z-10 h-3 w-3 rounded-full border-2 border-background", cfg.dot)} />
                   <div className="min-w-0 flex-1 rounded-md border border-border bg-card px-2.5 py-1.5 transition-colors hover:bg-muted/20">
                     <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -209,7 +265,11 @@ export function IncidentTimeline({
                       {event.hostname ? <span className="text-muted-foreground">{event.hostname}</span> : null}
                       {event.service ? <span className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">{event.service}</span> : null}
                     </div>
-                    <p className="mt-0.5 line-clamp-2 text-xs leading-4 text-muted-foreground">{event.message}</p>
+                    <TimelineMessage
+                      message={displayMessage}
+                      expanded={expanded}
+                      onToggle={() => setExpandedKey(expanded ? null : key)}
+                    />
                   </div>
                 </div>
               )

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState, useMemo } from "react"
 import { Bell, AlertTriangle, ListChecks, CheckCircle2, Eye, Trash2, Plus, ChevronDown, ChevronRight, Search, ShieldAlert, ShieldCheck, Server } from "lucide-react"
 
-import { getVulnerabilityAlerts, getAlertRules, getAlertEvents, updateAlertRule, deleteAlertRule, acknowledgeAlertEvent } from "@/api/alerts"
+import { getVulnerabilityAlerts, getAlertRules, getAlertEvents, getAlertFiringEvents, updateAlertRule, deleteAlertRule, acknowledgeAlertEvent } from "@/api/alerts"
 import type { AlertRule, AlertEvent, VulnerabilityAlert } from "@/api/alerts"
 import { Page, PageHeader, SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
@@ -121,12 +121,6 @@ export default function AlertsPage() {
     queryFn: getAlertRules,
   })
 
-  const eventsQuery = useQuery({
-    queryKey: ["alert-events"],
-    queryFn: () => getAlertEvents(50),
-    refetchInterval: 30_000,
-  })
-
   const toggleRuleMutation = useMutation({
     mutationFn: ({ id, isEnabled }: { id: number; isEnabled: boolean }) =>
       updateAlertRule(id, { is_enabled: !isEnabled }),
@@ -140,10 +134,33 @@ export default function AlertsPage() {
 
   const acknowledgeMutation = useMutation({
     mutationFn: (id: number) => acknowledgeAlertEvent(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["alert-events"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["alert-events"] })
+      queryClient.invalidateQueries({ queryKey: ["alert-firing-events"] })
+    },
   })
 
-  const events = eventsQuery.data ?? []
+  const eventsQuery = useQuery({
+    queryKey: ["alert-events"],
+    queryFn: () => getAlertEvents(50),
+    refetchInterval: 30_000,
+  })
+
+  const firingEventsQuery = useQuery({
+    queryKey: ["alert-firing-events"],
+    queryFn: getAlertFiringEvents,
+    refetchInterval: 30_000,
+  })
+
+  const firingEvents = firingEventsQuery.data ?? []
+
+  const events = useMemo(() => {
+    const byId = new Map<number, AlertEvent>()
+    for (const e of eventsQuery.data ?? []) byId.set(e.id, e)
+    for (const e of firingEvents) byId.set(e.id, e)
+    return Array.from(byId.values()).sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+  }, [eventsQuery.data, firingEvents])
+
   const rules = rulesQuery.data ?? []
   const vulnerabilities = alertsQuery.data ?? []
 
@@ -249,7 +266,7 @@ export default function AlertsPage() {
       {/* ───────────── Alert Events Tab ───────────── */}
       {tab === "events" && (
         <SectionCard>
-          {eventsQuery.isLoading ? (
+          {eventsQuery.isLoading || firingEventsQuery.isLoading ? (
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-12 bg-muted rounded-lg animate-pulse" />

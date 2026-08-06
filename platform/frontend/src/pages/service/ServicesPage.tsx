@@ -167,19 +167,19 @@ export default function ServicesPage() {
                 {categoryLabelByKey[category] || category}
                 <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded-full ml-1">{servicesByCategory[category].length}</span>
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {servicesByCategory[category].map((service) => {
                   const bothOn = service.log_collection_on && service.metric_collection_on
                   return (
-                    <div key={service.id} className="bg-card border border-border rounded-lg p-2.5 hover:border-primary/30 transition-all group">
-                      <div className="flex items-start justify-between mb-1.5">
+                    <div key={service.id} className="bg-card border border-border rounded-lg p-3 hover:border-primary/30 transition-all group">
+                      <div className="flex items-start justify-between mb-2">
                         <div className="flex-1 min-w-0">
                           <h3 className="text-xs font-semibold text-foreground">{service.service_name}</h3>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {service.version ? `v${service.version}` : ""}{service.port ? ` · port ${service.port}` : ""}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0 ml-1.5">
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
                           {service.status === "running" ? (
                             <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-500"><Wifi className="w-2.5 h-2.5" /> running</span>
                           ) : service.status === "warning" ? (
@@ -189,7 +189,7 @@ export default function ServicesPage() {
                           )}
                         </div>
                         {service.is_supported && (
-                          <div className="flex items-center gap-1 shrink-0 ml-1.5">
+                          <div className="flex items-center gap-1 shrink-0 ml-2">
                             <Link to={`/services/${service.id}`}
                               className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Configure">
                               <Settings className="w-3 h-3" />
@@ -199,7 +199,7 @@ export default function ServicesPage() {
                       </div>
 
                       {service.is_supported && (
-                        <div className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium mb-1.5",
+                        <div className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium mb-2",
                           bothOn ? "text-green-600 dark:text-green-400 bg-green-500/10" : "text-muted-foreground bg-secondary"
                         )}>
                           {bothOn ? <CheckCircle className="w-2.5 h-2.5" /> : <XCircle className="w-2.5 h-2.5" />}
@@ -208,15 +208,15 @@ export default function ServicesPage() {
                       )}
 
                       {!service.is_supported && (
-                        <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium mb-1.5 text-muted-foreground bg-secondary">
+                        <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium mb-2 text-muted-foreground bg-secondary">
                           <XCircle className="w-2.5 h-2.5" />
                           Unknown service
                         </div>
                       )}
 
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5">
                             <FileText className="w-2.5 h-2.5 text-muted-foreground" />
                             <span className="text-xs text-muted-foreground">Log Collection</span>
                           </div>
@@ -225,7 +225,7 @@ export default function ServicesPage() {
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5">
                             <BarChart3 className="w-2.5 h-2.5 text-muted-foreground" />
                             <span className="text-xs text-muted-foreground">Metrics Collection</span>
                           </div>
@@ -234,7 +234,7 @@ export default function ServicesPage() {
                           </span>
                         </div>
                         {bothOn && service.is_supported && (
-                          <div className="flex gap-1 pt-1">
+                          <div className="flex gap-1.5 pt-1.5">
                             <ServiceQuickLinks serviceId={service.id} serviceName={service.service_name} />
                           </div>
                         )}

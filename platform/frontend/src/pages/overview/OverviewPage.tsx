@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Activity, FileText, RefreshCw, Server, Sparkles } from "lucide-react"
+import { Activity, RefreshCw, Server, Sparkles } from "lucide-react"
 
 import { getOverview, type OverviewResponse } from "@/api/overview"
 import { Button } from "@/components/ui/button"
@@ -26,12 +26,12 @@ function SectionShell({
     <section className="rounded-lg border border-border bg-card shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-muted/35 text-primary">
-            <Icon className="h-3 w-3" />
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/35 text-primary">
+            <Icon className="h-3.5 w-3.5" />
           </span>
           <div className="min-w-0">
-            <h2 className="truncate text-xs font-semibold text-foreground">{title}</h2>
-            {eyebrow ? <p className="mt-0.5 text-[11px] text-muted-foreground">{eyebrow}</p> : null}
+            <h2 className="truncate text-base font-semibold tracking-tight text-foreground">{title}</h2>
+            {eyebrow ? <p className="mt-0.5 text-xs text-muted-foreground">{eyebrow}</p> : null}
           </div>
         </div>
         {action}
@@ -91,10 +91,6 @@ export default function OverviewPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-muted-foreground">Auto-refresh 30s</span>
-            <Button variant="outline" size="sm" disabled>
-              <FileText className="h-3.5 w-3.5" />
-              Report
-            </Button>
             <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isRefetching}>
               <RefreshCw className={`h-3.5 w-3.5 ${q.isRefetching ? "animate-spin" : ""}`} />
               Refresh

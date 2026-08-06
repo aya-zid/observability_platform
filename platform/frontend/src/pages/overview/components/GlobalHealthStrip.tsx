@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Activity, AlertTriangle, Boxes, Bug, CheckCircle2, Server, ShieldAlert } from "lucide-react"
+import { Activity, Boxes, Bug, CheckCircle2, Server, ShieldAlert } from "lucide-react"
 
 import type { GlobalHealth } from "@/api/overview"
 import { cn } from "@/lib/utils"
@@ -67,7 +67,6 @@ export function GlobalHealthStrip({ data }: { data: GlobalHealth }) {
   const totalServices = data.services_healthy + data.services_degraded + data.services_down
   const serviceProblemCount = data.services_degraded + data.services_down
   const hostsPct = pct(data.hosts_online, data.hosts_total)
-  const serviceHealthyPct = pct(data.services_healthy, totalServices)
   const containersTotal = data.containers_total ?? 0
   const containersHealthy = data.containers_healthy ?? 0
   const containersDown = Math.max(containersTotal - containersHealthy, 0)
@@ -129,14 +128,6 @@ export function GlobalHealthStrip({ data }: { data: GlobalHealth }) {
         {tiles.map((tile) => (
           <Tile key={tile.key} tile={tile} />
         ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-muted/25 px-2.5 py-1.5 text-xs text-muted-foreground">
-        <AlertTriangle className={cn("h-3 w-3", serviceHealthyPct < 100 || data.active_signals > 0 ? "text-amber-500" : "text-emerald-500")} />
-        <span>
-          {data.active_signals > 0
-            ? "Open the Alerts page for the firing rules behind these numbers."
-            : "No active alerts right now. Keep an eye on recent activity for early operational noise."}
-        </span>
       </div>
     </div>
   )

@@ -147,6 +147,11 @@ export async function getAlertEvents(limit?: number): Promise<AlertEvent[]> {
   return data
 }
 
+export async function getAlertFiringEvents(): Promise<AlertEvent[]> {
+  const { data } = await client.get<AlertEvent[]>(`/api/alerts/events/firing`)
+  return data
+}
+
 export async function acknowledgeAlertEvent(id: number): Promise<void> {
   await client.post(`/api/alerts/events/${id}/acknowledge`)
 }

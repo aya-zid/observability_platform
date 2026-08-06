@@ -582,7 +582,7 @@ func (s *OverviewService) getTimelineEvents(
 				Hostname:  hostname,
 				Service:   serviceLabel,
 				EventType: classifyTimelineEvent(kind, e.Line),
-				Message:   truncateString(extractTimelineMessage(e.Line), 140),
+				Message:   extractTimelineMessage(e.Line),
 			})
 		}
 	}

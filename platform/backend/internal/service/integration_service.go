@@ -924,11 +924,11 @@ if all_nginx_receivers and f"  {normalize_proc_key}:\n" not in text:
         "      - context: log\n"
         "        statements:\n"
         "          - set(attributes[\"normalized_path\"], attributes[\"request_path\"])\n"
-        "          - replace_pattern(attributes[\"normalized_path\"], \"\\\\?.*$\", \"\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"[?].*$\", \"\")\n"
         "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\", \"/:id\")\n"
         "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{6,35}\", \"/:id\")\n"
         "          - replace_pattern(attributes[\"normalized_path\"], \"/[A-Za-z0-9]+(-[A-Za-z0-9]+)+\", \"/:id\")\n"
-        "          - replace_pattern(attributes[\"normalized_path\"], \"/\\\\d+\", \"/:id\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9]+\", \"/:id\")\n"
     )
     if "\nprocessors:\n" in text:
         text = text.replace("\nprocessors:\n", "\nprocessors:\n" + normalize_proc, 1)
@@ -1300,11 +1300,11 @@ if all_apache_receivers and f"  {normalize_proc_key}:\n" not in text:
         "      - context: log\n"
         "        statements:\n"
         "          - set(attributes[\"normalized_path\"], attributes[\"request_path\"])\n"
-        "          - replace_pattern(attributes[\"normalized_path\"], \"\\\\?.*$\", \"\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"[?].*$\", \"\")\n"
         "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\", \"/:id\")\n"
         "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9a-fA-F]{6,35}\", \"/:id\")\n"
         "          - replace_pattern(attributes[\"normalized_path\"], \"/[A-Za-z0-9]+(-[A-Za-z0-9]+)+\", \"/:id\")\n"
-        "          - replace_pattern(attributes[\"normalized_path\"], \"/\\\\d+\", \"/:id\")\n"
+        "          - replace_pattern(attributes[\"normalized_path\"], \"/[0-9]+\", \"/:id\")\n"
     )
     if "\nprocessors:\n" in text:
         text = text.replace("\nprocessors:\n", "\nprocessors:\n" + normalize_proc, 1)

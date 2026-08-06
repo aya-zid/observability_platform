@@ -294,6 +294,15 @@ func (h *AlertRulesHandler) ListAlertEvents(c echo.Context) error {
 	return c.JSON(http.StatusOK, events)
 }
 
+func (h *AlertRulesHandler) ListFiringEvents(c echo.Context) error {
+	claims := c.Get("claims").(*infrastructure.Claims)
+	events, err := h.alertRuleRepo.ListFiringEventsByTenantCtx(c.Request().Context(), claims.TenantID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to list firing events"})
+	}
+	return c.JSON(http.StatusOK, events)
+}
+
 func (h *AlertRulesHandler) AcknowledgeEvent(c echo.Context) error {
 	claims := c.Get("claims").(*infrastructure.Claims)
 	idStr := c.Param("id")

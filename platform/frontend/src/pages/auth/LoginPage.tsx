@@ -6,6 +6,7 @@ import { z } from "zod"
 import { Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react"
 
 import * as authApi from "@/api/auth"
+import { apiErrorCode, ERROR_CODES } from "@/api/client"
 import AuthShell from "@/components/auth/AuthShell"
 import { Button } from "@/components/ui/button"
 import { useAuthStore } from "@/store/authStore"
@@ -36,8 +37,13 @@ export default function LoginPage() {
       setStatus("authenticated")
       if (res.role) setRole(res.role)
       navigate("/overview", { replace: true })
-    } catch {
+    } catch (e) {
       setStatus("unauthenticated")
+      if (apiErrorCode(e) === ERROR_CODES.USER_DEACTIVATED) {
+        setStatus("inactive")
+        navigate("/inactive", { replace: true })
+        return
+      }
       setError("Invalid email or password.")
     }
   }
@@ -70,6 +76,12 @@ export default function LoginPage() {
         <div>
           <div className="flex items-center justify-between">
             <label className="text-sm font-semibold text-foreground uppercase tracking-wider">Password</label>
+            <Link
+              to="/forgot-password"
+              className="text-sm text-primary hover:underline"
+            >
+              Forgot password?
+            </Link>
           </div>
           <div className="relative mt-1.5">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

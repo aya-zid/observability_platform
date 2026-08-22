@@ -86,9 +86,9 @@ export function DashboardSectionHeader({
   description?: string
 }) {
   return (
-    <div className="mb-2">
-      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-      {description ? <p className="text-xs text-muted-foreground mt-0.5">{description}</p> : null}
+    <div className="mb-3">
+      <h3 className="text-lg font-semibold tracking-tight text-foreground">{title}</h3>
+      {description ? <p className="mt-0.5 text-sm text-muted-foreground">{description}</p> : null}
     </div>
   )
 }

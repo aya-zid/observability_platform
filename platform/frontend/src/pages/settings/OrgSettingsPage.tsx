@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import client from "@/api/client"
 import { SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
+import { useAuthStore } from "@/store/authStore"
 
 type OrgSettings = {
   company_name: string
@@ -30,6 +31,9 @@ const timezones = [
 
 export default function OrgSettingsPage() {
   const queryClient = useQueryClient()
+  const role = useAuthStore((s) => s.role)
+  const isAdmin = role === "admin"
+  const canEdit = role === null || isAdmin
   const query = useQuery({ queryKey: ["org-settings"], queryFn: getOrgSettings })
   const [companyName, setCompanyName] = useState("")
   const [timezone, setTimezone] = useState("UTC")
@@ -69,8 +73,9 @@ export default function OrgSettingsPage() {
               <input
                 type="text"
                 value={companyName}
+                disabled={!canEdit}
                 onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 placeholder="Your company"
               />
               <p className="text-sm text-muted-foreground">Used for branding and notifications.</p>
@@ -93,8 +98,9 @@ export default function OrgSettingsPage() {
               </label>
               <select
                 value={timezone}
+                disabled={!canEdit}
                 onChange={(e) => setTimezone(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
               >
                 {timezones.map((tz) => (
                   <option key={tz} value={tz}>{tz}</option>
@@ -106,7 +112,13 @@ export default function OrgSettingsPage() {
         )}
       </SectionCard>
 
-      {!query.isLoading && (
+      {!canEdit && (
+        <p className="text-sm text-muted-foreground -mt-4">
+          Only admins can update organization information.
+        </p>
+      )}
+
+      {!query.isLoading && canEdit && (
         <div className="flex items-center justify-end gap-3">
           <Button
             variant="outline"

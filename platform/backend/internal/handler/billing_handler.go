@@ -67,3 +67,11 @@ func (h *BillingHandler) GetUsageHistory(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, history)
 }
+
+func (h *BillingHandler) ListPlans(c echo.Context) error {
+	plans, err := h.billingService.ListActivePlans(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, plans)
+}

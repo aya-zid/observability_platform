@@ -49,6 +49,8 @@ type Config struct {
 	AuthFailedLoginWindowSeconds int
 	AuthLockoutSeconds           int
 
+	PasswordResetTokenTTLMinutes int
+
 	// ── Server ────────────────────────────────────────────────
 	ServerPort string
 
@@ -92,7 +94,7 @@ type Config struct {
 	GeminiAPIKey string // empty = AI reports disabled (fails gracefully)
 	GeminiModel  string // e.g. "gemini-3.5-flash"
 	GroqAPIKey   string // empty = Groq fallback disabled
-	GroqModel    string // e.g. "llama-3.3-70b-versatile"
+	GroqModel    string // e.g. "openai/gpt-oss-120b"
 	AIProvider   string // "gemini" | "groq" — primary provider (default gemini)
 	AIChunkBytes int    // payloads above this size are split per UTC region
 }
@@ -138,6 +140,8 @@ func Load() *Config {
 		AuthFailedLoginWindowSeconds: getEnvInt("AUTH_FAILED_LOGIN_WINDOW_SECONDS", 900),
 		AuthLockoutSeconds:           getEnvInt("AUTH_LOCKOUT_SECONDS", 900),
 
+		PasswordResetTokenTTLMinutes: getEnvInt("PASSWORD_RESET_TOKEN_TTL_MINUTES", 60),
+
 		// Server
 		ServerPort: getEnv("SERVER_PORT", "8080"),
 
@@ -180,7 +184,7 @@ func Load() *Config {
 		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
 		GeminiModel:  getEnv("GEMINI_MODEL", "gemini-3.5-flash"),
 		GroqAPIKey:   getEnv("GROQ_API_KEY", ""),
-		GroqModel:    getEnv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+		GroqModel:    getEnv("GROQ_MODEL", "openai/gpt-oss-120b"),
 		AIProvider:   getEnv("AI_PROVIDER", "gemini"),
 		AIChunkBytes: getEnvInt("AI_CHUNK_BYTES", 20000),
 	}
@@ -225,9 +229,8 @@ func Load() *Config {
 		if cfg.AppEnv == "production" {
 			log.Fatal("[CONFIG] CORS_ALLOW_ORIGINS is required in production")
 		}
-		// Dev default (explicit, visible): avoids silent misconfig when you forget env vars locally.
-		cfg.CORSAllowOrigins = []string{"http://localhost:5173"}
-		log.Printf("[CONFIG] CORS_ALLOW_ORIGINS not set — defaulting to http://localhost:5173 (development)")
+		cfg.CORSAllowOrigins = []string{"http://localhost:5173", "http://localhost:5174"}
+		log.Printf("[CONFIG] CORS_ALLOW_ORIGINS not set — defaulting to http://localhost:5173,http://localhost:5174 (development)")
 	}
 	if cfg.AuthRateLimitWindowSeconds <= 0 || cfg.AuthRateLimitWindowSeconds > 3600 {
 		log.Fatal("[CONFIG] AUTH_RATE_LIMIT_WINDOW_SECONDS must be between 1 and 3600")
@@ -249,6 +252,9 @@ func Load() *Config {
 	}
 	if cfg.AuthLockoutSeconds <= 0 || cfg.AuthLockoutSeconds > 24*3600 {
 		log.Fatal("[CONFIG] AUTH_LOCKOUT_SECONDS must be between 1 and 86400")
+	}
+	if cfg.PasswordResetTokenTTLMinutes <= 0 || cfg.PasswordResetTokenTTLMinutes > 24*60 {
+		log.Fatal("[CONFIG] PASSWORD_RESET_TOKEN_TTL_MINUTES must be between 1 and 1440")
 	}
 	if cfg.VulnerabilityScanInterval < time.Hour {
 		log.Fatal("[CONFIG] VULNERABILITY_SCAN_INTERVAL_HOURS must be at least 1")

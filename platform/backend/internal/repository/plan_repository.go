@@ -16,6 +16,10 @@ func NewPlanRepository(db *gorm.DB) *PlanRepository {
 	return &PlanRepository{db: db}
 }
 
+func (r *PlanRepository) WithDB(db *gorm.DB) *PlanRepository {
+	return &PlanRepository{db: db}
+}
+
 func (r *PlanRepository) ListActivePlansCtx(ctx context.Context) ([]domain.Plan, error) {
 	var rows []domain.Plan
 	err := r.db.WithContext(ctx).Where("is_active = ?", true).Order("price_per_month ASC").Find(&rows).Error

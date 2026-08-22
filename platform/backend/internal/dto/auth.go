@@ -34,6 +34,16 @@ type AuthResponse struct {
 	Role string `json:"role"`
 }
 
+// ForgotPasswordRequest - Input for POST /forgot-password
+type ForgotPasswordRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+// ResetPasswordRequest - Input for POST /reset-password/:token
+type ResetPasswordRequest struct {
+	Password string `json:"password" validate:"required,min=8,containsany=ABCDEFGHIJKLMNOPQRSTUVWXYZ,containsany=abcdefghijklmnopqrstuvwxyz,containsany=0123456789"`
+}
+
 type OkResponse struct {
 	OK bool `json:"ok"`
 }

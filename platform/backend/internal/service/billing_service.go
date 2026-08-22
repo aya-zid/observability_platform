@@ -16,6 +16,7 @@ type BillingService struct {
 	subscriptionRepo *repository.SubscriptionRepository
 	usageRepo        *repository.UsageRepository
 	hostRepo         *repository.HostRepository
+	tenantRepo       *repository.TenantRepository
 }
 
 func NewBillingService(
@@ -23,12 +24,14 @@ func NewBillingService(
 	subscriptionRepo *repository.SubscriptionRepository,
 	usageRepo *repository.UsageRepository,
 	hostRepo *repository.HostRepository,
+	tenantRepo *repository.TenantRepository,
 ) *BillingService {
 	return &BillingService{
 		planRepo:         planRepo,
 		subscriptionRepo: subscriptionRepo,
 		usageRepo:        usageRepo,
 		hostRepo:         hostRepo,
+		tenantRepo:       tenantRepo,
 	}
 }
 
@@ -95,7 +98,13 @@ func (s *BillingService) ChangePlan(ctx context.Context, tenantID uint, newPlanI
 		return fmt.Errorf("cannot downgrade: you have %d hosts but the plan allows only %d", len(hosts), newPlan.MaxHosts)
 	}
 
-	return s.subscriptionRepo.UpdatePlanCtx(ctx, tenantID, newPlanID)
+	now := time.Now()
+	periodEnd := now.AddDate(0, newPlan.DurationMonths, 0)
+
+	if err := s.subscriptionRepo.UpdatePlanCtx(ctx, tenantID, newPlanID, periodEnd); err != nil {
+		return err
+	}
+	return s.tenantRepo.UpdateSubscriptionStatusCtx(ctx, tenantID, "active")
 }
 
 func (s *BillingService) GetUsageHistory(ctx context.Context, tenantID uint, days int) ([]dto.DailyUsage, error) {
@@ -112,6 +121,18 @@ func (s *BillingService) GetUsageHistory(ctx context.Context, tenantID uint, day
 			LogBytes: r.LogBytesIngested,
 			Metrics:  r.MetricSamplesIngested,
 		})
+	}
+	return result, nil
+}
+
+func (s *BillingService) ListActivePlans(ctx context.Context) ([]dto.PlanInfo, error) {
+	plans, err := s.planRepo.ListActivePlansCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]dto.PlanInfo, 0, len(plans))
+	for _, p := range plans {
+		result = append(result, planToInfo(p))
 	}
 	return result, nil
 }

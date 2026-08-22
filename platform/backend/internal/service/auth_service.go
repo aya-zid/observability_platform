@@ -48,6 +48,7 @@ type refreshSession struct {
 
 func (s *AuthService) Signup(ctx context.Context, req dto.SignupRequest) (accessToken string, refreshToken string, err error) {
 	var createdUser *domain.User
+	now := time.Now()
 	normalizedBusinessEmail := strings.ToLower(strings.TrimSpace(req.BusinessEmail))
 
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -100,20 +101,23 @@ func (s *AuthService) Signup(ctx context.Context, req dto.SignupRequest) (access
 			Email:        normalizedBusinessEmail,
 			PasswordHash: string(hash),
 			Role:         "admin",
+			Status:       string(domain.UserStatusActive),
 		}
 		if err := userRepo.Create(createdUser); err != nil {
 			return err
 		}
 
-		// Create free subscription for new tenant
-		var freePlan domain.Plan
-		if err := tx.Where("name = ?", "Free").First(&freePlan).Error; err != nil {
+		// Create free trial subscription for new tenant
+		var trialPlan domain.Plan
+		if err := tx.Where("name = ? AND is_trial = ?", "Trial", true).First(&trialPlan).Error; err != nil {
 			return err
 		}
+		periodEnd := now.AddDate(0, 0, 14)
 		sub := &domain.TenantSubscription{
-			TenantID: createdTenant.ID,
-			PlanID:   freePlan.ID,
-			Status:   "active",
+			TenantID:         createdTenant.ID,
+			PlanID:           trialPlan.ID,
+			Status:           "active",
+			CurrentPeriodEnd: &periodEnd,
 		}
 		return tx.Create(sub).Error
 	}); err != nil {
@@ -151,6 +155,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (access
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		s.recordFailedLogin(ctx, normalizedEmail)
 		return "", "", apierror.ErrInvalidCredentials
+	}
+
+	if user.Status == string(domain.UserStatusInactive) {
+		return "", "", apierror.ErrUserDeactivated
 	}
 
 	accessToken, refreshToken, err = s.issueTokens(ctx, user)
@@ -267,6 +275,14 @@ return val
 	}
 	if !tenant.IsActive {
 		return "", "", apierror.ErrUnauthorized
+	}
+
+	user, err := s.userRepo.WithDB(s.db).FindByIDCtx(ctx, session.UserID)
+	if err != nil || user == nil {
+		return "", "", apierror.ErrUnauthorized
+	}
+	if user.Status == string(domain.UserStatusInactive) {
+		return "", "", apierror.ErrUserDeactivated
 	}
 
 	newAccessToken, err := infrastructure.GenerateToken(session.UserID, session.TenantID, session.Email, session.Role)

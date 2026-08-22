@@ -142,6 +142,7 @@ func (s *TeamService) AcceptInvitation(ctx context.Context, token string, fullNa
 			Email:        inv.Email,
 			PasswordHash: string(hash),
 			Role:         inv.Role,
+			Status:       string(domain.UserStatusActive),
 		}
 		if err := userRepo.Create(user); err != nil {
 			return err
@@ -162,11 +163,16 @@ func (s *TeamService) ListTeam(ctx context.Context, tenantID uint) (*dto.TeamRes
 
 	members := make([]dto.TeamMember, 0, len(users))
 	for _, u := range users {
+		status := u.Status
+		if status == "" {
+			status = string(domain.UserStatusActive)
+		}
 		members = append(members, dto.TeamMember{
 			ID:        u.ID,
 			FullName:  u.FullName,
 			Email:     u.Email,
 			Role:      u.Role,
+			Status:    status,
 			CreatedAt: u.CreatedAt.Format(time.RFC3339),
 		})
 	}
@@ -236,6 +242,44 @@ func (s *TeamService) ChangeRole(ctx context.Context, tenantID uint, targetUserI
 	}
 
 	return s.userRepo.UpdateRoleCtx(ctx, targetUserID, newRole)
+}
+
+// SetUserStatus activates or deactivates a team member account.
+// Deactivated users are blocked at login/refresh and on every API call.
+func (s *TeamService) SetUserStatus(ctx context.Context, tenantID uint, targetUserID uint, callerUserID uint, status string) error {
+	if status != string(domain.UserStatusActive) && status != string(domain.UserStatusInactive) {
+		return apierror.ErrValidationFailed
+	}
+
+	target, err := s.userRepo.FindByIDCtx(ctx, targetUserID)
+	if err != nil {
+		return err
+	}
+	if target == nil || target.TenantID != tenantID {
+		return errors.New("user not found in this tenant")
+	}
+
+	if targetUserID == callerUserID {
+		return errors.New("cannot change your own status")
+	}
+
+	// Prevent deactivating the last active admin — or no admin would be able
+	// to manage the account anymore.
+	if target.Role == "admin" && status == string(domain.UserStatusInactive) {
+		count, err := s.userRepo.CountByTenantAndRoleAndStatusCtx(ctx, tenantID, "admin", string(domain.UserStatusActive))
+		if err != nil {
+			return err
+		}
+		if count <= 1 {
+			return errors.New("cannot deactivate the last active admin")
+		}
+	}
+
+	if target.Status == status {
+		return nil
+	}
+
+	return s.userRepo.UpdateStatusCtx(ctx, targetUserID, status)
 }
 
 func (s *TeamService) ResendInvitation(ctx context.Context, invitationID uint, tenantID uint) (*domain.Invitation, error) {

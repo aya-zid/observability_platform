@@ -169,6 +169,50 @@ func (s *EmailSender) InviteTeammateHTML(inviterName, companyName, inviteeEmail,
 </html>`, companyName, inviterName, companyName, roleDisplay, inviteeEmail, roleDisplay, inviteURL, inviteURL)
 }
 
+func (s *EmailSender) PasswordResetHTML(resetURL string) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+  <table width="100%%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7;padding:40px 16px">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%%">
+          <tr>
+            <td style="padding-bottom:24px;text-align:center">
+              <span style="font-size:22px;font-weight:700;color:#1e293b">Observability Platform</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#ffffff;border-radius:12px;padding:40px 32px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
+              <h1 style="margin:0 0 8px;font-size:22px;color:#1e293b;font-weight:600">Reset your password</h1>
+              <p style="margin:0 0 24px;font-size:15px;color:#64748b;line-height:1.5">
+                We received a request to reset the password for your <strong>Observability Platform</strong> account.
+                Click the button below to choose a new password. This link expires in 1 hour.
+              </p>
+              <a href="%s" style="display:inline-block;background-color:#2563eb;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 32px;border-radius:8px">Reset Password</a>
+              <p style="margin:24px 0 0;font-size:13px;color:#94a3b8;line-height:1.4">
+                If you didn't request a password reset, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 16px 0;text-align:center;font-size:12px;color:#94a3b8">
+              <p style="margin:0 0 4px">Observability Platform &middot; Real-time infrastructure monitoring</p>
+              <p style="margin:0">If the button above doesn't work, copy this link into your browser:<br><span style="color:#64748b">%s</span></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`, resetURL, resetURL)
+}
+
 func (s *EmailSender) AlertFiredHTML(ruleName, serviceType, severity, hostname, serviceName, domain, description string, metricValue, thresholdValue *float64, unit string, dashboardURL string) string {
 	severityColor := "#f59e0b"
 	severityLabel := "Warning"

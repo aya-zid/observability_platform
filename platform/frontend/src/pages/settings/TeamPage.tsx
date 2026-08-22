@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { Ban, UserCheck } from "lucide-react"
 
-import { getTeam, inviteTeammate, removeMember, changeRole, resendInvitation, revokeInvitation } from "@/api/team"
+import { getTeam, inviteTeammate, removeMember, changeRole, setUserStatus, resendInvitation, revokeInvitation } from "@/api/team"
 import { SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
 
@@ -32,6 +33,11 @@ export default function TeamPage() {
 
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: number; role: string }) => changeRole(userId, role),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team"] }),
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: ({ userId, status }: { userId: number; status: "active" | "inactive" }) => setUserStatus(userId, status),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team"] }),
   })
 
@@ -66,38 +72,86 @@ export default function TeamPage() {
                   <th className="pb-2 font-medium">Name</th>
                   <th className="pb-2 font-medium">Email</th>
                   <th className="pb-2 font-medium">Role</th>
+                  <th className="pb-2 font-medium">Status</th>
                   <th className="pb-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {team?.members.map((m) => (
-                  <tr key={m.id} className="border-b border-border/50">
-                    <td className="py-2">{m.full_name}</td>
-                    <td className="py-2 text-muted-foreground">{m.email}</td>
-                    <td className="py-2">
-                      <select
-                        value={m.role}
-                        onChange={(e) =>
-                          roleMutation.mutate({ userId: m.id, role: e.target.value })
-                        }
-                        className="bg-transparent border border-border rounded px-2 py-1 text-sm"
-                      >
-                        <option value="member">member</option>
-                        <option value="admin">admin</option>
-                      </select>
+                {team?.members.map((m) => {
+                  const isInactive = m.status === "inactive"
+                  return (
+                    <tr key={m.id} className="border-b border-border/50">
+                      <td className="py-2">{m.full_name}</td>
+                      <td className="py-2 text-muted-foreground">{m.email}</td>
+                      <td className="py-2">
+                        <select
+                          value={m.role}
+                          onChange={(e) =>
+                            roleMutation.mutate({ userId: m.id, role: e.target.value })
+                          }
+                          className="bg-transparent border border-border rounded px-2 py-1 text-sm"
+                        >
+                          <option value="member">member</option>
+                          <option value="admin">admin</option>
+                        </select>
+                      </td>
+                      <td className="py-2">
+                        <span
+                          className={
+                            isInactive
+                              ? "inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full bg-destructive/10 text-destructive"
+                              : "inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full bg-green-500/10 text-green-600"
+                          }
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${isInactive ? "bg-destructive" : "bg-green-500"}`} />
+                          {isInactive ? "inactive" : "active"}
+                        </span>
+                      </td>
+                      <td className="py-2">
+                        {isInactive ? (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => statusMutation.mutate({ userId: m.id, status: "active" })}
+                          >
+                            <UserCheck className="w-3.5 h-3.5 mr-1.5" />
+                            Activate
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => removeMutation.mutate(m.id)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => statusMutation.mutate({ userId: m.id, status: "inactive" })}
+                          >
+                            <Ban className="w-3.5 h-3.5 mr-1.5" />
+                            Deactivate
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => removeMutation.mutate(m.id)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      )}
                     </td>
-                    <td className="py-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive"
-                        onClick={() => removeMutation.mutate(m.id)}
-                      >
-                        Remove
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

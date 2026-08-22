@@ -30,3 +30,18 @@ export async function logout(): Promise<OkResponse> {
   const { data } = await client.post<OkResponse>("/logout")
   return data
 }
+
+export async function requestPasswordReset(email: string): Promise<OkResponse> {
+  const { data } = await client.post<OkResponse>("/forgot-password", { email })
+  return data
+}
+
+export async function validateResetToken(token: string): Promise<{ valid: boolean; email?: string }> {
+  const { data } = await client.get(`/reset-password/${token}`)
+  return data
+}
+
+export async function resetPassword(token: string, password: string): Promise<OkResponse> {
+  const { data } = await client.post<OkResponse>(`/reset-password/${token}`, { password })
+  return data
+}

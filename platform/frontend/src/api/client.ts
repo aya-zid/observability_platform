@@ -1,5 +1,7 @@
 import axios, { type AxiosError, type AxiosInstance } from "axios"
 
+import { useAuthStore } from "@/store/authStore"
+
 type RetriableConfig = {
   _retry?: boolean
   url?: string
@@ -38,6 +40,20 @@ client.interceptors.response.use(
     const status = error.response?.status
     const orig = (error.config ?? {}) as RetriableConfig
 
+    // A deactivated user is rejected on every call. Transition the whole app
+    // to the "inactive" screen regardless of where the error occurred.
+    if (status === 403 && apiErrorCode(error) === ERROR_CODES.USER_DEACTIVATED) {
+      useAuthStore.getState().setStatus("inactive")
+    }
+
+    if (status === 403 && apiErrorCode(error) === ERROR_CODES.SUBSCRIPTION_EXPIRED) {
+      useAuthStore.getState().setStatus("subscription_expired")
+    }
+
+    if (status === 403 && apiErrorCode(error) === ERROR_CODES.ACCOUNT_SUSPENDED) {
+      useAuthStore.getState().setStatus("account_suspended")
+    }
+
     if (
       status === 401 &&
       !orig._retry &&
@@ -71,4 +87,20 @@ client.interceptors.response.use(
 )
 
 export default client
+
+// apiErrorCode extracts the backend error code (e.g. "USER_DEACTIVATED")
+// from an axios error, when present.
+export function apiErrorCode(error: unknown): string | undefined {
+  if (axios.isAxiosError(error)) {
+    const code = (error.response?.data as { code?: string } | undefined)?.code
+    if (typeof code === "string" && code.length > 0) return code
+  }
+  return undefined
+}
+
+export const ERROR_CODES = {
+  USER_DEACTIVATED: "USER_DEACTIVATED",
+  SUBSCRIPTION_EXPIRED: "SUBSCRIPTION_EXPIRED",
+  ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
+} as const
 

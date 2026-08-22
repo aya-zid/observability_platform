@@ -2,7 +2,12 @@ import { Navigate, createBrowserRouter } from "react-router-dom"
 
 import AppLayout from "@/components/layout/AppLayout"
 import LoginPage from "@/pages/auth/LoginPage"
+import InactivePage from "@/pages/auth/InactivePage"
+import SubscriptionExpiredPage from "@/pages/auth/SubscriptionExpiredPage"
+import AccountSuspendedPage from "@/pages/auth/AccountSuspendedPage"
 import SignupPage from "@/pages/auth/SignupPage"
+import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage"
+import ResetPasswordPage from "@/pages/auth/ResetPasswordPage"
 import AcceptInvitePage from "@/pages/auth/AcceptInvitePage"
 import AlertsPage from "@/pages/alerts/AlertsPage"
 import ServicesPage from "@/pages/service/ServicesPage"
@@ -48,7 +53,12 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <WelcomePage /> },
       { path: "/login", element: <LoginPage /> },
+      { path: "/inactive", element: <InactivePage /> },
+      { path: "/subscription-expired", element: <SubscriptionExpiredPage /> },
+      { path: "/account-suspended", element: <AccountSuspendedPage /> },
       { path: "/signup", element: <SignupPage /> },
+      { path: "/forgot-password", element: <ForgotPasswordPage /> },
+      { path: "/reset-password/:token", element: <ResetPasswordPage /> },
       { path: "/invite/:token", element: <AcceptInvitePage /> },
     ],
   },

@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom"
+import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom"
 import { Building2, Users, Key, Bell, CreditCard, ChevronRight, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -50,6 +50,11 @@ export default function SettingsLayout() {
   const visibleItems = sidebarItems.filter((t) => roleLoading || !t.adminOnly || isAdmin)
 
   const currentItem = sidebarItems.find((item) => location.pathname === item.path)
+
+  // Guard against direct URL access to admin-only tabs by non-admins.
+  if (!roleLoading && !isAdmin && currentItem?.adminOnly) {
+    return <Navigate to="/settings/general" replace />
+  }
 
   return (
     <div className="flex h-full">

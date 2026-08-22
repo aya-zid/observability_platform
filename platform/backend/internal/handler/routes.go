@@ -39,24 +39,35 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 	subscriptionRepo := repository.NewSubscriptionRepository(infrastructure.DB)
 	usageRepo := repository.NewUsageRepository(infrastructure.DB)
 	alertRuleRepo := repository.NewAlertRuleRepository(infrastructure.DB)
+	adminRepo := repository.NewAdminRepository(infrastructure.DB)
+	adminDashboardRepo := repository.NewAdminDashboardRepository(infrastructure.DB)
 
 	// ── Auth routes (public) ─────────────────────────────────────────────────
 	authService := service.NewAuthService(infrastructure.DB, infrastructure.Redis, cfg, tenantRepo, userRepo)
 	authHandler := NewAuthHandler(authService, cfg)
-	queryService := service.NewQueryService(cfg, tenantRepo)
+	resetTokenRepo := repository.NewPasswordResetRepository(infrastructure.DB)
+	passwordResetService := service.NewPasswordResetService(
+		infrastructure.DB, userRepo, resetTokenRepo, emailSender,
+		cfg.PlatformURL, time.Duration(cfg.PasswordResetTokenTTLMinutes)*time.Minute,
+	)
+	passwordResetHandler := NewPasswordResetHandler(passwordResetService)
+	queryService := service.NewQueryService(cfg, tenantRepo, subscriptionRepo)
 	discoveryService := service.NewDiscoveryService(hostRepo, discoveryRepo, alertsRepo)
 	integrationService := service.NewIntegrationService(cfg, tenantRepo, discoveryRepo)
 
 	// ── Team / Profile / Settings / Billing services ─────────────────────────
 	teamService := service.NewTeamService(infrastructure.DB, userRepo, invitationRepo, tenantRepo, emailSender, cfg.PlatformURL)
 	profileService := service.NewProfileService(infrastructure.DB, userRepo)
-	billingService := service.NewBillingService(planRepo, subscriptionRepo, usageRepo, hostRepo)
+	billingService := service.NewBillingService(planRepo, subscriptionRepo, usageRepo, hostRepo, tenantRepo)
 
 	rlWindow := time.Duration(cfg.AuthRateLimitWindowSeconds) * time.Second
 	e.POST("/signup", authHandler.Signup, custommiddleware.RateLimitByIP(infrastructure.Redis, "signup", cfg.AuthSignupRateLimitPerWindow, rlWindow))
 	e.POST("/login", authHandler.Login, custommiddleware.RateLimitByIP(infrastructure.Redis, "login", cfg.AuthLoginRateLimitPerWindow, rlWindow))
 	e.POST("/refresh", authHandler.Refresh, custommiddleware.RateLimitByIP(infrastructure.Redis, "refresh", cfg.AuthRefreshRateLimitPerWindow, rlWindow))
 	e.POST("/logout", authHandler.Logout)
+	e.POST("/forgot-password", passwordResetHandler.ForgotPassword, custommiddleware.RateLimitByIP(infrastructure.Redis, "forgot-password", cfg.AuthLoginRateLimitPerWindow, rlWindow))
+	e.GET("/reset-password/:token", passwordResetHandler.ValidateResetToken)
+	e.POST("/reset-password/:token", passwordResetHandler.ResetPassword, custommiddleware.RateLimitByIP(infrastructure.Redis, "reset-password", cfg.AuthLoginRateLimitPerWindow, rlWindow))
 	installHandler := NewInstallHandler(cfg)
 	integrationHandler := NewIntegrationHandler(integrationService)
 	alertsHandler := NewAlertsHandler(alertsRepo)
@@ -66,6 +77,17 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 	profileHandler := NewProfileHandler(profileService)
 	billingHandler := NewBillingHandler(billingService)
 	alertRulesHandler := NewAlertRulesHandler(alertRuleRepo)
+
+	adminAuthService := service.NewAdminAuthService(infrastructure.DB, infrastructure.Redis, cfg, adminRepo)
+	adminAuthHandler := NewAdminAuthHandler(adminAuthService, cfg)
+	adminDashboardService := service.NewAdminDashboardService(infrastructure.DB, adminDashboardRepo, planRepo, tenantRepo, hostRepo, usageRepo, subscriptionRepo)
+	adminDashboardHandler := NewAdminDashboardHandler(adminDashboardService)
+	adminTenantService := service.NewAdminTenantService(infrastructure.DB, tenantRepo, subscriptionRepo, planRepo, hostRepo, userRepo, adminDashboardRepo)
+	adminTenantHandler := NewAdminTenantHandler(adminTenantService)
+	adminPackService := service.NewAdminPackService(infrastructure.DB, planRepo, subscriptionRepo, adminDashboardRepo)
+	adminPackHandler := NewAdminPackHandler(adminPackService)
+	adminSubscriptionService := service.NewAdminSubscriptionService(infrastructure.DB, tenantRepo, subscriptionRepo, planRepo, hostRepo)
+	adminSubscriptionHandler := NewAdminSubscriptionHandler(adminSubscriptionService)
 
 	nginxDashboardService := service.NewNginxDashboardService(cfg, infrastructure.Redis)
 	nginxDashboardHandler := NewNginxDashboardHandler(
@@ -164,11 +186,14 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 	e.GET("/invite/:token", teamHandler.ValidateInvitation)
 	e.POST("/invite/:token/accept", teamHandler.AcceptInvitation)
 
+	// Public plans listing (for subscription renewal / trial users)
+	e.GET("/plans", billingHandler.ListPlans)
+
 	// ── Platform API (browser auth) ───────────────────────────────────────────
 	tenantHandler := NewTenantHandler(tenantRepo, userRepo, tenantCache)
 	discoveryAPIHandler := NewDiscoveryAPIHandler(discoveryService)
 	queryHandler := NewQueryHandler(queryService)
-	api := e.Group("/api", custommiddleware.AuthMiddleware(tenantRepo))
+	api := e.Group("/api", custommiddleware.AuthMiddleware(tenantRepo, userRepo, subscriptionRepo))
 	{
 		// ── Member-accessible mutations ─────────────────────────
 		// Profile (own name / password)
@@ -201,6 +226,7 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 			settings.POST("/team/invite", teamHandler.InviteTeammate)
 			settings.DELETE("/team/:userId", teamHandler.RemoveMember)
 			settings.PATCH("/team/:userId/role", teamHandler.ChangeRole)
+			settings.PATCH("/team/:userId/status", teamHandler.SetUserStatus)
 			settings.POST("/team/invitations/:id/resend", teamHandler.ResendInvitation)
 			settings.DELETE("/team/invitations/:id", teamHandler.RevokeInvitation)
 			settings.GET("/notifications", notificationHandler.ListChannels)
@@ -294,9 +320,43 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 			r.GET("/hosts/:machineId/logs", hostDashboardHandler.Logs)
 			r.GET("/hosts/:machineId/logs/health-summary", hostDashboardHandler.LogsHealthSummary)
 
-			// Container dashboard routes
-			r.GET("/containers/:id/dashboard", containerDashboardHandler.Dashboard)
-			r.GET("/containers/:id/logs", containerDashboardHandler.Logs)
+		// Container dashboard routes
+		r.GET("/containers/:id/dashboard", containerDashboardHandler.Dashboard)
+		r.GET("/containers/:id/logs", containerDashboardHandler.Logs)
+		}
+	}
+
+	// ── Admin API ─────────────────────────────────────────────────────────────
+	admin := e.Group("/admin/api")
+	{
+		// Public admin auth
+		admin.POST("/auth/signup", adminAuthHandler.Signup)
+		admin.POST("/auth/login", adminAuthHandler.Login)
+		admin.POST("/auth/refresh", adminAuthHandler.Refresh)
+		admin.POST("/auth/logout", adminAuthHandler.Logout)
+
+		// Protected admin routes
+		adminProtected := admin.Group("", custommiddleware.AdminAuthMiddleware(adminRepo))
+		{
+			adminProtected.GET("/auth/me", adminAuthHandler.GetMe)
+			adminProtected.POST("/auth/change-password", adminAuthHandler.ChangePassword)
+
+			adminProtected.GET("/dashboard/stats", adminDashboardHandler.GetStats)
+			adminProtected.GET("/dashboard/tenants", adminDashboardHandler.ListTenants)
+			adminProtected.GET("/dashboard/tenants/:id", adminDashboardHandler.GetTenantDetail)
+
+			adminProtected.POST("/tenants/:id/ban", adminTenantHandler.BanTenant)
+			adminProtected.POST("/tenants/:id/unban", adminTenantHandler.UnbanTenant)
+			adminProtected.POST("/tenants/:id/change-plan", adminTenantHandler.ChangePlan)
+			adminProtected.POST("/tenants/:id/renew", adminTenantHandler.RenewSubscription)
+
+			adminProtected.GET("/packs", adminPackHandler.ListPacks)
+			adminProtected.GET("/packs/:id", adminPackHandler.GetPack)
+			adminProtected.POST("/packs", adminPackHandler.CreatePack)
+			adminProtected.PATCH("/packs/:id", adminPackHandler.UpdatePack)
+			adminProtected.DELETE("/packs/:id", adminPackHandler.DeletePack)
+
+			adminProtected.GET("/subscriptions/expired", adminSubscriptionHandler.ListExpired)
 		}
 	}
 

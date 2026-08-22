@@ -68,6 +68,18 @@ func (r *UserRepository) UpdateRoleCtx(ctx context.Context, id uint, role string
 	return r.db.WithContext(ctx).Model(&domain.User{}).Where("id = ?", id).Update("role", role).Error
 }
 
+func (r *UserRepository) UpdateStatusCtx(ctx context.Context, id uint, status string) error {
+	return r.db.WithContext(ctx).Model(&domain.User{}).Where("id = ?", id).Update("status", status).Error
+}
+
+func (r *UserRepository) CountByTenantAndRoleAndStatusCtx(ctx context.Context, tenantID uint, role string, status string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&domain.User{}).
+		Where("tenant_id = ? AND role = ? AND status = ?", tenantID, role, status).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *UserRepository) UpdatePasswordCtx(ctx context.Context, id uint, passwordHash string) error {
 	return r.db.WithContext(ctx).Model(&domain.User{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"password_hash":      passwordHash,

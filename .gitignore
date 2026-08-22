@@ -9,9 +9,22 @@ whattodo.txt
 .vscode/
 .idea/
 
+# Dependencies
+node_modules/
+vendor/
+
 # Backend local build artifacts
 platform/backend/server
+platform/backend/tests/
+
+# Env files
+.env
+.env.local
 
 lovable_design
 
 .kilo
+
+HANDOFF.md
+NEXT_STEPS.md
+RETENTION_STATUS.md

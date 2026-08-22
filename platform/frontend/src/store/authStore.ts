@@ -1,6 +1,6 @@
 import { create } from "zustand"
 
-export type AuthStatus = "unknown" | "authenticated" | "unauthenticated"
+export type AuthStatus = "unknown" | "authenticated" | "unauthenticated" | "inactive" | "subscription_expired" | "account_suspended"
 
 type AuthState = {
   status: AuthStatus

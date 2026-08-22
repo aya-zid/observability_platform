@@ -133,6 +133,35 @@ func (h *TeamHandler) ChangeRole(c echo.Context) error {
 	return c.JSON(http.StatusOK, dto.OkResponse{OK: true})
 }
 
+func (h *TeamHandler) SetUserStatus(c echo.Context) error {
+	claims := c.Get("claims").(*infrastructure.Claims)
+	userIDStr := c.Param("userId")
+	targetID, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid user id"})
+	}
+
+	var req dto.UpdateUserStatusRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	if err := validator.ValidateStruct(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if err := h.teamService.SetUserStatus(c.Request().Context(), claims.TenantID, uint(targetID), claims.UserID, req.Status); err != nil {
+		if apiErr, ok := apierror.As(err); ok {
+			return c.JSON(apiErr.Status, map[string]interface{}{
+				"error": apiErr.Message,
+				"code":  apiErr.Code,
+			})
+		}
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, dto.OkResponse{OK: true})
+}
+
 func (h *TeamHandler) ResendInvitation(c echo.Context) error {
 	claims := c.Get("claims").(*infrastructure.Claims)
 	idStr := c.Param("id")

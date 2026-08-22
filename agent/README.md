@@ -10,7 +10,7 @@ It collects:
 
 - Metrics from system/services automatically
 - Logs from common service log paths automatically
-- Traces from applications (with a small app-side config to export OTLP)
+
 
 ## Scripts
 

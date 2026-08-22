@@ -12,6 +12,10 @@ type Plan struct {
 	MaxLogBytesPerDay    int64   `gorm:"not null"`
 	PricePerMonth        float64 `gorm:"type:numeric(10,2)"`
 	IsActive             bool    `gorm:"type:boolean;default:true"`
+	AIReportsEnabled     bool    `gorm:"type:boolean;not null;default:false"`
+	Description          string  `gorm:"type:text"`
+	DurationMonths       int     `gorm:"not null;default:1"`
+	IsTrial              bool    `gorm:"type:boolean;not null;default:false"`
 }
 
 type TenantSubscription struct {
@@ -23,4 +27,8 @@ type TenantSubscription struct {
 	Status           string     `gorm:"type:varchar(20);not null;default:'active'"`
 	StartedAt        time.Time  `gorm:"autoCreateTime"`
 	CurrentPeriodEnd *time.Time
+	BannedAt         *time.Time `gorm:"column:banned_at"`
+	BanReason        string     `gorm:"type:text"`
+	BannedByAdminID  *uint      `gorm:"column:banned_by_admin_id"`
+	Notes            string     `gorm:"type:text"`
 }

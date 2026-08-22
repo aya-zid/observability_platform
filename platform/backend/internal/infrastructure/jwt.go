@@ -23,13 +23,19 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+type AdminClaims struct {
+	AdminID uint   `json:"admin_id"`
+	Email   string `json:"email"`
+	Role    string `json:"role"`
+	jwt.RegisteredClaims
+}
+
 func InitJWT(c *config.Config) {
 	cfg = c
 }
 
-// GenerateToken creates a new JWT
+// GenerateToken creates a new tenant JWT
 func GenerateToken(userID, tenantID uint, email, role string) (string, error) {
-	// Kept for backward compatibility. New code should treat this as an access token.
 	if cfg == nil {
 		return "", errors.New("config not initialized")
 	}
@@ -52,13 +58,35 @@ func GenerateToken(userID, tenantID uint, email, role string) (string, error) {
 	return token.SignedString([]byte(cfg.JWTSecret))
 }
 
+// GenerateAdminToken creates a new admin JWT
+func GenerateAdminToken(adminID uint, email, role string) (string, error) {
+	if cfg == nil {
+		return "", errors.New("config not initialized")
+	}
+	claims := AdminClaims{
+		AdminID: adminID,
+		Email:   email,
+		Role:    role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    cfg.JWTIssuer + "-admin",
+			Subject:   strconv.FormatUint(uint64(adminID), 10),
+			Audience:  []string{cfg.JWTAudience + "-admin"},
+			ID:        uuid.NewString(),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(cfg.AccessTokenTTLMinutes) * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(cfg.JWTSecret))
+}
+
 // ParseToken validates and returns claims
 func ParseToken(tokenStr string) (*Claims, error) {
 	if cfg == nil {
 		return nil, errors.New("config not initialized")
 	}
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		// Reject tokens signed with unexpected algorithms.
 		if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -76,6 +104,42 @@ func ParseToken(tokenStr string) (*Claims, error) {
 		audOK := false
 		for _, a := range claims.Audience {
 			if a == cfg.JWTAudience {
+				audOK = true
+				break
+			}
+		}
+		if !audOK {
+			return nil, jwt.ErrTokenInvalidAudience
+		}
+		return claims, nil
+	}
+
+	return nil, jwt.ErrSignatureInvalid
+}
+
+// ParseAdminToken validates and returns admin claims
+func ParseAdminToken(tokenStr string) (*AdminClaims, error) {
+	if cfg == nil {
+		return nil, errors.New("config not initialized")
+	}
+	token, err := jwt.ParseWithClaims(tokenStr, &AdminClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if token.Method == nil || token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(cfg.JWTSecret), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*AdminClaims); ok && token.Valid {
+		if claims.Issuer != cfg.JWTIssuer+"-admin" {
+			return nil, jwt.ErrTokenInvalidIssuer
+		}
+		audOK := false
+		for _, a := range claims.Audience {
+			if a == cfg.JWTAudience+"-admin" {
 				audOK = true
 				break
 			}

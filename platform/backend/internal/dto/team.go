@@ -14,11 +14,16 @@ type ChangeRoleRequest struct {
 	Role string `json:"role" validate:"required,oneof=admin member"`
 }
 
+type UpdateUserStatusRequest struct {
+	Status string `json:"status" validate:"required,oneof=active inactive"`
+}
+
 type TeamMember struct {
 	ID        uint   `json:"id"`
 	FullName  string `json:"full_name"`
 	Email     string `json:"email"`
 	Role      string `json:"role"`
+	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
 }
 

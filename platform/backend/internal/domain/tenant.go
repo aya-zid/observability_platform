@@ -25,6 +25,9 @@ type Tenant struct {
     APIKey       string    `gorm:"column:api_key;type:varchar(255);unique;not null"`
     APIKeyLastUsedAt *time.Time `gorm:"column:api_key_last_used_at"`
     Timezone     string    `gorm:"type:varchar(50);default:'UTC'"`
+    BannedAt     *time.Time `gorm:"column:banned_at"`
+    BanReason    string    `gorm:"type:text"`
+    BannedByAdminID *uint  `gorm:"column:banned_by_admin_id"`
 
     // Has many Users (bidirectional)
     Users        []User    `gorm:"foreignKey:TenantID"`

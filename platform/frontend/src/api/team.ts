@@ -5,6 +5,7 @@ export type TeamMember = {
   full_name: string
   email: string
   role: string
+  status: string
   created_at: string
 }
 
@@ -43,6 +44,10 @@ export async function removeMember(userId: number): Promise<void> {
 
 export async function changeRole(userId: number, role: string): Promise<void> {
   await client.patch(`/api/settings/team/${userId}/role`, { role })
+}
+
+export async function setUserStatus(userId: number, status: "active" | "inactive"): Promise<void> {
+  await client.patch(`/api/settings/team/${userId}/status`, { status })
 }
 
 export async function resendInvitation(id: number): Promise<{ invite_url: string; expires_at: string }> {

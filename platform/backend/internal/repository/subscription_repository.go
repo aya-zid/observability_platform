@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -14,6 +15,10 @@ type SubscriptionRepository struct {
 }
 
 func NewSubscriptionRepository(db *gorm.DB) *SubscriptionRepository {
+	return &SubscriptionRepository{db: db}
+}
+
+func (r *SubscriptionRepository) WithDB(db *gorm.DB) *SubscriptionRepository {
 	return &SubscriptionRepository{db: db}
 }
 
@@ -30,9 +35,17 @@ func (r *SubscriptionRepository) Create(sub *domain.TenantSubscription) error {
 	return r.db.Create(sub).Error
 }
 
-func (r *SubscriptionRepository) UpdatePlanCtx(ctx context.Context, tenantID uint, planID uint) error {
+func (r *SubscriptionRepository) UpdatePlanCtx(ctx context.Context, tenantID uint, planID uint, periodEnd time.Time) error {
 	return r.db.WithContext(ctx).
 		Model(&domain.TenantSubscription{}).
 		Where("tenant_id = ?", tenantID).
-		Update("plan_id", planID).Error
+		Updates(map[string]interface{}{
+			"plan_id":            planID,
+			"status":             "active",
+			"started_at":         time.Now(),
+			"current_period_end": periodEnd,
+			"banned_at":          nil,
+			"ban_reason":         "",
+			"banned_by_admin_id": nil,
+		}).Error
 }

@@ -56,6 +56,14 @@ func (r *TenantRepository) UpdateAPIKeyByIDCtx(ctx context.Context, id uint, api
 		Error
 }
 
+func (r *TenantRepository) UpdateSubscriptionStatusCtx(ctx context.Context, id uint, status string) error {
+	return r.db.WithContext(ctx).
+		Model(&domain.Tenant{}).
+		Where("id = ?", id).
+		Update("subscription_status", status).
+		Error
+}
+
 func (r *TenantRepository) UpdateOrgSettingsCtx(ctx context.Context, tenantID uint, updates map[string]interface{}) error {
 	return r.db.WithContext(ctx).Model(&domain.Tenant{}).Where("id = ?", tenantID).Updates(updates).Error
 }

@@ -37,6 +37,7 @@ func main() {
 		&domain.NginxVirtualHost{},
 		&domain.ApacheVirtualHost{},
 		&domain.Invitation{},
+		&domain.PasswordResetToken{},
 		&domain.NotificationChannel{},
 		&domain.Plan{},
 		&domain.TenantSubscription{},
@@ -49,10 +50,20 @@ func main() {
 		&domain.IncidentSignal{},
 		&domain.DismissedIncident{},
 		&domain.Report{},
+		&domain.Admin{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
 	log.Println("[DB] AutoMigrate completed")
+
+	// Backfill: make any pre-existing users active. GORM adds the new column
+	// with a DEFAULT of 'active', but we also guard against NULL/empty rows
+	// that may exist if a previous deployment added the column differently.
+	if err := infrastructure.DB.Exec(`UPDATE users SET status = 'active' WHERE status IS NULL OR status = ''`).Error; err != nil {
+		log.Fatalf("[DB] failed to backfill user status: %v", err)
+	} else {
+		log.Println("[DB] user status backfill completed (all existing users active)")
+	}
 
 	// ── Seed default plans ────────────────────────────────────────────────────
 	seedPlans()
@@ -98,6 +109,14 @@ func main() {
 	notifDispatcher := service.NewNotificationDispatcher(notifRepo, alertRuleRepo, emailSender, cfg.PlatformURL)
 	go notifDispatcher.StartNotificationWorker(context.Background())
 
+	// ── Start subscription expiration checker ─────────────────────────────────
+	subscriptionWorker := service.NewSubscriptionWorker(infrastructure.DB, subscriptionRepo)
+	subscriptionWorker.StartExpirationChecker(context.Background(), 1*time.Hour)
+
+	// ── Start retention cleanup worker ─────────────────────────────────────────
+	retentionWorker := service.NewRetentionWorker(cfg, infrastructure.DB, subscriptionRepo, tenantRepo)
+	retentionWorker.StartRetentionCleaner(context.Background(), 1*time.Minute)
+
 	// ── Echo setup ────────────────────────────────────────────────────────────
 	e := echo.New()
 	e.HideBanner = true
@@ -128,9 +147,12 @@ func seedPlans() {
 	}
 
 	plans := []domain.Plan{
-		{Name: "Free", MaxHosts: 2, MaxServicesPerHost: 20, LogRetentionDays: 3, MetricsRetentionDays: 7, MaxLogBytesPerDay: 524288000, PricePerMonth: 0, IsActive: true},
-		{Name: "Pro", MaxHosts: 10, MaxServicesPerHost: 20, LogRetentionDays: 14, MetricsRetentionDays: 30, MaxLogBytesPerDay: 5368709120, PricePerMonth: 49, IsActive: true},
-		{Name: "Enterprise", MaxHosts: 50, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 90, MaxLogBytesPerDay: 53687091200, PricePerMonth: 199, IsActive: true},
+		{Name: "Free", MaxHosts: 2, MaxServicesPerHost: 20, LogRetentionDays: 3, MetricsRetentionDays: 7, MaxLogBytesPerDay: 524288000, PricePerMonth: 0, IsActive: true, DurationMonths: 1},
+		{Name: "Basic", MaxHosts: 5, MaxServicesPerHost: 20, LogRetentionDays: 7, MetricsRetentionDays: 14, MaxLogBytesPerDay: 1073741824, PricePerMonth: 19, IsActive: true, DurationMonths: 1},
+		{Name: "Pro", MaxHosts: 10, MaxServicesPerHost: 20, LogRetentionDays: 14, MetricsRetentionDays: 30, MaxLogBytesPerDay: 5368709120, PricePerMonth: 49, IsActive: true, DurationMonths: 1},
+		{Name: "Premium", MaxHosts: 25, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 60, MaxLogBytesPerDay: 21474836480, PricePerMonth: 99, IsActive: true, DurationMonths: 1},
+		{Name: "Enterprise", MaxHosts: 50, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 90, MaxLogBytesPerDay: 53687091200, PricePerMonth: 199, IsActive: true, DurationMonths: 1},
+		{Name: "Trial", MaxHosts: 25, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 60, MaxLogBytesPerDay: 21474836480, PricePerMonth: 0, IsActive: true, DurationMonths: 1, IsTrial: true},
 	}
 	for _, p := range plans {
 		if err := db.Create(&p).Error; err != nil {

@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react"
 
 import * as authApi from "@/api/auth"
+import { apiErrorCode, ERROR_CODES } from "@/api/client"
 import { useAuthStore } from "@/store/authStore"
 
 export default function AuthBootstrap({
@@ -25,7 +26,15 @@ export default function AuthBootstrap({
         setStatus("authenticated")
         if (res.role) setRole(res.role)
       })
-      .catch(() => setStatus("unauthenticated"))
+      .catch((e) => {
+        // A deactivated account is rejected with USER_DEACTIVATED. Surface a
+        // dedicated page instead of redirecting to the login form.
+        if (apiErrorCode(e) === ERROR_CODES.USER_DEACTIVATED) {
+          setStatus("inactive")
+        } else {
+          setStatus("unauthenticated")
+        }
+      })
       .finally(() => setReady(true))
   }, [setStatus, setRole])
 

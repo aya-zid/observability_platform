@@ -17,6 +17,7 @@ type BillingService struct {
 	usageRepo        *repository.UsageRepository
 	hostRepo         *repository.HostRepository
 	tenantRepo       *repository.TenantRepository
+	subReqRepo       *repository.SubscriptionRequestRepository
 }
 
 func NewBillingService(
@@ -25,6 +26,7 @@ func NewBillingService(
 	usageRepo *repository.UsageRepository,
 	hostRepo *repository.HostRepository,
 	tenantRepo *repository.TenantRepository,
+	subReqRepo *repository.SubscriptionRequestRepository,
 ) *BillingService {
 	return &BillingService{
 		planRepo:         planRepo,
@@ -32,6 +34,7 @@ func NewBillingService(
 		usageRepo:        usageRepo,
 		hostRepo:         hostRepo,
 		tenantRepo:       tenantRepo,
+		subReqRepo:       subReqRepo,
 	}
 }
 
@@ -67,14 +70,30 @@ func (s *BillingService) GetBillingOverview(ctx context.Context, tenantID uint) 
 		HostsUsed:        len(hosts),
 		HostsLimit:       sub.Plan.MaxHosts,
 		LogBytesToday:    logBytesToday,
-		LogBytesLimit:    sub.Plan.MaxLogBytesPerDay,
 		LogRetentionDays: sub.Plan.LogRetentionDays,
+	}
+
+	var pendingInfo *dto.PendingRequestInfo
+	if s.subReqRepo != nil {
+		pendingReq, _ := s.subReqRepo.GetPendingByTenantCtx(ctx, tenantID)
+		if pendingReq != nil {
+			pendingInfo = &dto.PendingRequestInfo{
+				ID:        pendingReq.ID,
+				PlanID:    pendingReq.PlanID,
+				PlanName:  pendingReq.Plan.Name,
+				PlanPrice: pendingReq.Plan.PricePerMonth,
+				Status:    pendingReq.Status,
+				Notes:     pendingReq.Notes,
+				CreatedAt: pendingReq.CreatedAt.Format(time.RFC3339),
+			}
+		}
 	}
 
 	return &dto.BillingOverview{
 		Plan:           planInfo,
 		Usage:          usageInfo,
 		AvailablePlans: availablePlans,
+		PendingRequest: pendingInfo,
 	}, nil
 }
 
@@ -98,13 +117,25 @@ func (s *BillingService) ChangePlan(ctx context.Context, tenantID uint, newPlanI
 		return fmt.Errorf("cannot downgrade: you have %d hosts but the plan allows only %d", len(hosts), newPlan.MaxHosts)
 	}
 
-	now := time.Now()
-	periodEnd := now.AddDate(0, newPlan.DurationMonths, 0)
+	if s.subReqRepo == nil {
+		return errors.New("subscription request repository not initialized")
+	}
 
-	if err := s.subscriptionRepo.UpdatePlanCtx(ctx, tenantID, newPlanID, periodEnd); err != nil {
+	existingReq, err := s.subReqRepo.GetPendingByTenantCtx(ctx, tenantID)
+	if err != nil {
 		return err
 	}
-	return s.tenantRepo.UpdateSubscriptionStatusCtx(ctx, tenantID, "active")
+
+	if existingReq != nil {
+		return s.subReqRepo.UpdatePlanCtx(ctx, existingReq.ID, newPlanID)
+	}
+
+	req := &domain.SubscriptionRequest{
+		TenantID: tenantID,
+		PlanID:   newPlanID,
+		Status:   "pending",
+	}
+	return s.subReqRepo.Create(ctx, req)
 }
 
 func (s *BillingService) GetUsageHistory(ctx context.Context, tenantID uint, days int) ([]dto.DailyUsage, error) {
@@ -145,7 +176,6 @@ func planToInfo(plan domain.Plan) dto.PlanInfo {
 		MaxServicesPerHost:   plan.MaxServicesPerHost,
 		LogRetentionDays:     plan.LogRetentionDays,
 		MetricsRetentionDays: plan.MetricsRetentionDays,
-		MaxLogBytesPerDay:    plan.MaxLogBytesPerDay,
 		PricePerMonth:        plan.PricePerMonth,
 	}
 }

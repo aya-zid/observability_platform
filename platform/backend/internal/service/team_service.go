@@ -20,22 +20,22 @@ import (
 )
 
 type TeamService struct {
-	db               *gorm.DB
-	userRepo         *repository.UserRepository
-	invitationRepo   *repository.InvitationRepository
-	tenantRepo       *repository.TenantRepository
-	emailSender      *EmailSender
-	platformURL      string
+	db             *gorm.DB
+	userRepo       *repository.UserRepository
+	invitationRepo *repository.InvitationRepository
+	tenantRepo     *repository.TenantRepository
+	emailSender    *EmailSender
+	platformURL    string
 }
 
 func NewTeamService(db *gorm.DB, userRepo *repository.UserRepository, invitationRepo *repository.InvitationRepository, tenantRepo *repository.TenantRepository, emailSender *EmailSender, platformURL string) *TeamService {
 	return &TeamService{
-		db:               db,
-		userRepo:         userRepo,
-		invitationRepo:   invitationRepo,
-		tenantRepo:       tenantRepo,
-		emailSender:      emailSender,
-		platformURL:      strings.TrimRight(platformURL, "/"),
+		db:             db,
+		userRepo:       userRepo,
+		invitationRepo: invitationRepo,
+		tenantRepo:     tenantRepo,
+		emailSender:    emailSender,
+		platformURL:    strings.TrimRight(platformURL, "/"),
 	}
 }
 
@@ -99,7 +99,7 @@ func (s *TeamService) InviteTeammate(ctx context.Context, tenantID uint, inviter
 			companyName = "the team"
 		}
 		inviteURL := fmt.Sprintf("%s/invite/%s", s.platformURL, token)
-		subject := fmt.Sprintf("You're invited to join %s on Observability Platform", companyName)
+		subject := fmt.Sprintf("You’re invited to join %s on MediaNet Observability", companyName)
 		body := s.emailSender.InviteTeammateHTML(inviterName, companyName, email, role, inviteURL)
 
 		if err := s.emailSender.Send(email, subject, body); err != nil {
@@ -318,7 +318,7 @@ func (s *TeamService) ResendInvitation(ctx context.Context, invitationID uint, t
 		companyName = "the team"
 	}
 	inviteURL := fmt.Sprintf("%s/invite/%s", s.platformURL, token)
-	subject := fmt.Sprintf("Reminder: You're invited to join %s on Observability Platform", companyName)
+	subject := fmt.Sprintf("Reminder: join %s on MediaNet Observability", companyName)
 	body := s.emailSender.InviteTeammateHTML("A team admin", companyName, inv.Email, inv.Role, inviteURL)
 	if err := s.emailSender.Send(inv.Email, subject, body); err != nil {
 		log.Printf("[team] failed to resend invite email to %s: %v", inv.Email, err)

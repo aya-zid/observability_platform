@@ -16,7 +16,6 @@ type Plan = {
   max_services_per_host: number
   log_retention_days: number
   metrics_retention_days: number
-  max_log_bytes_per_day: number
   ai_reports_enabled: boolean
   duration_months: number
 }
@@ -26,27 +25,7 @@ export default function SubscriptionExpiredPage() {
   const clearSession = useAuthStore((s) => s.clearSession)
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
-  const [selecting, setSelecting] = useState<number | null>(null)
-
-  useEffect(() => {
-    fetch("/plans")
-      .then((r) => r.json())
-      .then((data) => {
-        setPlans(data || [])
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [])
-
-  async function onSignOut() {
-    try {
-      await authApi.logout()
-    } catch {
-      // non-fatal
-    }
-    clearSession()
-    navigate("/login", { replace: true })
-  }
+  const [requested, setRequested] = useState(false)
 
   async function onSelectPlan(planId: number) {
     setSelecting(planId)
@@ -56,7 +35,8 @@ export default function SubscriptionExpiredPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan_id: planId }),
       })
-      window.location.reload()
+      setRequested(true)
+      setSelecting(null)
     } catch {
       setSelecting(null)
     }
@@ -73,6 +53,12 @@ export default function SubscriptionExpiredPage() {
           Your subscription has expired. Choose a plan below to restore full access
           to the platform.
         </p>
+
+        {requested && (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200">
+            Subscription request submitted! An administrator will review your request shortly to activate your plan.
+          </div>
+        )}
 
         {loading ? (
           <div className="text-sm text-muted-foreground mt-6">Loading plans…</div>

@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Ban, UserCheck } from "lucide-react"
 
 import { getTeam, inviteTeammate, removeMember, changeRole, setUserStatus, resendInvitation, revokeInvitation } from "@/api/team"
+import { getMe } from "@/api/tenant"
 import { SectionCard } from "@/components/shared/Page"
 import { Button } from "@/components/ui/button"
 
@@ -16,6 +17,13 @@ export default function TeamPage() {
     queryKey: ["team"],
     queryFn: getTeam,
   })
+
+  const meQuery = useQuery({
+    queryKey: ["me"],
+    queryFn: getMe,
+  })
+
+  const currentUserId = meQuery.data?.user_id
 
   const inviteMutation = useMutation({
     mutationFn: () => inviteTeammate(email, inviteRole),
@@ -114,6 +122,7 @@ export default function TeamPage() {
                             variant="outline"
                             size="sm"
                             onClick={() => statusMutation.mutate({ userId: m.id, status: "active" })}
+                            disabled={m.id === currentUserId}
                           >
                             <UserCheck className="w-3.5 h-3.5 mr-1.5" />
                             Activate
@@ -123,6 +132,7 @@ export default function TeamPage() {
                             size="sm"
                             className="text-destructive"
                             onClick={() => removeMutation.mutate(m.id)}
+                            disabled={m.id === currentUserId}
                           >
                             Remove
                           </Button>
@@ -134,6 +144,7 @@ export default function TeamPage() {
                             size="sm"
                             className="text-destructive"
                             onClick={() => statusMutation.mutate({ userId: m.id, status: "inactive" })}
+                            disabled={m.id === currentUserId}
                           >
                             <Ban className="w-3.5 h-3.5 mr-1.5" />
                             Deactivate
@@ -143,6 +154,7 @@ export default function TeamPage() {
                             size="sm"
                             className="text-destructive"
                             onClick={() => removeMutation.mutate(m.id)}
+                            disabled={m.id === currentUserId}
                           >
                             Remove
                           </Button>

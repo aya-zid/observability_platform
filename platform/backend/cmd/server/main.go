@@ -3,11 +3,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"gorm.io/gorm"
 
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/config"
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/domain"
@@ -51,10 +53,28 @@ func main() {
 		&domain.DismissedIncident{},
 		&domain.Report{},
 		&domain.Admin{},
+		&domain.SubscriptionRequest{},
 	); err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
 	log.Println("[DB] AutoMigrate completed")
+
+	// This limit was retired in favor of retention and host limits. AutoMigrate
+	// never drops columns, so remove it explicitly from databases created by
+	// older versions as well.
+	if infrastructure.DB.Migrator().HasColumn(&domain.Plan{}, "max_log_bytes_per_day") {
+		if err := infrastructure.DB.Migrator().DropColumn(&domain.Plan{}, "max_log_bytes_per_day"); err != nil {
+			log.Fatalf("[DB] failed to remove retired plan log-byte limit: %v", err)
+		}
+	}
+	// Older releases stored a platform ban on the subscription. A platform ban
+	// belongs to the tenant; repair those legacy rows so unbanning does not
+	// accidentally leave the subscription suspended.
+	if infrastructure.DB.Migrator().HasColumn(&domain.TenantSubscription{}, "banned_at") {
+		if err := infrastructure.DB.Exec("UPDATE tenant_subscriptions SET status = 'active', banned_at = NULL, ban_reason = '', banned_by_admin_id = NULL WHERE banned_at IS NOT NULL AND status = 'suspended'").Error; err != nil {
+			log.Fatalf("[DB] failed to repair legacy subscription bans: %v", err)
+		}
+	}
 
 	// Backfill: make any pre-existing users active. GORM adds the new column
 	// with a DEFAULT of 'active', but we also guard against NULL/empty rows
@@ -113,9 +133,10 @@ func main() {
 	subscriptionWorker := service.NewSubscriptionWorker(infrastructure.DB, subscriptionRepo)
 	subscriptionWorker.StartExpirationChecker(context.Background(), 1*time.Hour)
 
-	// ── Start retention cleanup worker ─────────────────────────────────────────
-	retentionWorker := service.NewRetentionWorker(cfg, infrastructure.DB, subscriptionRepo, tenantRepo)
-	retentionWorker.StartRetentionCleaner(context.Background(), 1*time.Minute)
+	// Retention cleanup is deliberately disabled. The prior implementation used
+	// Loki's delete API and could remove current logs, which is not acceptable
+	// for an observability platform. Storage retention is controlled only by the
+	// infrastructure configuration.
 
 	// ── Echo setup ────────────────────────────────────────────────────────────
 	e := echo.New()
@@ -140,26 +161,37 @@ func main() {
 
 func seedPlans() {
 	db := infrastructure.DB
-	var count int64
-	db.Model(&domain.Plan{}).Count(&count)
-	if count > 0 {
-		return
+	plans := []domain.Plan{
+		{Name: "Free", MaxHosts: 2, MaxServicesPerHost: 20, LogRetentionDays: 3, MetricsRetentionDays: 7, PricePerMonth: 0, IsActive: true, DurationMonths: 1},
+		{Name: "Basic", MaxHosts: 5, MaxServicesPerHost: 20, LogRetentionDays: 7, MetricsRetentionDays: 14, PricePerMonth: 19, IsActive: true, DurationMonths: 1},
+		{Name: "Pro", MaxHosts: 10, MaxServicesPerHost: 20, LogRetentionDays: 14, MetricsRetentionDays: 30, PricePerMonth: 49, IsActive: true, DurationMonths: 1},
+		{Name: "Premium", MaxHosts: 25, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 60, PricePerMonth: 99, IsActive: true, DurationMonths: 1},
+		{Name: "Enterprise", MaxHosts: 50, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 90, PricePerMonth: 199, IsActive: true, DurationMonths: 1},
+		{Name: "Trial", MaxHosts: 25, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 60, PricePerMonth: 0, IsActive: true, DurationMonths: 1, IsTrial: true},
 	}
 
-	plans := []domain.Plan{
-		{Name: "Free", MaxHosts: 2, MaxServicesPerHost: 20, LogRetentionDays: 3, MetricsRetentionDays: 7, MaxLogBytesPerDay: 524288000, PricePerMonth: 0, IsActive: true, DurationMonths: 1},
-		{Name: "Basic", MaxHosts: 5, MaxServicesPerHost: 20, LogRetentionDays: 7, MetricsRetentionDays: 14, MaxLogBytesPerDay: 1073741824, PricePerMonth: 19, IsActive: true, DurationMonths: 1},
-		{Name: "Pro", MaxHosts: 10, MaxServicesPerHost: 20, LogRetentionDays: 14, MetricsRetentionDays: 30, MaxLogBytesPerDay: 5368709120, PricePerMonth: 49, IsActive: true, DurationMonths: 1},
-		{Name: "Premium", MaxHosts: 25, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 60, MaxLogBytesPerDay: 21474836480, PricePerMonth: 99, IsActive: true, DurationMonths: 1},
-		{Name: "Enterprise", MaxHosts: 50, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 90, MaxLogBytesPerDay: 53687091200, PricePerMonth: 199, IsActive: true, DurationMonths: 1},
-		{Name: "Trial", MaxHosts: 25, MaxServicesPerHost: 20, LogRetentionDays: 30, MetricsRetentionDays: 60, MaxLogBytesPerDay: 21474836480, PricePerMonth: 0, IsActive: true, DurationMonths: 1, IsTrial: true},
-	}
 	for _, p := range plans {
-		if err := db.Create(&p).Error; err != nil {
-			log.Printf("[seed] failed to create plan %s: %v", p.Name, err)
+		var existing domain.Plan
+		err := db.Where("name = ?", p.Name).First(&existing).Error
+		switch {
+		case err == nil:
+			// Signup requires the system Trial plan to carry this flag. Older
+			// databases may have the named plan without it.
+			if p.IsTrial && !existing.IsTrial {
+				if err := db.Model(&existing).Update("is_trial", true).Error; err != nil {
+					log.Printf("[seed] failed to repair trial plan: %v", err)
+				} else {
+					log.Println("[seed] repaired trial plan")
+				}
+			}
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			if err := db.Create(&p).Error; err != nil {
+				log.Printf("[seed] failed to create plan %s: %v", p.Name, err)
+			}
+		default:
+			log.Printf("[seed] failed to look up plan %s: %v", p.Name, err)
 		}
 	}
-	log.Printf("[seed] created %d default plans", len(plans))
 }
 
 func boolStatus(ok bool) string {

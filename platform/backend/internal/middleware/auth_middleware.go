@@ -104,7 +104,16 @@ func isBillingPath(c echo.Context) bool {
 // an already-issued access token after their admin deactivates the account.
 func authorize(c echo.Context, claims *infrastructure.Claims, tenantRepo *repository.TenantRepository, userRepo *repository.UserRepository, subscriptionRepo *repository.SubscriptionRepository) (bool, error) {
 	tenant, err := tenantRepo.FindByIDCtx(c.Request().Context(), claims.TenantID)
-	if err != nil || tenant == nil || !tenant.IsActive {
+	if err != nil || tenant == nil {
+		return false, c.JSON(http.StatusUnauthorized, map[string]string{"error": "tenant inactive"})
+	}
+	if tenant.BannedAt != nil {
+		return false, c.JSON(apierror.ErrTenantBanned.Status, map[string]interface{}{
+			"error": apierror.ErrTenantBanned.Message,
+			"code":  apierror.ErrTenantBanned.Code,
+		})
+	}
+	if !tenant.IsActive {
 		return false, c.JSON(http.StatusUnauthorized, map[string]string{"error": "tenant inactive"})
 	}
 

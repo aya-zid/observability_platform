@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"gitlab.medianet.tn/pfe/2026-aya-zid/observability-platform/backend/internal/config"
@@ -54,43 +53,15 @@ type QueryLogLabelsParams struct {
 type QueryService struct {
 	cfg        *config.Config
 	tenantRepo *repository.TenantRepository
-	subRepo    *repository.SubscriptionRepository
 	httpClient *http.Client
 }
 
-func NewQueryService(cfg *config.Config, tenantRepo *repository.TenantRepository, subRepo *repository.SubscriptionRepository) *QueryService {
+func NewQueryService(cfg *config.Config, tenantRepo *repository.TenantRepository, _ *repository.SubscriptionRepository) *QueryService {
 	return &QueryService{
 		cfg:        cfg,
 		tenantRepo: tenantRepo,
-		subRepo:    subRepo,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
-}
-
-func (s *QueryService) getRetentionCutoff(ctx context.Context, tenantID uint) time.Time {
-	if s.subRepo == nil {
-		return time.Time{}
-	}
-	sub, err := s.subRepo.FindByTenantCtx(ctx, tenantID)
-	if err != nil || sub == nil || sub.Plan.ID == 0 {
-		return time.Time{}
-	}
-	return time.Now().Add(-time.Duration(sub.Plan.LogRetentionDays) * 24 * time.Hour)
-}
-
-func clampStart(start string, cutoff time.Time) string {
-	if start == "" || cutoff.IsZero() {
-		return start
-	}
-	startNs, err := strconv.ParseInt(start, 10, 64)
-	if err != nil {
-		return start
-	}
-	startTime := time.Unix(0, startNs)
-	if startTime.Before(cutoff) {
-		return strconv.FormatInt(cutoff.UnixNano(), 10)
-	}
-	return start
 }
 
 func (s *QueryService) QueryMetrics(ctx context.Context, tenantID uint, params QueryMetricsParams) (*ProxiedResponse, error) {
@@ -122,9 +93,6 @@ func (s *QueryService) QueryLogsRange(ctx context.Context, tenantID uint, params
 	if err != nil || tenant == nil {
 		return nil, fmt.Errorf("tenant not found")
 	}
-
-	cutoff := s.getRetentionCutoff(ctx, tenantID)
-	params.Start = clampStart(params.Start, cutoff)
 
 	limit := params.Limit
 	if limit == "" {
@@ -175,9 +143,6 @@ func (s *QueryService) QueryLogs(ctx context.Context, tenantID uint, params Quer
 		end = fmt.Sprintf("%d", now)
 	}
 
-	cutoff := s.getRetentionCutoff(ctx, tenantID)
-	start = clampStart(start, cutoff)
-
 	upstream := fmt.Sprintf("http://%s:%s/loki/api/v1/query_range", s.cfg.LokiHost, s.cfg.LokiPort)
 	queryParams := url.Values{}
 	queryParams.Set("query", params.Query)
@@ -208,8 +173,6 @@ func (s *QueryService) QueryLogLabels(ctx context.Context, tenantID uint, params
 		queryParams.Set("query", params.Query)
 	}
 	if params.Start != "" {
-		cutoff := s.getRetentionCutoff(ctx, tenantID)
-		params.Start = clampStart(params.Start, cutoff)
 		queryParams.Set("start", params.Start)
 	}
 	if params.End != "" {

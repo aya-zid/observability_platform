@@ -44,41 +44,37 @@ func NewAdminTenantService(
 func (s *AdminTenantService) BanTenant(ctx context.Context, tenantID uint, adminID uint, reason string) error {
 	now := time.Now()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&domain.Tenant{}).Where("id = ?", tenantID).Updates(map[string]interface{}{
-			"is_active":           false,
-			"subscription_status": domain.SubscriptionStatusSuspended,
-			"banned_at":           now,
-			"ban_reason":          reason,
-			"banned_by_admin_id":  adminID,
-		}).Error; err != nil {
-			return err
-		}
-		return tx.Model(&domain.TenantSubscription{}).Where("tenant_id = ?", tenantID).Updates(map[string]interface{}{
-			"status":             "suspended",
+		result := tx.Model(&domain.Tenant{}).Where("id = ?", tenantID).Updates(map[string]interface{}{
+			"is_active":          false,
 			"banned_at":          now,
 			"ban_reason":         reason,
 			"banned_by_admin_id": adminID,
-		}).Error
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	})
 }
 
 func (s *AdminTenantService) UnbanTenant(ctx context.Context, tenantID uint) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&domain.Tenant{}).Where("id = ?", tenantID).Updates(map[string]interface{}{
-			"is_active":           true,
-			"subscription_status": domain.SubscriptionStatusActive,
-			"banned_at":           nil,
-			"ban_reason":          "",
-			"banned_by_admin_id":  nil,
-		}).Error; err != nil {
-			return err
-		}
-		return tx.Model(&domain.TenantSubscription{}).Where("tenant_id = ?", tenantID).Updates(map[string]interface{}{
-			"status":             "active",
+		result := tx.Model(&domain.Tenant{}).Where("id = ?", tenantID).Updates(map[string]interface{}{
+			"is_active":          true,
 			"banned_at":          nil,
 			"ban_reason":         "",
 			"banned_by_admin_id": nil,
-		}).Error
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	})
 }
 
@@ -99,7 +95,6 @@ func (s *AdminTenantService) GetTenantDetail(ctx context.Context, tenantID uint)
 	logRetention := 0
 	metricsRetention := 0
 	maxHosts := 0
-	maxLogBytes := int64(0)
 	aiReports := false
 	currentPeriodEnd := ""
 	startedAt := ""
@@ -109,7 +104,6 @@ func (s *AdminTenantService) GetTenantDetail(ctx context.Context, tenantID uint)
 		logRetention = sub.Plan.LogRetentionDays
 		metricsRetention = sub.Plan.MetricsRetentionDays
 		maxHosts = sub.Plan.MaxHosts
-		maxLogBytes = sub.Plan.MaxLogBytesPerDay
 		aiReports = sub.Plan.AIReportsEnabled
 		if sub.CurrentPeriodEnd != nil {
 			currentPeriodEnd = sub.CurrentPeriodEnd.Format("2006-01-02")
@@ -136,7 +130,6 @@ func (s *AdminTenantService) GetTenantDetail(ctx context.Context, tenantID uint)
 		LogRetentionDays:     logRetention,
 		MetricsRetentionDays: metricsRetention,
 		MaxHosts:             maxHosts,
-		MaxLogBytesPerDay:    maxLogBytes,
 		CurrentPeriodEnd:     ptrStr(currentPeriodEnd),
 		StartedAt:            startedAt,
 		BannedAt:             ptrStr(bannedAt),
@@ -148,12 +141,12 @@ func (s *AdminTenantService) GetTenantDetail(ctx context.Context, tenantID uint)
 }
 
 func (s *AdminTenantService) AssignPack(ctx context.Context, tenantID uint, planID uint) error {
-	subSvc := NewAdminSubscriptionService(s.db, s.tenantRepo, s.subRepo, s.planRepo, s.hostRepo)
+	subSvc := NewAdminSubscriptionService(s.db, s.tenantRepo, s.subRepo, s.planRepo, s.hostRepo, repository.NewSubscriptionRequestRepository(s.db))
 	return subSvc.AssignPack(ctx, tenantID, planID)
 }
 
 func (s *AdminTenantService) RenewSubscription(ctx context.Context, tenantID uint, durationMonths int) error {
-	subSvc := NewAdminSubscriptionService(s.db, s.tenantRepo, s.subRepo, s.planRepo, s.hostRepo)
+	subSvc := NewAdminSubscriptionService(s.db, s.tenantRepo, s.subRepo, s.planRepo, s.hostRepo, repository.NewSubscriptionRequestRepository(s.db))
 	return subSvc.RenewSubscription(ctx, tenantID, durationMonths)
 }
 

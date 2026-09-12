@@ -7,7 +7,6 @@ export type PlanInfo = {
   max_services_per_host: number
   log_retention_days: number
   metrics_retention_days: number
-  max_log_bytes_per_day: number
   price_per_month: number
 }
 
@@ -15,14 +14,24 @@ export type UsageInfo = {
   hosts_used: number
   hosts_limit: number
   log_bytes_today: number
-  log_bytes_limit: number
   log_retention_days: number
+}
+
+export type PendingRequestInfo = {
+  id: number
+  plan_id: number
+  plan_name: string
+  plan_price: number
+  status: string
+  notes?: string
+  created_at: string
 }
 
 export type BillingOverview = {
   plan: PlanInfo
   usage: UsageInfo
   available_plans: PlanInfo[]
+  pending_request?: PendingRequestInfo
 }
 
 export type DailyUsage = {

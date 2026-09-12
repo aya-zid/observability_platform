@@ -12,11 +12,12 @@ import (
 )
 
 type AdminSubscriptionService struct {
-	db          *gorm.DB
-	tenantRepo  *repository.TenantRepository
-	subRepo     *repository.SubscriptionRepository
-	planRepo    *repository.PlanRepository
-	hostRepo    *repository.HostRepository
+	db         *gorm.DB
+	tenantRepo *repository.TenantRepository
+	subRepo    *repository.SubscriptionRepository
+	planRepo   *repository.PlanRepository
+	hostRepo   *repository.HostRepository
+	subReqRepo *repository.SubscriptionRequestRepository
 }
 
 func NewAdminSubscriptionService(
@@ -25,6 +26,7 @@ func NewAdminSubscriptionService(
 	subRepo *repository.SubscriptionRepository,
 	planRepo *repository.PlanRepository,
 	hostRepo *repository.HostRepository,
+	subReqRepo *repository.SubscriptionRequestRepository,
 ) *AdminSubscriptionService {
 	return &AdminSubscriptionService{
 		db:         db,
@@ -32,6 +34,7 @@ func NewAdminSubscriptionService(
 		subRepo:    subRepo,
 		planRepo:   planRepo,
 		hostRepo:   hostRepo,
+		subReqRepo: subReqRepo,
 	}
 }
 
@@ -65,9 +68,6 @@ func (s *AdminSubscriptionService) AssignPack(ctx context.Context, tenantID uint
 			existing.Status = "active"
 			existing.StartedAt = now
 			existing.CurrentPeriodEnd = &periodEnd
-			existing.BannedAt = nil
-			existing.BanReason = ""
-			existing.BannedByAdminID = nil
 			existing.Notes = ""
 			if err := tx.Save(&existing).Error; err != nil {
 				return err
@@ -114,9 +114,6 @@ func (s *AdminSubscriptionService) RenewSubscription(ctx context.Context, tenant
 		if err := tx.Model(&domain.TenantSubscription{}).Where("tenant_id = ?", tenantID).Updates(map[string]interface{}{
 			"status":             "active",
 			"current_period_end": newEnd,
-			"banned_at":          nil,
-			"ban_reason":         "",
-			"banned_by_admin_id": nil,
 		}).Error; err != nil {
 			return err
 		}
@@ -133,4 +130,51 @@ func (s *AdminSubscriptionService) ListExpired(ctx context.Context) ([]domain.Te
 		Where("status = ? AND current_period_end IS NOT NULL AND current_period_end < ?", "active", now).
 		Find(&subs).Error
 	return subs, err
+}
+
+func (s *AdminSubscriptionService) ListAllSubscriptions(ctx context.Context, status string) ([]domain.TenantSubscription, error) {
+	return s.subRepo.ListAllCtx(ctx, status)
+}
+
+func (s *AdminSubscriptionService) ListSubscriptionRequests(ctx context.Context, status string) ([]domain.SubscriptionRequest, error) {
+	return s.subReqRepo.List(ctx, status)
+}
+
+func (s *AdminSubscriptionService) ReviewSubscriptionRequest(ctx context.Context, reqID uint, status string, adminNotes string, adminID uint) error {
+	req, err := s.subReqRepo.FindByIDCtx(ctx, reqID)
+	if err != nil || req == nil {
+		return errors.New("subscription request not found")
+	}
+
+	if req.Status != "pending" {
+		return errors.New("request has already been reviewed")
+	}
+
+	if status != "approved" && status != "rejected" {
+		return errors.New("invalid status: must be approved or rejected")
+	}
+
+	if status == "approved" {
+		if err := s.AssignPack(ctx, req.TenantID, req.PlanID); err != nil {
+			return err
+		}
+	}
+
+	return s.subReqRepo.UpdateStatus(ctx, reqID, status, adminNotes, adminID)
+}
+
+func (s *AdminSubscriptionService) CreateSubscriptionRequest(ctx context.Context, tenantID uint, planID uint, notes string) error {
+	var plan domain.Plan
+	if err := s.db.WithContext(ctx).First(&plan, planID).Error; err != nil {
+		return errors.New("plan not found")
+	}
+
+	req := &domain.SubscriptionRequest{
+		TenantID: tenantID,
+		PlanID:   planID,
+		Status:   "pending",
+		Notes:    notes,
+	}
+
+	return s.subReqRepo.Create(ctx, req)
 }

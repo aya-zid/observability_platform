@@ -44,6 +44,11 @@ export default function LoginPage() {
         navigate("/inactive", { replace: true })
         return
       }
+      if (apiErrorCode(e) === ERROR_CODES.TENANT_BANNED) {
+        setStatus("account_suspended")
+        navigate("/account-suspended", { replace: true })
+        return
+      }
       setError("Invalid email or password.")
     }
   }

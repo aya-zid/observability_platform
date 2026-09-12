@@ -49,3 +49,14 @@ func (r *SubscriptionRepository) UpdatePlanCtx(ctx context.Context, tenantID uin
 			"banned_by_admin_id": nil,
 		}).Error
 }
+
+func (r *SubscriptionRepository) ListAllCtx(ctx context.Context, status string) ([]domain.TenantSubscription, error) {
+	var subs []domain.TenantSubscription
+	query := r.db.WithContext(ctx).Preload("Tenant").Preload("Plan").Order("id DESC")
+	if status != "" && status != "all" {
+		query = query.Where("status = ?", status)
+	}
+	err := query.Find(&subs).Error
+	return subs, err
+}
+

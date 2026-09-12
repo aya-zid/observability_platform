@@ -88,7 +88,9 @@ limits_config:
 compactor:
   working_directory: /loki/compactor
   compaction_interval: 10m
-  retention_enabled: true
+  # Keep data indefinitely. Per-tenant retention was previously implemented
+  # through Loki's delete API and is intentionally disabled.
+  retention_enabled: false
   retention_delete_delay: 2h
   delete_request_store: filesystem
 
@@ -111,4 +113,3 @@ frontend:
 querier:
   max_concurrent: 40
   query_ingesters_within: 0
-

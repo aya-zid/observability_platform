@@ -11,13 +11,13 @@ import (
 )
 
 type AdminDashboardService struct {
-	db             *gorm.DB
-	dashboardRepo  *repository.AdminDashboardRepository
-	planRepo       *repository.PlanRepository
-	tenantRepo     *repository.TenantRepository
-	hostRepo       *repository.HostRepository
-	usageRepo      *repository.UsageRepository
-	subRepo        *repository.SubscriptionRepository
+	db            *gorm.DB
+	dashboardRepo *repository.AdminDashboardRepository
+	planRepo      *repository.PlanRepository
+	tenantRepo    *repository.TenantRepository
+	hostRepo      *repository.HostRepository
+	usageRepo     *repository.UsageRepository
+	subRepo       *repository.SubscriptionRepository
 }
 
 func NewAdminDashboardService(
@@ -74,14 +74,16 @@ func (s *AdminDashboardService) GetStats(ctx context.Context) (*dto.AdminDashboa
 	}
 
 	return &dto.AdminDashboardStatsResponse{
-		TotalTenants:     stats.TotalTenants,
-		ActiveTenants:    stats.ActiveTenants,
-		BannedTenants:    stats.BannedTenants,
-		TotalHosts:       stats.TotalHosts,
-		TotalIngestToday: stats.TotalIngestToday,
-		RevenueEstimate:  stats.RevenueEstimate,
-		PlanDistribution: planDistDTO,
-		IngestionTrend:   trendDTO,
+		TotalTenants:         stats.TotalTenants,
+		ActiveTenants:        stats.ActiveTenants,
+		BannedTenants:        stats.BannedTenants,
+		TotalHosts:          stats.TotalHosts,
+		TotalIngestToday:    stats.TotalIngestToday,
+		RevenueEstimate:     stats.RevenueEstimate,
+		PendingRequests:     stats.PendingRequests,
+		ExpiredSubscriptions: stats.ExpiredSubscriptions,
+		PlanDistribution:    planDistDTO,
+		IngestionTrend:      trendDTO,
 	}, nil
 }
 
@@ -148,7 +150,6 @@ func (s *AdminDashboardService) GetTenantDetail(ctx context.Context, tenantID ui
 	logRetention := 0
 	metricsRetention := 0
 	maxHosts := 0
-	maxLogBytes := int64(0)
 	aiReports := false
 	currentPeriodEnd := ""
 	startedAt := ""
@@ -158,7 +159,6 @@ func (s *AdminDashboardService) GetTenantDetail(ctx context.Context, tenantID ui
 		logRetention = sub.Plan.LogRetentionDays
 		metricsRetention = sub.Plan.MetricsRetentionDays
 		maxHosts = sub.Plan.MaxHosts
-		maxLogBytes = sub.Plan.MaxLogBytesPerDay
 		aiReports = sub.Plan.AIReportsEnabled
 		if sub.CurrentPeriodEnd != nil {
 			currentPeriodEnd = sub.CurrentPeriodEnd.Format("2006-01-02")
@@ -185,7 +185,6 @@ func (s *AdminDashboardService) GetTenantDetail(ctx context.Context, tenantID ui
 		LogRetentionDays:     logRetention,
 		MetricsRetentionDays: metricsRetention,
 		MaxHosts:             maxHosts,
-		MaxLogBytesPerDay:    maxLogBytes,
 		CurrentPeriodEnd:     ptrStr(currentPeriodEnd),
 		StartedAt:            startedAt,
 		BannedAt:             ptrStr(bannedAt),

@@ -1,20 +1,40 @@
+import { useState, useEffect } from "react"
 import { Outlet, NavLink } from "react-router-dom"
 import { useAdminAuthStore } from "@/store/adminAuthStore"
 import client from "@/api/client"
 import {
-  LayoutDashboard, Users, Package, Settings, LogOut, Activity
+  LayoutDashboard, Users, Package, Settings, LogOut, Activity, CreditCard
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const navItems = [
-  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", end: true },
-  { to: "/tenants", icon: Users, label: "Tenants" },
-  { to: "/packs", icon: Package, label: "Packs" },
-  { to: "/settings", icon: Settings, label: "Settings" },
-]
-
 export function AdminLayout() {
   const clearSession = useAdminAuthStore((s) => s.clearSession)
+  const [pendingCount, setPendingCount] = useState<number>(0)
+
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        const res = await client.get("/dashboard/stats")
+        if (res.data?.pending_requests) {
+          setPendingCount(res.data.pending_requests)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchPendingCount()
+    const interval = setInterval(fetchPendingCount, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const navItems = [
+    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", end: true },
+    { to: "/subscriptions", icon: CreditCard, label: "Subscriptions", badge: pendingCount },
+    { to: "/tenants", icon: Users, label: "Tenants" },
+    { to: "/packs", icon: Package, label: "Packs" },
+    { to: "/settings", icon: Settings, label: "Settings" },
+  ]
 
   const handleLogout = async () => {
     try {
@@ -38,7 +58,7 @@ export function AdminLayout() {
               <span className="text-sidebar-accent">Media</span><span className="text-sidebar-primary">Net</span>
             </div>
             <div className="text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/50 font-semibold">
-              Admin
+              Admin Panel
             </div>
           </div>
         </div>
@@ -51,15 +71,22 @@ export function AdminLayout() {
               end={item.end}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors border-l-2",
+                  "flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors border-l-2",
                   isActive
                     ? "bg-sidebar-primary/15 text-sidebar-primary border-l-sidebar-primary"
                     : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/10 border-l-transparent"
                 )
               }
             >
-              <item.icon className="w-4 h-4 shrink-0" />
-              <span className="font-medium">{item.label}</span>
+              <div className="flex items-center gap-3">
+                <item.icon className="w-4 h-4 shrink-0" />
+                <span className="font-medium">{item.label}</span>
+              </div>
+              {!!item.badge && item.badge > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                  {item.badge}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

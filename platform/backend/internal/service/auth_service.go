@@ -109,7 +109,7 @@ func (s *AuthService) Signup(ctx context.Context, req dto.SignupRequest) (access
 
 		// Create free trial subscription for new tenant
 		var trialPlan domain.Plan
-		if err := tx.Where("name = ? AND is_trial = ?", "Trial", true).First(&trialPlan).Error; err != nil {
+		if err := tx.Where("is_trial = ? AND is_active = ?", true, true).Order("id ASC").First(&trialPlan).Error; err != nil {
 			return err
 		}
 		periodEnd := now.AddDate(0, 0, 14)
@@ -147,6 +147,9 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (access
 	tenant, err := s.tenantRepo.WithDB(s.db).FindByIDCtx(ctx, user.TenantID)
 	if err != nil || tenant == nil {
 		return "", "", apierror.ErrUnauthorized
+	}
+	if tenant.BannedAt != nil {
+		return "", "", apierror.ErrTenantBanned
 	}
 	if !tenant.IsActive {
 		return "", "", apierror.ErrUnauthorized
@@ -272,6 +275,9 @@ return val
 	tenant, err := s.tenantRepo.WithDB(s.db).FindByIDCtx(ctx, session.TenantID)
 	if err != nil || tenant == nil {
 		return "", "", apierror.ErrUnauthorized
+	}
+	if tenant.BannedAt != nil {
+		return "", "", apierror.ErrTenantBanned
 	}
 	if !tenant.IsActive {
 		return "", "", apierror.ErrUnauthorized

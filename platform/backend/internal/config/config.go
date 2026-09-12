@@ -177,7 +177,7 @@ func Load() *Config {
 		SMTPUser:        getEnv("SMTP_USER", ""),
 		SMTPPass:        getEnv("SMTP_PASS", ""),
 		SMTPFromAddress: getEnv("SMTP_FROM_ADDRESS", ""),
-		SMTPFromName:    getEnv("SMTP_FROM_NAME", "Observability Platform"),
+		SMTPFromName:    getEnv("SMTP_FROM_NAME", "MediaNet Observability"),
 		PlatformURL:     getEnv("PLATFORM_URL", "http://localhost:5173"),
 
 		// AI reports

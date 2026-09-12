@@ -16,12 +16,13 @@ var (
 	ErrForbidden    = &APIError{Code: "FORBIDDEN", Message: "Forbidden", Status: http.StatusForbidden}
 
 	ErrUserDeactivated = &APIError{Code: "USER_DEACTIVATED", Message: "Your account has been deactivated by your company administrator.", Status: http.StatusForbidden}
+	ErrTenantBanned    = &APIError{Code: "TENANT_BANNED", Message: "Your organization has been banned by the platform administrator.", Status: http.StatusForbidden}
 
-	ErrInternal = &APIError{Code: "INTERNAL", Message: "Internal server error", Status: http.StatusInternalServerError}
+	ErrInternal                   = &APIError{Code: "INTERNAL", Message: "Internal server error", Status: http.StatusInternalServerError}
 	ErrAuthTemporarilyUnavailable = &APIError{Code: "AUTH_TEMPORARILY_UNAVAILABLE", Message: "Authentication temporarily unavailable", Status: http.StatusServiceUnavailable}
 
 	ErrInvalidResetToken = &APIError{Code: "INVALID_RESET_TOKEN", Message: "This password reset link is invalid or has expired.", Status: http.StatusBadRequest}
 
-	ErrAccountSuspended     = &APIError{Code: "ACCOUNT_SUSPENDED", Message: "Your account has been suspended.", Status: http.StatusForbidden}
-	ErrSubscriptionExpired  = &APIError{Code: "SUBSCRIPTION_EXPIRED", Message: "Your subscription has expired.", Status: http.StatusForbidden}
+	ErrAccountSuspended    = &APIError{Code: "ACCOUNT_SUSPENDED", Message: "Your account has been suspended.", Status: http.StatusForbidden}
+	ErrSubscriptionExpired = &APIError{Code: "SUBSCRIPTION_EXPIRED", Message: "Your subscription has expired.", Status: http.StatusForbidden}
 )

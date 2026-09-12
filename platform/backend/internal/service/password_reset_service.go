@@ -82,7 +82,7 @@ func (s *PasswordResetService) RequestPasswordReset(ctx context.Context, email s
 	}
 
 	resetURL := fmt.Sprintf("%s/reset-password/%s", s.platformURL, token)
-	subject := "Reset your Observability Platform password"
+	subject := "Reset your MediaNet Observability password"
 	body := s.emailSender.PasswordResetHTML(resetURL)
 	if err := s.emailSender.Send(normalizedEmail, subject, body); err != nil {
 		return fmt.Errorf("send reset email: %w", err)

@@ -25,6 +25,9 @@ lovable_design
 
 .kilo
 
-HANDOFF.md
-NEXT_STEPS.md
-RETENTION_STATUS.md
+# Diagrams and markdown notes
+*.drawio
+**/*.drawio
+*.md
+!README.md
+!**/README.md

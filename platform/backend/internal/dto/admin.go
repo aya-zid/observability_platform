@@ -22,21 +22,24 @@ type AdminAuthResponse struct {
 }
 
 type AdminProfileResponse struct {
-	AdminID uint   `json:"admin_id"`
-	Email   string `json:"email"`
+	AdminID  uint   `json:"admin_id"`
+	Email    string `json:"email"`
 	FullName string `json:"full_name"`
-	Role    string `json:"role"`
+	Role     string `json:"role"`
 }
 
 type AdminDashboardStatsResponse struct {
-	TotalTenants     int64            `json:"total_tenants"`
-	ActiveTenants    int64            `json:"active_tenants"`
-	BannedTenants    int64            `json:"banned_tenants"`
-	TotalHosts       int64            `json:"total_hosts"`
-	TotalIngestToday int64            `json:"total_ingest_today"`
-	RevenueEstimate  float64          `json:"revenue_estimate"`
-	PlanDistribution []PlanDistribution `json:"plan_distribution"`
-	IngestionTrend   []DailyUsage     `json:"ingestion_trend"`
+	TotalTenants          int64              `json:"total_tenants"`
+	ActiveTenants         int64              `json:"active_tenants"`
+	BannedTenants         int64              `json:"banned_tenants"`
+	TotalHosts            int64              `json:"total_hosts"`
+	TotalIngestToday      int64              `json:"total_ingest_today"`
+	RevenueEstimate       float64            `json:"revenue_estimate"`
+	PendingRequests       int64              `json:"pending_requests"`
+	ExpiredSubscriptions  int64              `json:"expired_subscriptions"`
+	TotalSubscriptions    int64              `json:"total_subscriptions"`
+	PlanDistribution      []PlanDistribution `json:"plan_distribution"`
+	IngestionTrend        []DailyUsage       `json:"ingestion_trend"`
 }
 
 type PlanDistribution struct {
@@ -45,42 +48,41 @@ type PlanDistribution struct {
 }
 
 type AdminTenantListItem struct {
-	ID                uint             `json:"id"`
-	CompanyName       string           `json:"company_name"`
-	ContactEmail      string           `json:"contact_email"`
-	IsActive          bool             `json:"is_active"`
-	SubscriptionStatus string          `json:"subscription_status"`
-	HostsUsed         int              `json:"hosts_used"`
-	PlanName          string           `json:"plan_name"`
-	PlanPrice         float64          `json:"plan_price"`
-	CurrentPeriodEnd  *string          `json:"current_period_end"`
-	BannedAt          *string          `json:"banned_at"`
-	BanReason         string           `json:"ban_reason"`
-	CreatedAt         string           `json:"created_at"`
+	ID                 uint    `json:"id"`
+	CompanyName        string  `json:"company_name"`
+	ContactEmail       string  `json:"contact_email"`
+	IsActive           bool    `json:"is_active"`
+	SubscriptionStatus string  `json:"subscription_status"`
+	HostsUsed          int     `json:"hosts_used"`
+	PlanName           string  `json:"plan_name"`
+	PlanPrice          float64 `json:"plan_price"`
+	CurrentPeriodEnd   *string `json:"current_period_end"`
+	BannedAt           *string `json:"banned_at"`
+	BanReason          string  `json:"ban_reason"`
+	CreatedAt          string  `json:"created_at"`
 }
 
 type AdminTenantDetailResponse struct {
-	ID                uint             `json:"id"`
-	CompanyName       string           `json:"company_name"`
-	ContactEmail      string           `json:"contact_email"`
-	ContactPhone      string           `json:"contact_phone"`
-	IsActive          bool             `json:"is_active"`
-	SubscriptionStatus string          `json:"subscription_status"`
-	Timezone          string           `json:"timezone"`
-	HostsUsed         int              `json:"hosts_used"`
-	PlanName          string           `json:"plan_name"`
-	PlanPrice         float64          `json:"plan_price"`
-	LogRetentionDays  int              `json:"log_retention_days"`
-	MetricsRetentionDays int           `json:"metrics_retention_days"`
-	MaxHosts          int              `json:"max_hosts"`
-	MaxLogBytesPerDay int64            `json:"max_log_bytes_per_day"`
-	CurrentPeriodEnd  *string          `json:"current_period_end"`
-	StartedAt         string           `json:"started_at"`
-	BannedAt          *string          `json:"banned_at"`
-	BanReason         string           `json:"ban_reason"`
-	AIReportsEnabled  bool             `json:"ai_reports_enabled"`
-	UsersCount        int              `json:"users_count"`
-	CreatedAt         string           `json:"created_at"`
+	ID                   uint    `json:"id"`
+	CompanyName          string  `json:"company_name"`
+	ContactEmail         string  `json:"contact_email"`
+	ContactPhone         string  `json:"contact_phone"`
+	IsActive             bool    `json:"is_active"`
+	SubscriptionStatus   string  `json:"subscription_status"`
+	Timezone             string  `json:"timezone"`
+	HostsUsed            int     `json:"hosts_used"`
+	PlanName             string  `json:"plan_name"`
+	PlanPrice            float64 `json:"plan_price"`
+	LogRetentionDays     int     `json:"log_retention_days"`
+	MetricsRetentionDays int     `json:"metrics_retention_days"`
+	MaxHosts             int     `json:"max_hosts"`
+	CurrentPeriodEnd     *string `json:"current_period_end"`
+	StartedAt            string  `json:"started_at"`
+	BannedAt             *string `json:"banned_at"`
+	BanReason            string  `json:"ban_reason"`
+	AIReportsEnabled     bool    `json:"ai_reports_enabled"`
+	UsersCount           int     `json:"users_count"`
+	CreatedAt            string  `json:"created_at"`
 }
 
 type AdminBanTenantRequest struct {
@@ -95,7 +97,6 @@ type AdminCreatePackRequest struct {
 	MaxServicesPerHost   int     `json:"max_services_per_host" validate:"required,min=1"`
 	LogRetentionDays     int     `json:"log_retention_days" validate:"required,min=1"`
 	MetricsRetentionDays int     `json:"metrics_retention_days" validate:"required,min=1"`
-	MaxLogBytesPerDay    int64   `json:"max_log_bytes_per_day" validate:"required,min=1"`
 	AIReportsEnabled     bool    `json:"ai_reports_enabled"`
 	DurationMonths       int     `json:"duration_months" validate:"required,min=0"`
 	IsActive             bool    `json:"is_active"`
@@ -110,7 +111,6 @@ type AdminUpdatePackRequest struct {
 	MaxServicesPerHost   int     `json:"max_services_per_host" validate:"required,min=1"`
 	LogRetentionDays     int     `json:"log_retention_days" validate:"required,min=1"`
 	MetricsRetentionDays int     `json:"metrics_retention_days" validate:"required,min=1"`
-	MaxLogBytesPerDay    int64   `json:"max_log_bytes_per_day" validate:"required,min=1"`
 	AIReportsEnabled     bool    `json:"ai_reports_enabled"`
 	DurationMonths       int     `json:"duration_months" validate:"required,min=0"`
 	IsActive             bool    `json:"is_active"`
@@ -126,7 +126,6 @@ type AdminPackResponse struct {
 	MaxServicesPerHost   int     `json:"max_services_per_host"`
 	LogRetentionDays     int     `json:"log_retention_days"`
 	MetricsRetentionDays int     `json:"metrics_retention_days"`
-	MaxLogBytesPerDay    int64   `json:"max_log_bytes_per_day"`
 	AIReportsEnabled     bool    `json:"ai_reports_enabled"`
 	DurationMonths       int     `json:"duration_months"`
 	IsActive             bool    `json:"is_active"`
@@ -142,4 +141,37 @@ type AdminAssignPackRequest struct {
 
 type AdminRenewSubscriptionRequest struct {
 	DurationMonths int `json:"duration_months" validate:"required,min=1"`
+}
+
+type AdminSubscriptionRequestItem struct {
+	ID           uint    `json:"id"`
+	TenantID     uint    `json:"tenant_id"`
+	TenantName   string  `json:"tenant_name"`
+	TenantEmail  string  `json:"tenant_email"`
+	PlanID       uint    `json:"plan_id"`
+	PlanName     string  `json:"plan_name"`
+	PlanPrice    float64 `json:"plan_price"`
+	Status       string  `json:"status"`
+	Notes        string  `json:"notes"`
+	AdminNotes   string  `json:"admin_notes"`
+	ReviewedAt   *string `json:"reviewed_at"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+type AdminReviewSubscriptionRequest struct {
+	Status     string `json:"status" validate:"required,oneof=approved rejected"`
+	AdminNotes string `json:"admin_notes"`
+}
+
+type AdminSubscriptionListItem struct {
+	ID               uint    `json:"id"`
+	TenantID         uint    `json:"tenant_id"`
+	TenantName       string  `json:"tenant_name"`
+	TenantEmail      string  `json:"tenant_email"`
+	PlanName         string  `json:"plan_name"`
+	PlanPrice        float64 `json:"plan_price"`
+	Status           string  `json:"status"`
+	StartedAt        string  `json:"started_at"`
+	CurrentPeriodEnd *string `json:"current_period_end"`
+	Notes            string  `json:"notes"`
 }

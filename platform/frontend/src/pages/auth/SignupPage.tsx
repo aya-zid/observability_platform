@@ -1,4 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod"
+import axios from "axios"
 import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { Link, useNavigate } from "react-router-dom"
@@ -57,9 +58,9 @@ export default function SignupPage() {
       setStatus("authenticated")
       if (res.role) setRole(res.role)
       navigate("/overview", { replace: true })
-    } catch {
+    } catch (err) {
       setStatus("unauthenticated")
-      setError("Signup failed. Check your inputs and try again.")
+      setError(getSignupErrorMessage(err))
     }
   }
 
@@ -141,6 +142,23 @@ export default function SignupPage() {
       </p>
     </AuthShell>
   )
+}
+
+function getSignupErrorMessage(error: unknown) {
+  if (!axios.isAxiosError(error)) {
+    return "Signup failed. Please try again."
+  }
+
+  const message = (error.response?.data as { error?: unknown } | undefined)?.error
+  if (typeof message === "string" && message.length > 0) {
+    return message
+  }
+
+  if (!error.response) {
+    return "Unable to reach the server. Please try again shortly."
+  }
+
+  return "Signup failed. Please try again."
 }
 
 function Field({

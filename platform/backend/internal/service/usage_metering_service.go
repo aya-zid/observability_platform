@@ -14,18 +14,14 @@ import (
 )
 
 type UsageMeteringService struct {
-	redis            *redis.Client
-	usageRepo        *repository.UsageRepository
-	planRepo         *repository.PlanRepository
-	subscriptionRepo *repository.SubscriptionRepository
+	redis     *redis.Client
+	usageRepo *repository.UsageRepository
 }
 
-func NewUsageMeteringService(redis *redis.Client, usageRepo *repository.UsageRepository, planRepo *repository.PlanRepository, subscriptionRepo *repository.SubscriptionRepository) *UsageMeteringService {
+func NewUsageMeteringService(redis *redis.Client, usageRepo *repository.UsageRepository, _ *repository.PlanRepository, _ *repository.SubscriptionRepository) *UsageMeteringService {
 	return &UsageMeteringService{
-		redis:            redis,
-		usageRepo:        usageRepo,
-		planRepo:         planRepo,
-		subscriptionRepo: subscriptionRepo,
+		redis:     redis,
+		usageRepo: usageRepo,
 	}
 }
 
@@ -43,27 +39,6 @@ func (s *UsageMeteringService) RecordIngestion(ctx context.Context, tenantID uin
 	pipe.Expire(ctx, key+":log_bytes", 48*time.Hour)
 	pipe.Expire(ctx, key+":metric_samples", 48*time.Hour)
 	_, _ = pipe.Exec(ctx)
-}
-
-func (s *UsageMeteringService) CheckQuota(ctx context.Context, tenantID uint) (bool, error) {
-	sub, err := s.subscriptionRepo.FindByTenantCtx(ctx, tenantID)
-	if err != nil || sub == nil {
-		return true, nil
-	}
-	if sub.Plan.MaxLogBytesPerDay == 0 {
-		return true, nil
-	}
-
-	today := time.Now().Format("2006-01-02")
-	key := fmt.Sprintf("usage:%d:%s:log_bytes", tenantID, today)
-	used, err := s.redis.Get(ctx, key).Int64()
-	if err == redis.Nil {
-		return true, nil
-	}
-	if err != nil {
-		return true, nil
-	}
-	return used < sub.Plan.MaxLogBytesPerDay, nil
 }
 
 func (s *UsageMeteringService) FlushToPostgres(ctx context.Context) {

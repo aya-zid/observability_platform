@@ -46,6 +46,24 @@ export default function BillingPage() {
         <div className="text-sm text-muted-foreground py-8 text-center">Loading billing info...</div>
       ) : billing ? (
         <>
+          {billing.pending_request && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 text-amber-900 dark:text-amber-200">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-full bg-amber-500/20 p-1 text-amber-600 dark:text-amber-400">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-semibold text-sm">Subscription Request Pending Admin Approval</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    You submitted a request to switch your subscription to <strong className="text-foreground">{billing.pending_request.plan_name}</strong> (${billing.pending_request.plan_price.toFixed(2)}/mo). An administrator will review and process your request shortly.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <SectionCard title="Current Plan" description="Your active subscription plan.">
             <div className="grid gap-2">
               <div className="text-2xl font-semibold">{billing.plan.name}</div>
@@ -61,9 +79,6 @@ export default function BillingPage() {
                 </div>
                 <div>
                   <span className="text-muted-foreground">Metrics retention:</span> {billing.plan.metrics_retention_days} days
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Daily log limit:</span> {formatBytes(billing.plan.max_log_bytes_per_day)}
                 </div>
               </div>
             </div>
@@ -86,21 +101,6 @@ export default function BillingPage() {
                   />
                 </div>
               </div>
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Logs Today</span>
-                  <span>{formatBytes(billing.usage.log_bytes_today)} / {formatBytes(billing.usage.log_bytes_limit)}</span>
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      billing.usage.log_bytes_today >= billing.usage.log_bytes_limit ? "bg-destructive" : "bg-primary"
-                    )}
-                    style={{ width: `${Math.min((billing.usage.log_bytes_today / billing.usage.log_bytes_limit) * 100, 100)}%` }}
-                  />
-                </div>
-              </div>
             </div>
 
             {usageHistoryQuery.data && usageHistoryQuery.data.length > 0 && (
@@ -118,36 +118,49 @@ export default function BillingPage() {
             )}
           </SectionCard>
 
-          <SectionCard title="Available Plans" description="Compare and upgrade your plan.">
+          <SectionCard title="Available Plans" description="Compare and request plan changes.">
             <div className="grid gap-4 md:grid-cols-3">
               {billing.available_plans.map((plan) => {
                 const isCurrent = plan.id === billing.plan.id
+                const isRequested = billing.pending_request?.plan_id === plan.id
                 return (
                   <div
                     key={plan.id}
                     className={cn(
-                      "rounded-xl border p-4",
-                      isCurrent ? "border-primary" : "border-border"
+                      "rounded-xl border p-4 flex flex-col justify-between",
+                      isCurrent ? "border-primary" : isRequested ? "border-amber-500/50 bg-amber-500/5" : "border-border"
                     )}
                   >
-                    <div className="font-semibold text-lg">{plan.name}</div>
-                    <div className="text-2xl font-bold mt-2">${plan.price_per_month.toFixed(2)}</div>
-                    <div className="text-sm text-muted-foreground">per month</div>
-                    <ul className="mt-4 grid gap-2 text-sm">
-                      <li>Up to {plan.max_hosts} hosts</li>
-                      <li>{plan.log_retention_days} day log retention</li>
-                      <li>{formatBytes(plan.max_log_bytes_per_day)} / day log limit</li>
-                    </ul>
-                    <div className="mt-4">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold text-lg">{plan.name}</div>
+                        {isRequested && (
+                          <span className="text-[10px] font-medium uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                            Requested
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-2xl font-bold mt-2">${plan.price_per_month.toFixed(2)}</div>
+                      <div className="text-sm text-muted-foreground">per month</div>
+                      <ul className="mt-4 grid gap-2 text-sm">
+                        <li>Up to {plan.max_hosts} hosts</li>
+                        <li>{plan.log_retention_days} day log retention</li>
+                      </ul>
+                    </div>
+                    <div className="mt-6">
                       {isCurrent ? (
-                        <Button variant="outline" disabled className="w-full">Current</Button>
+                        <Button variant="outline" disabled className="w-full">Current Plan</Button>
+                      ) : isRequested ? (
+                        <Button variant="outline" disabled className="w-full text-amber-600 dark:text-amber-400 border-amber-500/30">
+                          Request Pending
+                        </Button>
                       ) : (
                         <Button
                           className="w-full"
                           onClick={() => changePlanMutation.mutate(plan.id)}
                           disabled={changePlanMutation.isPending}
                         >
-                          {plan.price_per_month === 0 ? "Downgrade" : "Upgrade"}
+                          {changePlanMutation.isPending ? "Submitting..." : "Request Plan"}
                         </Button>
                       )}
                     </div>

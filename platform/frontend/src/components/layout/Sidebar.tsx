@@ -3,12 +3,11 @@ import { NavLink, useLocation } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
   LayoutDashboard, Bell, Server, Compass, Box, Settings, User,
-  ChevronLeft, ChevronRight, Sun, Moon, Activity, Languages, BookOpen, FileText,
+  ChevronLeft, ChevronRight, Sun, Moon, Activity, BookOpen, FileText,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useThemeStore } from "@/store/themeStore"
-import { useTranslation } from "@/i18n/LanguageContext"
 import { getAlertFiringEvents } from "@/api/alerts"
 
 const navItems = [
@@ -26,7 +25,6 @@ export default function Sidebar() {
   const location = useLocation()
   const theme = useThemeStore((s) => s.theme)
   const toggleTheme = useThemeStore((s) => s.toggle)
-  const { lang, setLang } = useTranslation()
 
   const firingCount = useQuery({
     queryKey: ["alert-firing-events", "sidebar"],
@@ -138,16 +136,6 @@ export default function Sidebar() {
           {theme === "dark" ? <Sun className="w-4 h-4 shrink-0" /> : <Moon className="w-4 h-4 shrink-0" />}
           {!collapsed && (
             <span className="font-medium">{theme === "dark" ? "Light mode" : "Dark mode"}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setLang(lang === "en" ? "fr" : "en")}
-          title={collapsed ? (lang === "en" ? "Français" : "English") : undefined}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/10 border-l-2 border-transparent transition-colors"
-        >
-          <Languages className="w-4 h-4 shrink-0" />
-          {!collapsed && (
-            <span className="font-medium">{lang === "en" ? "Français" : "English"}</span>
           )}
         </button>
       </div>

@@ -356,7 +356,7 @@ export default function ServiceConfigPage() {
                 <Zap className="w-3 h-3 text-primary" />
                 <span className="text-sm text-primary uppercase tracking-wider font-semibold">Run on {data.hostname}</span>
               </div>
-              <pre className="p-4 text-sm text-primary font-mono whitespace-pre-wrap break-all overflow-x-auto bg-[hsl(240,15%,5%)] leading-relaxed">
+              <pre className="p-4 text-sm text-primary font-mono whitespace-pre-wrap break-all overflow-x-auto bg-muted leading-relaxed">
                 {installCommand}
               </pre>
               <button

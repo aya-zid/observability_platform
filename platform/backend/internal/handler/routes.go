@@ -56,9 +56,10 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 	integrationService := service.NewIntegrationService(cfg, tenantRepo, discoveryRepo)
 
 	// ── Team / Profile / Settings / Billing services ─────────────────────────
+	subscriptionRequestRepo := repository.NewSubscriptionRequestRepository(infrastructure.DB)
 	teamService := service.NewTeamService(infrastructure.DB, userRepo, invitationRepo, tenantRepo, emailSender, cfg.PlatformURL)
 	profileService := service.NewProfileService(infrastructure.DB, userRepo)
-	billingService := service.NewBillingService(planRepo, subscriptionRepo, usageRepo, hostRepo, tenantRepo)
+	billingService := service.NewBillingService(planRepo, subscriptionRepo, usageRepo, hostRepo, tenantRepo, subscriptionRequestRepo)
 
 	rlWindow := time.Duration(cfg.AuthRateLimitWindowSeconds) * time.Second
 	e.POST("/signup", authHandler.Signup, custommiddleware.RateLimitByIP(infrastructure.Redis, "signup", cfg.AuthSignupRateLimitPerWindow, rlWindow))
@@ -86,7 +87,7 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 	adminTenantHandler := NewAdminTenantHandler(adminTenantService)
 	adminPackService := service.NewAdminPackService(infrastructure.DB, planRepo, subscriptionRepo, adminDashboardRepo)
 	adminPackHandler := NewAdminPackHandler(adminPackService)
-	adminSubscriptionService := service.NewAdminSubscriptionService(infrastructure.DB, tenantRepo, subscriptionRepo, planRepo, hostRepo)
+	adminSubscriptionService := service.NewAdminSubscriptionService(infrastructure.DB, tenantRepo, subscriptionRepo, planRepo, hostRepo, subscriptionRequestRepo)
 	adminSubscriptionHandler := NewAdminSubscriptionHandler(adminSubscriptionService)
 
 	nginxDashboardService := service.NewNginxDashboardService(cfg, infrastructure.Redis)
@@ -356,7 +357,10 @@ func SetupRoutes(e *echo.Echo, cfg *config.Config, emailSender *service.EmailSen
 			adminProtected.PATCH("/packs/:id", adminPackHandler.UpdatePack)
 			adminProtected.DELETE("/packs/:id", adminPackHandler.DeletePack)
 
+			adminProtected.GET("/subscriptions", adminSubscriptionHandler.ListAll)
 			adminProtected.GET("/subscriptions/expired", adminSubscriptionHandler.ListExpired)
+			adminProtected.GET("/subscriptions/requests", adminSubscriptionHandler.ListRequests)
+			adminProtected.POST("/subscriptions/requests/:id/review", adminSubscriptionHandler.ReviewRequest)
 		}
 	}
 

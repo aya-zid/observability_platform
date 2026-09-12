@@ -54,6 +54,10 @@ client.interceptors.response.use(
       useAuthStore.getState().setStatus("account_suspended")
     }
 
+    if (status === 403 && apiErrorCode(error) === ERROR_CODES.TENANT_BANNED) {
+      useAuthStore.getState().setStatus("account_suspended")
+    }
+
     if (
       status === 401 &&
       !orig._retry &&
@@ -102,5 +106,5 @@ export const ERROR_CODES = {
   USER_DEACTIVATED: "USER_DEACTIVATED",
   SUBSCRIPTION_EXPIRED: "SUBSCRIPTION_EXPIRED",
   ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
+  TENANT_BANNED: "TENANT_BANNED",
 } as const
-

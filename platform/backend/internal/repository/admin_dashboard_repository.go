@@ -19,17 +19,19 @@ func NewAdminDashboardRepository(db *gorm.DB) *AdminDashboardRepository {
 }
 
 type TenantStats struct {
-	TotalTenants    int64
-	ActiveTenants   int64
-	BannedTenants   int64
-	TotalHosts      int64
-	TotalIngestToday int64
-	RevenueEstimate float64
+	TotalTenants         int64
+	ActiveTenants        int64
+	BannedTenants        int64
+	TotalHosts          int64
+	TotalIngestToday    int64
+	RevenueEstimate     float64
+	PendingRequests      int64
+	ExpiredSubscriptions int64
 }
 
 type PlanDistribution struct {
-	PlanName  string
-	Count     int64
+	PlanName string
+	Count    int64
 }
 
 func (r *AdminDashboardRepository) GetTenantStats(ctx context.Context) (*TenantStats, error) {
@@ -41,7 +43,7 @@ func (r *AdminDashboardRepository) GetTenantStats(ctx context.Context) (*TenantS
 	if err := r.db.WithContext(ctx).Model(&domain.Tenant{}).Where("is_active = ? AND subscription_status = ?", true, domain.SubscriptionStatusActive).Count(&stats.ActiveTenants).Error; err != nil {
 		return nil, err
 	}
-	if err := r.db.WithContext(ctx).Model(&domain.Tenant{}).Where("is_active = ? AND subscription_status = ?", false, domain.SubscriptionStatusSuspended).Count(&stats.BannedTenants).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&domain.Tenant{}).Where("banned_at IS NOT NULL").Count(&stats.BannedTenants).Error; err != nil {
 		return nil, err
 	}
 	if err := r.db.WithContext(ctx).Model(&domain.Host{}).Count(&stats.TotalHosts).Error; err != nil {
@@ -64,6 +66,11 @@ func (r *AdminDashboardRepository) GetTenantStats(ctx context.Context) (*TenantS
 			stats.RevenueEstimate += sub.Plan.PricePerMonth
 		}
 	}
+
+	r.db.WithContext(ctx).Model(&domain.SubscriptionRequest{}).Where("status = ?", "pending").Count(&stats.PendingRequests)
+
+	now := time.Now()
+	r.db.WithContext(ctx).Model(&domain.TenantSubscription{}).Where("status = ? AND current_period_end IS NOT NULL AND current_period_end < ?", "active", now).Count(&stats.ExpiredSubscriptions)
 
 	return &stats, nil
 }
